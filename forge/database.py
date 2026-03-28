@@ -1,0 +1,531 @@
+"""SQLite schema, migrations, and query functions."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import uuid
+from datetime import datetime, timezone
+
+
+def get_connection(db_path: str = "") -> sqlite3.Connection:
+    """Return a sqlite3 Connection with Row factory and WAL mode."""
+    if not db_path:
+        from forge.config import DB_PATH
+        db_path = str(DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Create all tables if they don't exist (idempotent)."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            repo_path TEXT NOT NULL,
+            default_branch TEXT NOT NULL DEFAULT 'main',
+            gate_dir TEXT NOT NULL DEFAULT 'gates',
+            skill_refs TEXT,
+            created_at TEXT NOT NULL,
+            config TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 0,
+            current_stage TEXT,
+            status TEXT NOT NULL DEFAULT 'backlog',
+            branch_name TEXT,
+            spec_path TEXT,
+            plan_path TEXT,
+            review_path TEXT,
+            skill_overrides TEXT,
+            max_retries INTEGER NOT NULL DEFAULT 3,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS stage_runs (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL REFERENCES tasks(id),
+            stage TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            prompt_sent TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            duration_seconds REAL,
+            claude_output TEXT,
+            artifacts_produced TEXT,
+            gate_name TEXT,
+            gate_exit_code INTEGER,
+            gate_stdout TEXT,
+            gate_stderr TEXT,
+            tokens_used INTEGER,
+            error_message TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS task_links (
+            id TEXT PRIMARY KEY,
+            source_task_id TEXT NOT NULL REFERENCES tasks(id),
+            target_task_id TEXT NOT NULL REFERENCES tasks(id),
+            link_type TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS run_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            level TEXT NOT NULL,
+            message TEXT NOT NULL,
+            task_id TEXT,
+            stage_run_id TEXT,
+            metadata TEXT
+        );
+    """)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _new_id() -> str:
+    return str(uuid.uuid4())
+
+
+def _json_encode(value: list | dict | None) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value)
+
+
+def _json_decode(value: str | None) -> list | dict | None:
+    if value is None:
+        return None
+    return json.loads(value)
+
+
+# ---------------------------------------------------------------------------
+# Projects
+# ---------------------------------------------------------------------------
+
+def insert_project(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    repo_path: str,
+    default_branch: str = "main",
+    gate_dir: str = "gates",
+    skill_refs: list[str] | None = None,
+    config: dict | None = None,
+) -> str:
+    """Insert a new project. Returns the project id."""
+    project_id = _new_id()
+    conn.execute(
+        """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (project_id, name, repo_path, default_branch, gate_dir,
+         _json_encode(skill_refs), _now(), _json_encode(config)),
+    )
+    conn.commit()
+    return project_id
+
+
+def get_project(conn: sqlite3.Connection, project_id: str) -> sqlite3.Row | None:
+    """Look up a project by primary key."""
+    cur = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+    return cur.fetchone()
+
+
+def get_project_by_name(conn: sqlite3.Connection, name: str) -> sqlite3.Row | None:
+    """Look up a project by unique name."""
+    cur = conn.execute("SELECT * FROM projects WHERE name = ?", (name,))
+    return cur.fetchone()
+
+
+def list_projects(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """List all projects ordered by name."""
+    cur = conn.execute("SELECT * FROM projects ORDER BY name")
+    return cur.fetchall()
+
+
+def update_project(
+    conn: sqlite3.Connection,
+    project_id: str,
+    *,
+    name: str | None = None,
+    repo_path: str | None = None,
+    default_branch: str | None = None,
+    gate_dir: str | None = None,
+    skill_refs: list[str] | None = None,
+    config: dict | None = None,
+) -> bool:
+    """Update only the provided fields. Returns True if a row was modified."""
+    fields: list[str] = []
+    values: list = []
+    _SENTINEL = object()
+    for col, val, encoder in [
+        ("name", name, None),
+        ("repo_path", repo_path, None),
+        ("default_branch", default_branch, None),
+        ("gate_dir", gate_dir, None),
+        ("skill_refs", skill_refs, _json_encode),
+        ("config", config, _json_encode),
+    ]:
+        if val is not None:
+            fields.append(f"{col} = ?")
+            values.append(encoder(val) if encoder else val)
+    if not fields:
+        return False
+    values.append(project_id)
+    cur = conn.execute(
+        f"UPDATE projects SET {', '.join(fields)} WHERE id = ?", values,
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
+
+def insert_task(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    title: str,
+    description: str = "",
+    priority: int = 0,
+    skill_overrides: list[str] | None = None,
+    max_retries: int = 3,
+) -> str:
+    """Insert a new task with status='backlog'. Returns the task id."""
+    task_id = _new_id()
+    now = _now()
+    conn.execute(
+        """INSERT INTO tasks
+           (id, project_id, title, description, priority, status, skill_overrides, max_retries, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'backlog', ?, ?, ?, ?)""",
+        (task_id, project_id, title, description, priority,
+         _json_encode(skill_overrides), max_retries, now, now),
+    )
+    conn.commit()
+    return task_id
+
+
+def get_task(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
+    """Look up a task by primary key."""
+    cur = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    return cur.fetchone()
+
+
+def list_tasks(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str | None = None,
+    status: str | None = None,
+    priority_gte: int | None = None,
+) -> list[sqlite3.Row]:
+    """List tasks with optional filters, ordered by priority DESC, created_at ASC."""
+    clauses: list[str] = []
+    params: list = []
+    if project_id is not None:
+        clauses.append("project_id = ?")
+        params.append(project_id)
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    if priority_gte is not None:
+        clauses.append("priority >= ?")
+        params.append(priority_gte)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    cur = conn.execute(
+        f"SELECT * FROM tasks {where} ORDER BY priority DESC, created_at ASC",
+        params,
+    )
+    return cur.fetchall()
+
+
+def update_task(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    priority: int | None = None,
+    status: str | None = None,
+    current_stage: str | None = None,
+    branch_name: str | None = None,
+    spec_path: str | None = None,
+    plan_path: str | None = None,
+    review_path: str | None = None,
+    skill_overrides: list[str] | None = None,
+    completed_at: str | None = None,
+) -> bool:
+    """Update only the provided fields. Always sets updated_at. Returns True if modified."""
+    fields: list[str] = ["updated_at = ?"]
+    values: list = [_now()]
+    for col, val, encoder in [
+        ("title", title, None),
+        ("description", description, None),
+        ("priority", priority, None),
+        ("status", status, None),
+        ("current_stage", current_stage, None),
+        ("branch_name", branch_name, None),
+        ("spec_path", spec_path, None),
+        ("plan_path", plan_path, None),
+        ("review_path", review_path, None),
+        ("skill_overrides", skill_overrides, _json_encode),
+        ("completed_at", completed_at, None),
+    ]:
+        if val is not None:
+            fields.append(f"{col} = ?")
+            values.append(encoder(val) if encoder else val)
+    values.append(task_id)
+    cur = conn.execute(
+        f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", values,
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_task(conn: sqlite3.Connection, task_id: str) -> bool:
+    """Delete a task only if status='backlog'. Returns True if deleted."""
+    cur = conn.execute(
+        "DELETE FROM tasks WHERE id = ? AND status = 'backlog'", (task_id,),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def get_next_queued_task(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """Find the highest-priority active task that has a queued stage_run."""
+    cur = conn.execute(
+        """SELECT t.* FROM tasks t
+           JOIN stage_runs sr ON sr.task_id = t.id
+           WHERE t.status = 'active' AND sr.status = 'queued'
+           ORDER BY t.priority DESC, t.created_at ASC
+           LIMIT 1""",
+    )
+    return cur.fetchone()
+
+
+# ---------------------------------------------------------------------------
+# Stage runs
+# ---------------------------------------------------------------------------
+
+def insert_stage_run(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    stage: str,
+    attempt: int,
+    status: str = "queued",
+    prompt_sent: str | None = None,
+) -> str:
+    """Insert a new stage run. Returns the stage_run id."""
+    sr_id = _new_id()
+    conn.execute(
+        """INSERT INTO stage_runs (id, task_id, stage, attempt, status, prompt_sent)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (sr_id, task_id, stage, attempt, status, prompt_sent),
+    )
+    conn.commit()
+    return sr_id
+
+
+def get_stage_run(conn: sqlite3.Connection, stage_run_id: str) -> sqlite3.Row | None:
+    """Look up a stage run by primary key."""
+    cur = conn.execute("SELECT * FROM stage_runs WHERE id = ?", (stage_run_id,))
+    return cur.fetchone()
+
+
+def list_stage_runs(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str | None = None,
+    stage: str | None = None,
+    status: str | None = None,
+) -> list[sqlite3.Row]:
+    """List stage runs with optional filters, ordered by started_at ASC."""
+    clauses: list[str] = []
+    params: list = []
+    if task_id is not None:
+        clauses.append("task_id = ?")
+        params.append(task_id)
+    if stage is not None:
+        clauses.append("stage = ?")
+        params.append(stage)
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    cur = conn.execute(
+        f"SELECT * FROM stage_runs {where} ORDER BY started_at ASC", params,
+    )
+    return cur.fetchall()
+
+
+def update_stage_run(
+    conn: sqlite3.Connection,
+    stage_run_id: str,
+    *,
+    status: str | None = None,
+    prompt_sent: str | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+    duration_seconds: float | None = None,
+    claude_output: str | None = None,
+    artifacts_produced: list[str] | None = None,
+    gate_name: str | None = None,
+    gate_exit_code: int | None = None,
+    gate_stdout: str | None = None,
+    gate_stderr: str | None = None,
+    tokens_used: int | None = None,
+    error_message: str | None = None,
+) -> bool:
+    """Update only the provided fields. Returns True if modified."""
+    fields: list[str] = []
+    values: list = []
+    for col, val, encoder in [
+        ("status", status, None),
+        ("prompt_sent", prompt_sent, None),
+        ("started_at", started_at, None),
+        ("finished_at", finished_at, None),
+        ("duration_seconds", duration_seconds, None),
+        ("claude_output", claude_output, None),
+        ("artifacts_produced", artifacts_produced, _json_encode),
+        ("gate_name", gate_name, None),
+        ("gate_exit_code", gate_exit_code, None),
+        ("gate_stdout", gate_stdout, None),
+        ("gate_stderr", gate_stderr, None),
+        ("tokens_used", tokens_used, None),
+        ("error_message", error_message, None),
+    ]:
+        if val is not None:
+            fields.append(f"{col} = ?")
+            values.append(encoder(val) if encoder else val)
+    if not fields:
+        return False
+    values.append(stage_run_id)
+    cur = conn.execute(
+        f"UPDATE stage_runs SET {', '.join(fields)} WHERE id = ?", values,
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def get_retry_count(conn: sqlite3.Connection, task_id: str, stage: str) -> int:
+    """Count stage_runs for this task+stage with status in ('bounced', 'error')."""
+    cur = conn.execute(
+        """SELECT COUNT(*) FROM stage_runs
+           WHERE task_id = ? AND stage = ? AND status IN ('bounced', 'error')""",
+        (task_id, stage),
+    )
+    return cur.fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Task links
+# ---------------------------------------------------------------------------
+
+VALID_LINK_TYPES = {"blocks", "created_by", "follows", "related"}
+
+
+def insert_task_link(
+    conn: sqlite3.Connection,
+    *,
+    source_task_id: str,
+    target_task_id: str,
+    link_type: str,
+) -> str:
+    """Insert a task link. link_type must be valid. Returns the link id."""
+    if link_type not in VALID_LINK_TYPES:
+        raise ValueError(f"Invalid link_type: {link_type!r}. Must be one of {VALID_LINK_TYPES}")
+    link_id = _new_id()
+    conn.execute(
+        """INSERT INTO task_links (id, source_task_id, target_task_id, link_type, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (link_id, source_task_id, target_task_id, link_type, _now()),
+    )
+    conn.commit()
+    return link_id
+
+
+def get_task_links(conn: sqlite3.Connection, task_id: str) -> list[sqlite3.Row]:
+    """Return all links where task_id is either source or target, ordered by created_at."""
+    cur = conn.execute(
+        """SELECT * FROM task_links
+           WHERE source_task_id = ? OR target_task_id = ?
+           ORDER BY created_at""",
+        (task_id, task_id),
+    )
+    return cur.fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Run log
+# ---------------------------------------------------------------------------
+
+VALID_LOG_LEVELS = {"info", "warn", "error"}
+
+
+def insert_log(
+    conn: sqlite3.Connection,
+    *,
+    level: str,
+    message: str,
+    task_id: str | None = None,
+    stage_run_id: str | None = None,
+    metadata: dict | None = None,
+) -> int:
+    """Insert a log entry. Returns the autoincrement id."""
+    if level not in VALID_LOG_LEVELS:
+        raise ValueError(f"Invalid log level: {level!r}. Must be one of {VALID_LOG_LEVELS}")
+    cur = conn.execute(
+        """INSERT INTO run_log (timestamp, level, message, task_id, stage_run_id, metadata)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (_now(), level, message, task_id, stage_run_id, _json_encode(metadata)),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_logs(
+    conn: sqlite3.Connection,
+    *,
+    level: str | None = None,
+    task_id: str | None = None,
+    project_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    """Get filtered, paginated log entries ordered by timestamp DESC."""
+    clauses: list[str] = []
+    params: list = []
+    joins = ""
+    if project_id is not None:
+        joins = "JOIN tasks t ON run_log.task_id = t.id"
+        clauses.append("t.project_id = ?")
+        params.append(project_id)
+    if level is not None:
+        clauses.append("run_log.level = ?")
+        params.append(level)
+    if task_id is not None:
+        clauses.append("run_log.task_id = ?")
+        params.append(task_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.extend([limit, offset])
+    cur = conn.execute(
+        f"SELECT run_log.* FROM run_log {joins} {where} ORDER BY run_log.timestamp DESC LIMIT ? OFFSET ?",
+        params,
+    )
+    return cur.fetchall()
