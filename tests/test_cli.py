@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from unittest.mock import patch
 
 import pytest
 
@@ -13,10 +12,8 @@ from forge.cli import main
 
 @pytest.fixture()
 def db_path(tmp_path):
-    """Return a temporary database path and patch DB_PATH to use it."""
-    path = tmp_path / "test.db"
-    with patch("forge.cli.DB_PATH", path):
-        yield path
+    """Return the temporary database path (patching handled by conftest)."""
+    return tmp_path / "test.db"
 
 
 def _get_conn(db_path) -> sqlite3.Connection:

@@ -19,6 +19,17 @@ from forge.engine import (
 )
 from forge.gate_runner import GateResult
 
+# Save real methods before conftest's autouse fixture replaces them.
+_real_start = PipelineEngine.start
+_real_pause = PipelineEngine.pause
+
+
+@pytest.fixture(autouse=True)
+def _real_engine_methods(monkeypatch):
+    """Undo the conftest no-op patches so engine tests use real start/pause."""
+    monkeypatch.setattr(PipelineEngine, "start", _real_start)
+    monkeypatch.setattr(PipelineEngine, "pause", _real_pause)
+
 
 class _UnclosableConnection:
     """Wraps a sqlite3.Connection so that close() is a no-op.

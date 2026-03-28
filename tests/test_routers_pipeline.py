@@ -12,19 +12,6 @@ from forge.main import app
 from forge.routers import pipeline
 
 
-@pytest.fixture(autouse=True)
-def _use_tmp_db(tmp_path, monkeypatch):
-    """Redirect DB_PATH to a temporary database for each test."""
-    db_path = tmp_path / "test.db"
-    monkeypatch.setattr("forge.config.DB_PATH", db_path)
-    monkeypatch.setattr("forge.routers.projects.DB_PATH", db_path)
-    monkeypatch.setattr("forge.routers.tasks.DB_PATH", db_path)
-    monkeypatch.setattr("forge.routers.pipeline.DB_PATH", db_path)
-    conn = database.get_connection(str(db_path))
-    database.migrate(conn)
-    conn.close()
-
-
 def _make_mock_engine(running: bool = False) -> MagicMock:
     engine = MagicMock()
     engine.running = running

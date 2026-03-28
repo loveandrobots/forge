@@ -6,19 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from forge import database
-from forge.config import DB_PATH
 from forge.main import app
-
-
-@pytest.fixture(autouse=True)
-def _use_tmp_db(tmp_path, monkeypatch):
-    """Redirect DB_PATH to a temporary database for each test."""
-    db_path = tmp_path / "test.db"
-    monkeypatch.setattr("forge.config.DB_PATH", db_path)
-    monkeypatch.setattr("forge.routers.projects.DB_PATH", db_path)
-    conn = database.get_connection(str(db_path))
-    database.migrate(conn)
-    conn.close()
 
 
 @pytest.fixture()
