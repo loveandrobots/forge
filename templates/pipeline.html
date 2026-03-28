@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Pipeline — Forge{% endblock %}
+{% block content %}
+<div class="pipeline-header">
+    <h1>Pipeline</h1>
+    <div class="pipeline-controls">
+        <form class="filter-form" method="get" action="/">
+            <select name="project_id" onchange="this.form.submit()">
+                <option value="">All projects</option>
+                {% for p in projects %}
+                <option value="{{ p.id }}" {% if selected_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                {% endfor %}
+            </select>
+        </form>
+        <button class="btn btn-sm" hx-post="/api/engine/start" hx-swap="none">Start Engine</button>
+        <button class="btn btn-sm btn-secondary" hx-post="/api/engine/pause" hx-swap="none">Pause Engine</button>
+        <a href="/backlog" class="btn btn-sm btn-primary">New Task</a>
+    </div>
+</div>
+
+<div class="kanban" hx-get="/?{% if selected_project_id %}project_id={{ selected_project_id }}{% endif %}" hx-trigger="every 5s" hx-select=".kanban" hx-swap="outerHTML">
+    {% for col_name in column_names %}
+    <div class="kanban-column">
+        <div class="kanban-column-header">
+            <span class="column-title">{{ col_name | capitalize }}</span>
+            <span class="column-count">{{ columns[col_name] | length }}</span>
+        </div>
+        <div class="kanban-cards">
+            {% for task in columns[col_name] %}
+            <a href="/tasks/{{ task.id }}" class="card {% if task.status == 'needs_human' %}card-needs-human{% endif %}{% if task.status == 'failed' %} card-failed{% endif %}">
+                <div class="card-title">{{ task.title }}</div>
+                <div class="card-meta">
+                    {% if task.status == 'needs_human' %}
+                    <span class="badge badge-warning">Needs Human</span>
+                    {% elif task.status == 'failed' %}
+                    <span class="badge badge-error">Failed</span>
+                    {% elif task.status == 'paused' %}
+                    <span class="badge badge-info">Paused</span>
+                    {% endif %}
+                    <span class="priority">P{{ task.priority }}</span>
+                    {% if task.id in stage_run_info %}
+                    <span class="attempt">Attempt {{ stage_run_info[task.id].attempt }}</span>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Logs — Forge{% endblock %}
+{% block content %}
+<h1>Logs</h1>
+
+<form class="filter-bar" method="get" action="/logs">
+    <select name="level" onchange="this.form.submit()">
+        <option value="">All levels</option>
+        {% for lv in ["info", "warn", "error"] %}
+        <option value="{{ lv }}" {% if selected_level == lv %}selected{% endif %}>{{ lv }}</option>
+        {% endfor %}
+    </select>
+    <select name="project_id" onchange="this.form.submit()">
+        <option value="">All projects</option>
+        {% for p in projects %}
+        <option value="{{ p.id }}" {% if selected_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+    </select>
+    <input type="text" name="task_id" placeholder="Task ID" value="{{ selected_task_id or '' }}">
+    <button type="submit" class="btn btn-sm">Filter</button>
+</form>
+
+<div class="log-feed" id="log-feed">
+    {% if logs %}
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Level</th>
+                <th>Message</th>
+                <th>Task</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr class="log-row log-{{ log.level }}">
+                <td class="log-time">{{ log.timestamp }}</td>
+                <td><span class="badge badge-{{ log.level }}">{{ log.level }}</span></td>
+                <td>{{ log.message }}</td>
+                <td>
+                    {% if log.task_id %}
+                    <a href="/tasks/{{ log.task_id }}">{{ log.task_id[:8] }}</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">No log entries.</p>
+    {% endif %}
+</div>
+{% endblock %}

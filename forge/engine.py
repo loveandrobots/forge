@@ -61,8 +61,15 @@ class PipelineEngine:
         self._log("info", "Engine started")
 
     async def pause(self) -> None:
-        """Set running=False. The loop finishes its current work then stops."""
+        """Set running=False, then wait for the loop task to finish."""
         self.running = False
+        if self._loop_task is not None:
+            self._loop_task.cancel()
+            try:
+                await self._loop_task
+            except asyncio.CancelledError:
+                pass
+            self._loop_task = None
         self._log("info", "Engine paused")
 
     async def run_loop(self) -> None:

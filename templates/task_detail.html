@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ task.title }} — Forge{% endblock %}
+{% block content %}
+<div class="task-header">
+    <div>
+        <h1>{{ task.title }}</h1>
+        <div class="task-meta">
+            <span class="badge badge-{{ task.status }}">{{ task.status }}</span>
+            {% if task.current_stage %}
+            <span class="badge">{{ task.current_stage }}</span>
+            {% endif %}
+            <span class="priority">Priority: {{ task.priority }}</span>
+            {% if project %}
+            <span class="project-name">{{ project.name }}</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="task-actions">
+        {% if task.status == 'needs_human' %}
+        <button class="btn btn-primary" hx-post="/api/tasks/{{ task.id }}/resume" hx-swap="none" hx-on::after-request="window.location.reload()">Resume</button>
+        {% endif %}
+        {% if task.status == 'active' %}
+        <button class="btn btn-secondary" hx-post="/api/tasks/{{ task.id }}/pause" hx-swap="none" hx-on::after-request="window.location.reload()">Pause</button>
+        {% endif %}
+        {% if task.status in ('active', 'needs_human') %}
+        <button class="btn" hx-post="/api/tasks/{{ task.id }}/retry" hx-swap="none" hx-on::after-request="window.location.reload()">Retry</button>
+        {% endif %}
+    </div>
+</div>
+
+{% if task.description %}
+<div class="task-description">
+    <p>{{ task.description }}</p>
+</div>
+{% endif %}
+
+<h2>Stage Runs</h2>
+{% if stage_runs %}
+<div class="timeline">
+    {% for run in stage_runs %}
+    <div class="timeline-item">
+        <div class="timeline-header">
+            <span class="badge badge-{{ run.status }}">{{ run.stage }} — {{ run.status }}</span>
+            <span class="attempt">Attempt {{ run.attempt }}</span>
+            {% if run.duration_seconds is not none %}
+            <span class="duration">{{ "%.1f" | format(run.duration_seconds) }}s</span>
+            {% endif %}
+        </div>
+
+        {% if run.error_message %}
+        <div class="alert alert-error">{{ run.error_message }}</div>
+        {% endif %}
+
+        {% if run.gate_exit_code is not none and run.gate_exit_code != 0 %}
+        <div class="alert alert-warning">
+            <strong>Gate failed</strong> (exit code {{ run.gate_exit_code }})
+            {% if run.gate_stderr %}
+            <pre>{{ run.gate_stderr }}</pre>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <details>
+            <summary>Details</summary>
+            {% if run.prompt_sent %}
+            <div class="detail-section">
+                <h4>Prompt</h4>
+                <pre class="code-block">{{ run.prompt_sent }}</pre>
+            </div>
+            {% endif %}
+            {% if run.claude_output %}
+            <div class="detail-section">
+                <h4>Output</h4>
+                <pre class="code-block">{{ run.claude_output }}</pre>
+            </div>
+            {% endif %}
+            {% if run.gate_stdout %}
+            <div class="detail-section">
+                <h4>Gate stdout</h4>
+                <pre class="code-block">{{ run.gate_stdout }}</pre>
+            </div>
+            {% endif %}
+            {% if run.tokens_used is not none %}
+            <div class="detail-section">
+                <span>Tokens used: {{ run.tokens_used }}</span>
+            </div>
+            {% endif %}
+        </details>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="empty-state">No stage runs yet.</p>
+{% endif %}
+{% endblock %}

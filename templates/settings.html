@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Settings — Forge{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+<section class="settings-section">
+    <h2>Engine Configuration</h2>
+    <table class="settings-table">
+        <tr><td>Poll interval</td><td>{{ settings.engine.poll_interval_seconds }}s</td></tr>
+        <tr><td>Max concurrent tasks</td><td>{{ settings.engine.max_concurrent_tasks }}</td></tr>
+        <tr><td>Stage timeout</td><td>{{ settings.engine.stage_timeout_seconds }}s</td></tr>
+        <tr><td>Default max retries</td><td>{{ settings.engine.default_max_retries }}</td></tr>
+    </table>
+</section>
+
+<section class="settings-section">
+    <h2>Claude Configuration</h2>
+    <table class="settings-table">
+        <tr><td>Default model</td><td>{{ settings.claude.default_model }}</td></tr>
+        <tr><td>Headless flags</td><td><code>{{ settings.claude.headless_flags }}</code></td></tr>
+    </table>
+</section>
+
+<section class="settings-section">
+    <h2>Projects</h2>
+    {% if projects %}
+    <table class="settings-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Repo Path</th>
+                <th>Branch</th>
+                <th>Gate Dir</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in projects %}
+            <tr>
+                <td>{{ p.name }}</td>
+                <td><code>{{ p.repo_path }}</code></td>
+                <td>{{ p.default_branch }}</td>
+                <td>{{ p.gate_dir }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">No projects registered.</p>
+    {% endif %}
+</section>
+{% endblock %}

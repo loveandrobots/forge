@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Forge{% endblock %}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-brand">Forge</div>
+        <div class="nav-links">
+            <a href="/" class="nav-link{% if request.url.path == '/' %} active{% endif %}">Pipeline</a>
+            <a href="/backlog" class="nav-link{% if request.url.path == '/backlog' %} active{% endif %}">Backlog</a>
+            <a href="/logs" class="nav-link{% if request.url.path == '/logs' %} active{% endif %}">Logs</a>
+            <a href="/settings" class="nav-link{% if request.url.path == '/settings' %} active{% endif %}">Settings</a>
+        </div>
+    </nav>
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+    <script src="/static/app.js"></script>
+</body>
+</html>

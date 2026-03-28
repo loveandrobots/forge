@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import stat
 import textwrap
@@ -101,7 +100,8 @@ class TestBuildGateEnv:
 # ---------------------------------------------------------------------------
 
 class TestRunGate:
-    def test_passing_gate(self, tmp_path: object) -> None:
+    @pytest.mark.asyncio
+    async def test_passing_gate(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
         _write_gate_script(gate_dir, "spec", """\
             #!/bin/bash
@@ -110,7 +110,7 @@ class TestRunGate:
         """)
         env = _make_env(gate_dir, stage="spec")
 
-        result = asyncio.run(run_gate(gate_dir, "spec", env))
+        result = await run_gate(gate_dir, "spec", env)
 
         assert isinstance(result, GateResult)
         assert result.passed is True
@@ -120,7 +120,8 @@ class TestRunGate:
         assert result.gate_name == "post-spec.sh"
         assert result.duration_seconds >= 0
 
-    def test_failing_gate(self, tmp_path: object) -> None:
+    @pytest.mark.asyncio
+    async def test_failing_gate(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
         _write_gate_script(gate_dir, "plan", """\
             #!/bin/bash
@@ -130,7 +131,7 @@ class TestRunGate:
         """)
         env = _make_env(gate_dir, stage="plan")
 
-        result = asyncio.run(run_gate(gate_dir, "plan", env))
+        result = await run_gate(gate_dir, "plan", env)
 
         assert result.passed is False
         assert result.exit_code == 1
@@ -138,18 +139,20 @@ class TestRunGate:
         assert "missing required section" in result.stderr
         assert result.gate_name == "post-plan.sh"
 
-    def test_missing_gate_passes_by_default(self, tmp_path: object) -> None:
+    @pytest.mark.asyncio
+    async def test_missing_gate_passes_by_default(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
         env = _make_env(gate_dir, stage="review")
 
-        result = asyncio.run(run_gate(gate_dir, "review", env))
+        result = await run_gate(gate_dir, "review", env)
 
         assert result.passed is True
         assert result.exit_code == 0
         assert result.gate_name == "post-review.sh"
         assert result.duration_seconds == 0.0
 
-    def test_env_vars_available_in_script(self, tmp_path: object) -> None:
+    @pytest.mark.asyncio
+    async def test_env_vars_available_in_script(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
         _write_gate_script(gate_dir, "implement", """\
             #!/bin/bash
@@ -163,7 +166,7 @@ class TestRunGate:
         env = _make_env(gate_dir, stage="implement", attempt=3)
         env["FORGE_BRANCH"] = "forge/my-branch"
 
-        result = asyncio.run(run_gate(gate_dir, "implement", env))
+        result = await run_gate(gate_dir, "implement", env)
 
         assert result.passed is True
         assert "TASK=test-task-id" in result.stdout
@@ -171,7 +174,8 @@ class TestRunGate:
         assert "ATTEMPT=3" in result.stdout
         assert "BRANCH=forge/my-branch" in result.stdout
 
-    def test_nonzero_exit_code_other_than_one(self, tmp_path: object) -> None:
+    @pytest.mark.asyncio
+    async def test_nonzero_exit_code_other_than_one(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
         _write_gate_script(gate_dir, "spec", """\
             #!/bin/bash
@@ -180,7 +184,7 @@ class TestRunGate:
         """)
         env = _make_env(gate_dir, stage="spec")
 
-        result = asyncio.run(run_gate(gate_dir, "spec", env))
+        result = await run_gate(gate_dir, "spec", env)
 
         assert result.passed is False
         assert result.exit_code == 2

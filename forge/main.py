@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from forge import database
 from forge.config import DB_PATH, get_settings
 from forge.engine import PipelineEngine
-from forge.routers import pipeline, projects, tasks
+from forge.routers import dashboard, pipeline, projects, tasks
 
 _engine: PipelineEngine | None = None
 
@@ -49,3 +49,4 @@ if _static_dir.is_dir():
 app.include_router(projects.router)
 app.include_router(tasks.router)
 app.include_router(pipeline.router)
+app.include_router(dashboard.router)

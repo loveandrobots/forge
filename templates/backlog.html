@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Backlog — Forge{% endblock %}
+{% block content %}
+<h1>Backlog</h1>
+
+<div class="backlog-layout">
+    <div class="backlog-form-section">
+        <h2>Create Task</h2>
+        <form method="post" action="/api/tasks" class="task-form" id="create-task-form">
+            <div class="form-group">
+                <label for="project_id">Project</label>
+                <select name="project_id" id="project_id" required>
+                    <option value="">Select project</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}">{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="title">Title</label>
+                <input type="text" name="title" id="title" required>
+            </div>
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea name="description" id="description" rows="4"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="priority">Priority</label>
+                <input type="number" name="priority" id="priority" value="0" min="0">
+            </div>
+            <button type="submit" class="btn btn-primary">Create Task</button>
+        </form>
+    </div>
+
+    <div class="backlog-list-section">
+        <h2>Tasks</h2>
+        {% if tasks_by_project %}
+            {% for project_name, tasks in tasks_by_project.items() %}
+            <div class="project-group">
+                <h3>{{ project_name }}</h3>
+                <div class="task-list">
+                    {% for t in tasks %}
+                    <div class="task-row">
+                        <a href="/tasks/{{ t.id }}" class="task-link">
+                            <span class="task-title">{{ t.title }}</span>
+                            <span class="priority">P{{ t.priority }}</span>
+                        </a>
+                        <button class="btn btn-sm btn-danger" hx-delete="/api/tasks/{{ t.id }}" hx-confirm="Delete this task?" hx-swap="none" hx-on::after-request="window.location.reload()">Delete</button>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+        <p class="empty-state">No backlog tasks.</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+document.getElementById("create-task-form").addEventListener("submit", function(e) {
+    e.preventDefault();
+    var form = e.target;
+    var data = {
+        project_id: form.project_id.value,
+        title: form.title.value,
+        description: form.description.value,
+        priority: parseInt(form.priority.value, 10) || 0
+    };
+    fetch("/api/tasks", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(data)
+    }).then(function(resp) {
+        if (resp.ok) { window.location.reload(); }
+    });
+});
+</script>
+{% endblock %}
