@@ -1,0 +1,191 @@
+"""API routes for task management."""
+
+from __future__ import annotations
+
+import json
+
+from fastapi import APIRouter, HTTPException, Query
+
+from forge import database
+from forge.config import DB_PATH, STAGES
+from forge.models import TaskCreate, TaskResponse, TaskUpdate
+
+router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+def _row_to_task(row) -> dict:
+    """Convert a sqlite3.Row to a TaskResponse-compatible dict."""
+    d = dict(row)
+    if isinstance(d.get("skill_overrides"), str):
+        d["skill_overrides"] = json.loads(d["skill_overrides"])
+    return d
+
+
+@router.get("", response_model=list[TaskResponse])
+def list_tasks(
+    project_id: str | None = Query(None),
+    status: str | None = Query(None),
+    priority_gte: int | None = Query(None),
+) -> list[dict]:
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        rows = database.list_tasks(
+            conn,
+            project_id=project_id,
+            status=status,
+            priority_gte=priority_gte,
+        )
+        return [_row_to_task(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@router.post("", response_model=TaskResponse, status_code=201)
+def create_task(body: TaskCreate) -> dict:
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        # Verify project exists
+        project = database.get_project(conn, body.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        task_id = database.insert_task(
+            conn,
+            project_id=body.project_id,
+            title=body.title,
+            description=body.description,
+            priority=body.priority,
+            skill_overrides=body.skill_overrides,
+            max_retries=body.max_retries,
+        )
+        row = database.get_task(conn, task_id)
+        return _row_to_task(row)
+    finally:
+        conn.close()
+
+
+@router.get("/{task_id}", response_model=TaskResponse)
+def get_task(task_id: str) -> dict:
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return _row_to_task(row)
+    finally:
+        conn.close()
+
+
+@router.patch("/{task_id}", response_model=TaskResponse)
+def update_task(task_id: str, body: TaskUpdate) -> dict:
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        updates = body.model_dump(exclude_unset=True)
+        if not updates:
+            return _row_to_task(row)
+
+        database.update_task(conn, task_id, **updates)
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_task(updated_row)
+    finally:
+        conn.close()
+
+
+@router.delete("/{task_id}", status_code=204)
+def delete_task(task_id: str) -> None:
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if row["status"] != "backlog":
+            raise HTTPException(status_code=400, detail="Only backlog tasks can be deleted")
+
+        database.delete_task(conn, task_id)
+    finally:
+        conn.close()
+
+
+@router.post("/{task_id}/resume", response_model=TaskResponse)
+def resume_task(task_id: str) -> dict:
+    """Resume a needs_human task by creating a new stage_run for its current stage."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if row["status"] != "needs_human":
+            raise HTTPException(status_code=400, detail="Only needs_human tasks can be resumed")
+
+        stage = row["current_stage"]
+        if not stage:
+            stage = STAGES[0]
+
+        retry_count = database.get_retry_count(conn, task_id, stage)
+        database.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage=stage,
+            attempt=retry_count + 1,
+            status="queued",
+        )
+        database.update_task(conn, task_id, status="active")
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_task(updated_row)
+    finally:
+        conn.close()
+
+
+@router.post("/{task_id}/pause", response_model=TaskResponse)
+def pause_task(task_id: str) -> dict:
+    """Pause an active task."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if row["status"] != "active":
+            raise HTTPException(status_code=400, detail="Only active tasks can be paused")
+
+        database.update_task(conn, task_id, status="paused")
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_task(updated_row)
+    finally:
+        conn.close()
+
+
+@router.post("/{task_id}/retry", response_model=TaskResponse)
+def retry_task(task_id: str) -> dict:
+    """Force retry the current stage of a task."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if row["status"] not in ("active", "needs_human"):
+            raise HTTPException(
+                status_code=400,
+                detail="Only active or needs_human tasks can be retried",
+            )
+
+        stage = row["current_stage"]
+        if not stage:
+            stage = STAGES[0]
+
+        retry_count = database.get_retry_count(conn, task_id, stage)
+        database.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage=stage,
+            attempt=retry_count + 1,
+            status="queued",
+        )
+        database.update_task(conn, task_id, status="active")
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_task(updated_row)
+    finally:
+        conn.close()
