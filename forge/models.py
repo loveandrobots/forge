@@ -137,3 +137,7 @@ class PipelineStats(BaseModel):
     total_stage_runs: int = 0
     stage_runs_by_status: dict[str, int] = Field(default_factory=dict)
     avg_stage_duration_seconds: float | None = None
+    total_completed: int = 0
+    total_active: int = 0
+    avg_duration_by_stage: dict[str, float] = Field(default_factory=dict)
+    bounce_rate_by_stage: dict[str, float] = Field(default_factory=dict)

@@ -371,6 +371,10 @@ class TestEngineStatus:
         assert stats["total_tasks"] == 0
         assert stats["total_stage_runs"] == 0
         assert stats["avg_stage_duration_seconds"] is None
+        assert stats["total_completed"] == 0
+        assert stats["total_active"] == 0
+        assert stats["avg_duration_by_stage"] == {}
+        assert stats["bounce_rate_by_stage"] == {}
 
     def test_get_stats_with_data(
         self,
@@ -387,6 +391,36 @@ class TestEngineStatus:
         assert stats["total_tasks"] == 1
         assert stats["total_stage_runs"] == 1
         assert stats["avg_stage_duration_seconds"] == 10.0
+        assert stats["total_completed"] == 0
+        assert stats["total_active"] == 1
+        assert stats["avg_duration_by_stage"] == {"spec": 10.0}
+        assert stats["bounce_rate_by_stage"] == {"spec": 0.0}
+
+    def test_get_stats_with_completed_and_bounced(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        # Create a done task and an active task
+        t1 = db.insert_task(conn, project_id=project_id, title="Done task", priority=1)
+        db.update_task(conn, t1, status="done")
+        t2 = db.insert_task(conn, project_id=project_id, title="Active task", priority=2)
+        db.update_task(conn, t2, status="active")
+
+        # Create stage runs: 1 passed, 1 bounced for "spec"
+        sr1 = db.insert_stage_run(conn, task_id=t1, stage="spec", attempt=1)
+        db.update_stage_run(conn, sr1, status="passed", duration_seconds=10.0)
+        sr2 = db.insert_stage_run(conn, task_id=t2, stage="spec", attempt=1)
+        db.update_stage_run(conn, sr2, status="bounced", duration_seconds=5.0)
+
+        engine = PipelineEngine(settings, ":memory:")
+        with patch("forge.engine.database.get_connection", return_value=conn):
+            stats = engine.get_stats()
+        assert stats["total_completed"] == 1
+        assert stats["total_active"] == 1
+        assert abs(stats["avg_duration_by_stage"]["spec"] - 7.5) < 0.01
+        assert abs(stats["bounce_rate_by_stage"]["spec"] - 0.5) < 0.01
 
 
 # ---------------------------------------------------------------------------
