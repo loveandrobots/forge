@@ -559,9 +559,18 @@ class PipelineEngine:
         try:
             queued_runs = database.list_stage_runs(conn, status="queued")
             backlog_tasks = database.list_tasks(conn, status="backlog")
+            current_task_title = None
+            current_stage = None
+            if self.current_task_id:
+                task_row = database.get_task(conn, self.current_task_id)
+                if task_row:
+                    current_task_title = task_row["title"]
+                    current_stage = task_row["current_stage"]
             return {
                 "running": self.running,
                 "current_task_id": self.current_task_id,
+                "current_task_title": current_task_title,
+                "current_stage": current_stage,
                 "queue_depth": len(queued_runs) + len(backlog_tasks),
             }
         finally:

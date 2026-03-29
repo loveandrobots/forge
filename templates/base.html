@@ -16,6 +16,11 @@
             <a href="/logs" class="nav-link{% if request.url.path == '/logs' %} active{% endif %}">Logs</a>
             <a href="/settings" class="nav-link{% if request.url.path == '/settings' %} active{% endif %}">Settings</a>
         </div>
+        <div id="engine-status" class="engine-status"
+             hx-get="/partials/engine-status"
+             hx-trigger="load, every 5s, refresh"
+             hx-swap="innerHTML">
+        </div>
     </nav>
     <main class="content">
         {% block content %}{% endblock %}

@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from forge import database
 from forge.config import DB_PATH, STAGES
+from forge.routers.pipeline import _get_engine
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
@@ -200,3 +201,14 @@ def logs_page(
         )
     finally:
         conn.close()
+
+
+@router.get("/partials/engine-status", response_class=HTMLResponse)
+def engine_status_partial(request: Request) -> HTMLResponse:
+    """Render the engine status indicator as an HTML fragment for htmx."""
+    status = _get_engine().get_status()
+    return templates.TemplateResponse(
+        request,
+        "partials/engine_status.html",
+        {"status": status},
+    )

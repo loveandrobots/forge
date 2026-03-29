@@ -133,6 +133,8 @@ class RunLogEntry(BaseModel):
 class EngineStatus(BaseModel):
     running: bool
     current_task_id: str | None = None
+    current_task_title: str | None = None
+    current_stage: str | None = None
     queue_depth: int = 0
 
 

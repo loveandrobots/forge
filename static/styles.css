@@ -70,6 +70,52 @@ body {
     color: #fff;
 }
 
+/* Engine Status Indicator */
+.engine-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+.engine-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.engine-status-dot.running {
+    opacity: 1;
+}
+
+.engine-status-dot.paused {
+    opacity: 0.4;
+}
+
+.engine-status-text {
+    white-space: nowrap;
+}
+
+.engine-status-btn {
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+    line-height: 1.25;
+}
+
+.engine-status-btn:hover {
+    background: var(--bg);
+    color: var(--text);
+}
+
 /* Content */
 .content {
     padding: 1.5rem;

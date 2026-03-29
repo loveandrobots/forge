@@ -1,0 +1,19 @@
+{% if status.running %}
+<span class="engine-status-dot running"></span>
+{% if status.current_task_title %}
+<span class="engine-status-text">Running — working on: {{ status.current_task_title }} ({{ status.current_stage }})</span>
+{% else %}
+<span class="engine-status-text">Running — idle</span>
+{% endif %}
+<button class="engine-status-btn"
+        hx-post="/api/engine/pause"
+        hx-swap="none"
+        hx-on::after-request="htmx.trigger('#engine-status', 'refresh')">Pause</button>
+{% else %}
+<span class="engine-status-dot paused"></span>
+<span class="engine-status-text">Paused</span>
+<button class="engine-status-btn"
+        hx-post="/api/engine/start"
+        hx-swap="none"
+        hx-on::after-request="htmx.trigger('#engine-status', 'refresh')">Start</button>
+{% endif %}
