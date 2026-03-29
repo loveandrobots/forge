@@ -132,6 +132,86 @@ class TestPipelineView:
         assert "hx-trigger" in resp.text
         assert "every 5s" in resp.text
 
+    def test_retry_indicator_shown_for_attempt_gt_1(
+        self, tmp_path, client: TestClient, sample_project: dict,
+    ) -> None:
+        """AC 1: Cards with attempt > 1 show 'Attempt N/M'."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn, project_id=sample_project["id"],
+                title="Retry Task", priority=1, max_retries=3,
+            )
+            database.update_task(conn, tid, status="active", current_stage="implement")
+            database.insert_stage_run(conn, task_id=tid, stage="implement", attempt=2, status="running")
+        finally:
+            conn.close()
+        resp = client.get("/")
+        assert "Attempt 2/3" in resp.text
+
+    def test_no_retry_indicator_for_first_attempt(
+        self, client: TestClient, active_task_with_runs: str,
+    ) -> None:
+        """AC 2: Cards on first attempt do not show retry indicator."""
+        resp = client.get("/")
+        assert "Attempt 1/" not in resp.text
+        assert "Attempt 1" not in resp.text
+
+    def test_no_retry_indicator_for_backlog_or_done(
+        self, tmp_path, client: TestClient, sample_project: dict,
+    ) -> None:
+        """AC 3: Backlog and done tasks show no retry indicator."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            database.insert_task(
+                conn, project_id=sample_project["id"],
+                title="Backlog Task", priority=1,
+            )
+            tid_done = database.insert_task(
+                conn, project_id=sample_project["id"],
+                title="Done Task", priority=1,
+            )
+            database.update_task(conn, tid_done, status="done", current_stage="review")
+        finally:
+            conn.close()
+        resp = client.get("/")
+        assert "Attempt" not in resp.text
+
+    def test_max_retries_from_database(
+        self, tmp_path, client: TestClient, sample_project: dict,
+    ) -> None:
+        """AC 4: max_retries comes from the task's database value, not hardcoded."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn, project_id=sample_project["id"],
+                title="Custom Retries", priority=1, max_retries=5,
+            )
+            database.update_task(conn, tid, status="active", current_stage="spec")
+            database.insert_stage_run(conn, task_id=tid, stage="spec", attempt=2, status="running")
+        finally:
+            conn.close()
+        resp = client.get("/")
+        assert "Attempt 2/5" in resp.text
+
+    def test_retry_indicator_uses_attempt_css_class(
+        self, tmp_path, client: TestClient, sample_project: dict,
+    ) -> None:
+        """AC 5: Indicator uses the .attempt CSS class for small, plain text."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn, project_id=sample_project["id"],
+                title="Styled Task", priority=1, max_retries=3,
+            )
+            database.update_task(conn, tid, status="active", current_stage="plan")
+            database.insert_stage_run(conn, task_id=tid, stage="plan", attempt=2, status="running")
+        finally:
+            conn.close()
+        resp = client.get("/")
+        assert 'class="attempt"' in resp.text
+        assert "Attempt 2/3" in resp.text
+
 
 # ---------------------------------------------------------------------------
 # Task detail
