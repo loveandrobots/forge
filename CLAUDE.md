@@ -38,6 +38,12 @@ forge/
 └── config.yaml         # Engine configuration
 ```
 
+## Skills
+
+Load relevant skills from `.claude/skills/` before starting work:
+- `forge-implement` — required for all implementation tasks
+- `forge-testing` — required when writing or modifying tests
+
 ## Conventions
 
 - Use type hints on all function signatures.
