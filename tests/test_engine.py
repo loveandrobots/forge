@@ -244,7 +244,8 @@ class TestBounceTask:
 
 
 class TestTimeoutDetection:
-    def test_timeout_marks_error(
+    @pytest.mark.asyncio
+    async def test_timeout_marks_error(
         self, conn: sqlite3.Connection, settings: Settings, project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
@@ -262,13 +263,14 @@ class TestTimeoutDetection:
         )
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
-        engine._check_timeouts(conn, timeout_seconds=600)
+        await engine._check_timeouts(conn, timeout_seconds=600)
 
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "error"
         assert "timed out" in sr["error_message"]
 
-    def test_no_timeout_for_recent_run(
+    @pytest.mark.asyncio
+    async def test_no_timeout_for_recent_run(
         self, conn: sqlite3.Connection, settings: Settings, project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
@@ -283,7 +285,7 @@ class TestTimeoutDetection:
         )
         db.update_stage_run(conn, sr_id, started_at=recent_time)
 
-        engine._check_timeouts(conn, timeout_seconds=600)
+        await engine._check_timeouts(conn, timeout_seconds=600)
 
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "running"
@@ -660,6 +662,139 @@ class TestActivateBacklogTasks:
         # The spec stage_run should be passed
         spec_runs = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="passed")
         assert len(spec_runs) == 1
+
+
+# ---------------------------------------------------------------------------
+# Engine: auto-pause after task completion
+# ---------------------------------------------------------------------------
+
+
+class TestAutoPause:
+    @pytest.fixture
+    def pause_project_id(self, conn: sqlite3.Connection) -> str:
+        return db.insert_project(
+            conn, name="PauseProject", repo_path="/tmp/repo",
+            gate_dir="/tmp/repo/gates", pause_after_completion=True,
+        )
+
+    @pytest.fixture
+    def no_pause_project_id(self, conn: sqlite3.Connection) -> str:
+        return db.insert_project(
+            conn, name="NoPauseProject", repo_path="/tmp/repo",
+            gate_dir="/tmp/repo/gates", pause_after_completion=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_auto_pause_on_task_done(
+        self, conn: sqlite3.Connection, settings: Settings, pause_project_id: str,
+    ) -> None:
+        """Engine pauses when a task completes for a pause-enabled project."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+        task_id = db.insert_task(
+            conn, project_id=pause_project_id, title="My Task", priority=1,
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+
+        project = dict(db.get_project(conn, pause_project_id))
+        await engine.advance_task(conn, task_id, "review", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "done"
+        assert engine.running is False
+
+    @pytest.mark.asyncio
+    async def test_no_auto_pause_when_flag_is_false(
+        self, conn: sqlite3.Connection, settings: Settings, no_pause_project_id: str,
+    ) -> None:
+        """Engine continues when a task completes for a non-pause project."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+        task_id = db.insert_task(
+            conn, project_id=no_pause_project_id, title="My Task", priority=1,
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+
+        project = dict(db.get_project(conn, no_pause_project_id))
+        await engine.advance_task(conn, task_id, "review", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "done"
+        assert engine.running is True
+
+    @pytest.mark.asyncio
+    async def test_auto_pause_on_needs_human_from_bounce(
+        self, conn: sqlite3.Connection, settings: Settings, pause_project_id: str,
+    ) -> None:
+        """Engine pauses when bounce_task marks needs_human for a pause-enabled project."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+        task_id = db.insert_task(
+            conn, project_id=pause_project_id, title="Bounced Task", priority=1, max_retries=1,
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        # Create enough bounced runs to exceed max_retries
+        db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1, status="bounced")
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, pause_project_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="fail",
+            gate_name="post-spec.sh", duration_seconds=1.0,
+        )
+        await engine.bounce_task(conn, task, "spec", gate_result, project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        assert engine.running is False
+
+    @pytest.mark.asyncio
+    async def test_auto_pause_on_needs_human_from_error_retry(
+        self, conn: sqlite3.Connection, settings: Settings, pause_project_id: str,
+    ) -> None:
+        """Engine pauses when _handle_error_retry marks needs_human for a pause-enabled project."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+        task_id = db.insert_task(
+            conn, project_id=pause_project_id, title="Error Task", priority=1, max_retries=1,
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1, status="error")
+        # One error run already meets max_retries=1
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, pause_project_id))
+        await engine._handle_error_retry(conn, task, "spec", sr_id, project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        assert engine.running is False
+
+    @pytest.mark.asyncio
+    async def test_auto_pause_message_format(
+        self, conn: sqlite3.Connection, settings: Settings, pause_project_id: str,
+    ) -> None:
+        """Auto-pause log message matches the exact format from the spec."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+        safe_conn = _UnclosableConnection(conn)
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            task_id = db.insert_task(
+                conn, project_id=pause_project_id, title="Special Task", priority=1,
+            )
+            db.update_task(conn, task_id, status="active", current_stage="review")
+            project = dict(db.get_project(conn, pause_project_id))
+
+            await engine.advance_task(conn, task_id, "review", project=project)
+
+        logs = db.get_logs(conn, task_id=task_id)
+        auto_pause_logs = [row for row in logs if "auto-paused" in row["message"]]
+        assert len(auto_pause_logs) == 1
+        expected = (
+            "Engine auto-paused after completing task 'Special Task' for project "
+            "'PauseProject'. Restart the service and unpause to continue."
+        )
+        assert auto_pause_logs[0]["message"] == expected
 
 
 class TestTaskPriority:

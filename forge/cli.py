@@ -24,6 +24,17 @@ def main(argv: list[str] | None = None) -> None:
     init_p.add_argument("--default-branch", default="main", help="Default git branch")
     init_p.add_argument("--gate-dir", default="gates", help="Directory containing gate scripts")
     init_p.add_argument("--skills", default=None, help="Comma-separated skill references")
+    init_p.add_argument("--pause-after-completion", action="store_true", default=False,
+                        help="Pause the engine after completing tasks for this project")
+
+    # update-project
+    update_p = sub.add_parser("update-project", help="Update an existing project")
+    update_p.add_argument("--name", required=True, help="Project name to update")
+    pause_group = update_p.add_mutually_exclusive_group()
+    pause_group.add_argument("--pause-after-completion", action="store_true", dest="pause_after_completion", default=None,
+                             help="Enable auto-pause after task completion")
+    pause_group.add_argument("--no-pause-after-completion", action="store_false", dest="pause_after_completion",
+                             help="Disable auto-pause after task completion")
 
     # list-projects
     sub.add_parser("list-projects", help="List registered projects")
@@ -50,6 +61,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_migrate()
     elif args.command == "init-project":
         _cmd_init_project(args)
+    elif args.command == "update-project":
+        _cmd_update_project(args)
     elif args.command == "list-projects":
         _cmd_list_projects()
     elif args.command == "add-task":
@@ -83,8 +96,29 @@ def _cmd_init_project(args: argparse.Namespace) -> None:
             default_branch=args.default_branch,
             gate_dir=args.gate_dir,
             skill_refs=skill_refs,
+            pause_after_completion=args.pause_after_completion,
         )
         print(f"Project '{args.name}' created (id={project_id}).")
+    finally:
+        conn.close()
+
+
+def _cmd_update_project(args: argparse.Namespace) -> None:
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        database.migrate(conn)
+        project = database.get_project_by_name(conn, args.name)
+        if not project:
+            print(f"Error: project '{args.name}' not found.", file=sys.stderr)
+            sys.exit(1)
+        kwargs: dict = {}
+        if args.pause_after_completion is not None:
+            kwargs["pause_after_completion"] = args.pause_after_completion
+        if not kwargs:
+            print("No updates specified.", file=sys.stderr)
+            sys.exit(1)
+        database.update_project(conn, project["id"], **kwargs)
+        print(f"Project '{args.name}' updated.")
     finally:
         conn.close()
 
