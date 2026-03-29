@@ -98,6 +98,31 @@ class TestUpdateTask:
         resp = client.patch("/api/tasks/nonexistent", json={"title": "X"})
         assert resp.status_code == 404
 
+    def test_patch_status_rejected(self, client: TestClient, task_id: str) -> None:
+        resp = client.patch(f"/api/tasks/{task_id}", json={"status": "active"})
+        assert resp.status_code == 400
+        assert "Use /activate" in resp.json()["detail"]
+
+
+class TestActivateTask:
+    def test_activate_backlog_task(self, client: TestClient, task_id: str) -> None:
+        resp = client.post(f"/api/tasks/{task_id}/activate")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "active"
+        assert data["current_stage"] == "spec"
+
+    def test_activate_non_backlog_fails(self, client: TestClient, task_id: str) -> None:
+        # First activate it
+        client.post(f"/api/tasks/{task_id}/activate")
+        # Try again — now it's active, not backlog
+        resp = client.post(f"/api/tasks/{task_id}/activate")
+        assert resp.status_code == 400
+
+    def test_activate_not_found(self, client: TestClient) -> None:
+        resp = client.post("/api/tasks/nonexistent/activate")
+        assert resp.status_code == 404
+
 
 class TestDeleteTask:
     def test_delete_backlog_task(self, client: TestClient, task_id: str) -> None:

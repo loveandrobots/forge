@@ -546,6 +546,122 @@ class TestRunLoopIntegration:
 # ---------------------------------------------------------------------------
 
 
+class TestActivateBacklogTasks:
+    def test_activates_backlog_task(
+        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+    ) -> None:
+        """Backlog task gets activated with a queued stage_run for the first stage."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="Backlog task", priority=5,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            engine._activate_backlog_tasks(conn)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "active"
+        assert task["current_stage"] == "spec"
+        runs = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        assert len(runs) == 1
+        assert runs[0]["attempt"] == 1
+
+    def test_respects_concurrency_limit(
+        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+    ) -> None:
+        """Only activates up to max_concurrent_tasks backlog tasks."""
+        settings.engine.max_concurrent_tasks = 2
+        engine = PipelineEngine(settings, ":memory:")
+
+        task_ids = []
+        for i in range(4):
+            tid = db.insert_task(
+                conn, project_id=project_id, title=f"Task {i}", priority=i,
+            )
+            task_ids.append(tid)
+
+        safe_conn = _UnclosableConnection(conn)
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            engine._activate_backlog_tasks(conn)
+
+        active = db.list_tasks(conn, status="active")
+        backlog = db.list_tasks(conn, status="backlog")
+        assert len(active) == 2
+        assert len(backlog) == 2
+
+    def test_skips_when_at_capacity(
+        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+    ) -> None:
+        """Does not activate backlog tasks when active count meets concurrency limit."""
+        settings.engine.max_concurrent_tasks = 1
+        engine = PipelineEngine(settings, ":memory:")
+
+        # Create one already-active task
+        active_id = db.insert_task(
+            conn, project_id=project_id, title="Active", priority=10,
+        )
+        db.update_task(conn, active_id, status="active", current_stage="spec")
+
+        # Create a backlog task
+        backlog_id = db.insert_task(
+            conn, project_id=project_id, title="Waiting", priority=5,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            engine._activate_backlog_tasks(conn)
+
+        task = db.get_task(conn, backlog_id)
+        assert task["status"] == "backlog"
+
+    @pytest.mark.asyncio
+    async def test_engine_loop_picks_up_backlog_task(
+        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+    ) -> None:
+        """Full engine loop activates a backlog task and dispatches it."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="From backlog", priority=5,
+        )
+
+        dispatch_result = DispatchResult(
+            output="spec content",
+            exit_code=0,
+            duration_seconds=2.0,
+            tokens_used=50,
+        )
+        gate_result = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-spec.sh", duration_seconds=0.5,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+            patch("forge.engine.create_branch", new_callable=AsyncMock, return_value=True),
+        ):
+            engine.running = True
+            loop_task = asyncio.create_task(engine.run_loop())
+            await asyncio.sleep(0.5)
+            engine.running = False
+            try:
+                await asyncio.wait_for(loop_task, timeout=3.0)
+            except asyncio.TimeoutError:
+                loop_task.cancel()
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "active"
+        assert task["current_stage"] == "plan"
+        # The spec stage_run should be passed
+        spec_runs = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="passed")
+        assert len(spec_runs) == 1
+
+
 class TestTaskPriority:
     def test_highest_priority_picked(
         self, conn: sqlite3.Connection, project_id: str,

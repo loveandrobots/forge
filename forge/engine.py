@@ -83,6 +83,9 @@ class PipelineEngine:
                 # Step 1: Check for timed-out running stage_runs
                 self._check_timeouts(conn, timeout)
 
+                # Step 1b: Activate backlog tasks up to concurrency limit
+                self._activate_backlog_tasks(conn)
+
                 # Step 2: Find next queued task
                 task_row = database.get_next_queued_task(conn)
                 if task_row is None:
@@ -409,6 +412,37 @@ class PipelineEngine:
             if elapsed > timeout_seconds:
                 self.handle_timeout(conn, sr)
 
+    def _activate_backlog_tasks(self, conn: sqlite3.Connection) -> None:
+        """Pick up backlog tasks: set status='active', current_stage to first stage, create initial stage_run."""
+        active_count = len(database.list_tasks(conn, status="active"))
+        max_concurrent = self.settings.engine.max_concurrent_tasks
+        if active_count >= max_concurrent:
+            return
+
+        slots = max_concurrent - active_count
+        backlog_tasks = database.list_tasks(conn, status="backlog")
+        for task_row in backlog_tasks[:slots]:
+            task = _row_to_dict(task_row)
+            task_id = task["id"]
+            first_stage = STAGES[0]
+            database.update_task(
+                conn, task_id,
+                status="active",
+                current_stage=first_stage,
+            )
+            database.insert_stage_run(
+                conn,
+                task_id=task_id,
+                stage=first_stage,
+                attempt=1,
+                status="queued",
+            )
+            self._log(
+                "info",
+                f"Activated backlog task {task_id}, queued {first_stage}",
+                task_id=task_id,
+            )
+
     def _handle_error_retry(
         self,
         conn: sqlite3.Connection,
@@ -487,10 +521,11 @@ class PipelineEngine:
         conn = database.get_connection(self.db_path)
         try:
             queued_runs = database.list_stage_runs(conn, status="queued")
+            backlog_tasks = database.list_tasks(conn, status="backlog")
             return {
                 "running": self.running,
                 "current_task_id": self.current_task_id,
-                "queue_depth": len(queued_runs),
+                "queue_depth": len(queued_runs) + len(backlog_tasks),
             }
         finally:
             conn.close()

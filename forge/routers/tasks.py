@@ -85,6 +85,11 @@ def update_task(task_id: str, body: TaskUpdate) -> dict:
             raise HTTPException(status_code=404, detail="Task not found")
 
         updates = body.model_dump(exclude_unset=True)
+        if "status" in updates:
+            raise HTTPException(
+                status_code=400,
+                detail="Use /activate, /pause, /resume, or /retry to change task status",
+            )
         if not updates:
             return _row_to_task(row)
 
@@ -106,6 +111,32 @@ def delete_task(task_id: str) -> None:
             raise HTTPException(status_code=400, detail="Only backlog tasks can be deleted")
 
         database.delete_task(conn, task_id)
+    finally:
+        conn.close()
+
+
+@router.post("/{task_id}/activate", response_model=TaskResponse)
+def activate_task(task_id: str) -> dict:
+    """Move a backlog task into the pipeline by creating its first stage_run."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if row["status"] != "backlog":
+            raise HTTPException(status_code=400, detail="Only backlog tasks can be activated")
+
+        first_stage = STAGES[0]
+        database.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage=first_stage,
+            attempt=1,
+            status="queued",
+        )
+        database.update_task(conn, task_id, status="active", current_stage=first_stage)
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_task(updated_row)
     finally:
         conn.close()
 
