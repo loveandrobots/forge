@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 # Projects
 # ---------------------------------------------------------------------------
 
+
 class ProjectCreate(BaseModel):
     name: str
     repo_path: str
@@ -41,6 +42,7 @@ class ProjectResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Tasks
 # ---------------------------------------------------------------------------
+
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -87,6 +89,7 @@ class TaskResponse(BaseModel):
 # Stage runs
 # ---------------------------------------------------------------------------
 
+
 class StageRunResponse(BaseModel):
     id: str
     task_id: str
@@ -111,6 +114,7 @@ class StageRunResponse(BaseModel):
 # Run log
 # ---------------------------------------------------------------------------
 
+
 class RunLogEntry(BaseModel):
     id: int
     timestamp: datetime
@@ -124,6 +128,7 @@ class RunLogEntry(BaseModel):
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
+
 
 class EngineStatus(BaseModel):
     running: bool

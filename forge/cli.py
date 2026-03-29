@@ -11,7 +11,9 @@ from forge.config import DB_PATH
 
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the Forge CLI."""
-    parser = argparse.ArgumentParser(prog="forge", description="Forge pipeline orchestrator")
+    parser = argparse.ArgumentParser(
+        prog="forge", description="Forge pipeline orchestrator"
+    )
     sub = parser.add_subparsers(dest="command")
 
     # migrate
@@ -22,8 +24,12 @@ def main(argv: list[str] | None = None) -> None:
     init_p.add_argument("--name", required=True, help="Project name (unique)")
     init_p.add_argument("--repo-path", required=True, help="Path to project repository")
     init_p.add_argument("--default-branch", default="main", help="Default git branch")
-    init_p.add_argument("--gate-dir", default="gates", help="Directory containing gate scripts")
-    init_p.add_argument("--skills", default=None, help="Comma-separated skill references")
+    init_p.add_argument(
+        "--gate-dir", default="gates", help="Directory containing gate scripts"
+    )
+    init_p.add_argument(
+        "--skills", default=None, help="Comma-separated skill references"
+    )
 
     # list-projects
     sub.add_parser("list-projects", help="List registered projects")
@@ -33,7 +39,9 @@ def main(argv: list[str] | None = None) -> None:
     add_t.add_argument("--project", required=True, help="Project name")
     add_t.add_argument("--title", required=True, help="Task title")
     add_t.add_argument("--description", default="", help="Task description")
-    add_t.add_argument("--priority", type=int, default=0, help="Priority (higher = more urgent)")
+    add_t.add_argument(
+        "--priority", type=int, default=0, help="Priority (higher = more urgent)"
+    )
 
     # serve
     serve_p = sub.add_parser("serve", help="Start the Forge server")
@@ -75,7 +83,9 @@ def _cmd_init_project(args: argparse.Namespace) -> None:
         if existing:
             print(f"Error: project '{args.name}' already exists.", file=sys.stderr)
             sys.exit(1)
-        skill_refs = [s.strip() for s in args.skills.split(",")] if args.skills else None
+        skill_refs = (
+            [s.strip() for s in args.skills.split(",")] if args.skills else None
+        )
         project_id = database.insert_project(
             conn,
             name=args.name,
@@ -129,4 +139,5 @@ def _cmd_add_task(args: argparse.Namespace) -> None:
 
 def _cmd_serve(args: argparse.Namespace) -> None:
     import uvicorn
+
     uvicorn.run("forge.main:app", host=args.host, port=args.port, reload=False)

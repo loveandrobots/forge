@@ -88,7 +88,10 @@ def list_stage_runs(
     conn = database.get_connection(str(DB_PATH))
     try:
         rows = database.list_stage_runs(
-            conn, task_id=task_id, stage=stage, status=status,
+            conn,
+            task_id=task_id,
+            stage=stage,
+            status=status,
         )
         return [_row_to_stage_run(r) for r in rows]
     finally:

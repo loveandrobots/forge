@@ -12,6 +12,7 @@ def get_connection(db_path: str = "") -> sqlite3.Connection:
     """Return a sqlite3 Connection with Row factory and WAL mode."""
     if not db_path:
         from forge.config import DB_PATH
+
         db_path = str(DB_PATH)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -117,6 +118,7 @@ def _json_decode(value: str | None) -> list | dict | None:
 # Projects
 # ---------------------------------------------------------------------------
 
+
 def insert_project(
     conn: sqlite3.Connection,
     *,
@@ -132,8 +134,16 @@ def insert_project(
     conn.execute(
         """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (project_id, name, repo_path, default_branch, gate_dir,
-         _json_encode(skill_refs), _now(), _json_encode(config)),
+        (
+            project_id,
+            name,
+            repo_path,
+            default_branch,
+            gate_dir,
+            _json_encode(skill_refs),
+            _now(),
+            _json_encode(config),
+        ),
     )
     conn.commit()
     return project_id
@@ -187,7 +197,8 @@ def update_project(
         return False
     values.append(project_id)
     cur = conn.execute(
-        f"UPDATE projects SET {', '.join(fields)} WHERE id = ?", values,
+        f"UPDATE projects SET {', '.join(fields)} WHERE id = ?",
+        values,
     )
     conn.commit()
     return cur.rowcount > 0
@@ -196,6 +207,7 @@ def update_project(
 # ---------------------------------------------------------------------------
 # Tasks
 # ---------------------------------------------------------------------------
+
 
 def insert_task(
     conn: sqlite3.Connection,
@@ -214,8 +226,17 @@ def insert_task(
         """INSERT INTO tasks
            (id, project_id, title, description, priority, status, skill_overrides, max_retries, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, 'backlog', ?, ?, ?, ?)""",
-        (task_id, project_id, title, description, priority,
-         _json_encode(skill_overrides), max_retries, now, now),
+        (
+            task_id,
+            project_id,
+            title,
+            description,
+            priority,
+            _json_encode(skill_overrides),
+            max_retries,
+            now,
+            now,
+        ),
     )
     conn.commit()
     return task_id
@@ -291,7 +312,8 @@ def update_task(
             values.append(encoder(val) if encoder else val)
     values.append(task_id)
     cur = conn.execute(
-        f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", values,
+        f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?",
+        values,
     )
     conn.commit()
     return cur.rowcount > 0
@@ -300,7 +322,8 @@ def update_task(
 def delete_task(conn: sqlite3.Connection, task_id: str) -> bool:
     """Delete a task only if status='backlog'. Returns True if deleted."""
     cur = conn.execute(
-        "DELETE FROM tasks WHERE id = ? AND status = 'backlog'", (task_id,),
+        "DELETE FROM tasks WHERE id = ? AND status = 'backlog'",
+        (task_id,),
     )
     conn.commit()
     return cur.rowcount > 0
@@ -321,6 +344,7 @@ def get_next_queued_task(conn: sqlite3.Connection) -> sqlite3.Row | None:
 # ---------------------------------------------------------------------------
 # Stage runs
 # ---------------------------------------------------------------------------
+
 
 def insert_stage_run(
     conn: sqlite3.Connection,
@@ -369,7 +393,8 @@ def list_stage_runs(
         params.append(status)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     cur = conn.execute(
-        f"SELECT * FROM stage_runs {where} ORDER BY started_at ASC", params,
+        f"SELECT * FROM stage_runs {where} ORDER BY started_at ASC",
+        params,
     )
     return cur.fetchall()
 
@@ -417,7 +442,8 @@ def update_stage_run(
         return False
     values.append(stage_run_id)
     cur = conn.execute(
-        f"UPDATE stage_runs SET {', '.join(fields)} WHERE id = ?", values,
+        f"UPDATE stage_runs SET {', '.join(fields)} WHERE id = ?",
+        values,
     )
     conn.commit()
     return cur.rowcount > 0
@@ -449,7 +475,9 @@ def insert_task_link(
 ) -> str:
     """Insert a task link. link_type must be valid. Returns the link id."""
     if link_type not in VALID_LINK_TYPES:
-        raise ValueError(f"Invalid link_type: {link_type!r}. Must be one of {VALID_LINK_TYPES}")
+        raise ValueError(
+            f"Invalid link_type: {link_type!r}. Must be one of {VALID_LINK_TYPES}"
+        )
     link_id = _new_id()
     conn.execute(
         """INSERT INTO task_links (id, source_task_id, target_task_id, link_type, created_at)
@@ -489,7 +517,9 @@ def insert_log(
 ) -> int:
     """Insert a log entry. Returns the autoincrement id."""
     if level not in VALID_LOG_LEVELS:
-        raise ValueError(f"Invalid log level: {level!r}. Must be one of {VALID_LOG_LEVELS}")
+        raise ValueError(
+            f"Invalid log level: {level!r}. Must be one of {VALID_LOG_LEVELS}"
+        )
     cur = conn.execute(
         """INSERT INTO run_log (timestamp, level, message, task_id, stage_run_id, metadata)
            VALUES (?, ?, ?, ?, ?, ?)""",

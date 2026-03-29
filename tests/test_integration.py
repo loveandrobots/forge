@@ -135,7 +135,7 @@ class TestFullPipelineFlow:
         dispatched_stages: list[str] = []
         stage_index = 0
 
-        async def mock_dispatch(prompt, repo_path, branch, timeout):
+        async def mock_dispatch(prompt, repo_path, branch, timeout, **kwargs):
             nonlocal stage_index
             dispatched_stages.append(STAGES[stage_index])
             stage_index += 1
@@ -186,7 +186,7 @@ class TestFullPipelineFlow:
 
         observed_stages: list[str] = []
 
-        async def tracking_dispatch(prompt, repo_path, branch, timeout):
+        async def tracking_dispatch(prompt, repo_path, branch, timeout, **kwargs):
             # Determine current stage from the running stage_runs
             runs = db.list_stage_runs(conn, task_id=task_id, status="running")
             for r in runs:
@@ -295,7 +295,7 @@ class TestNeedsHumanFlow:
 
         dispatch_count = 0
 
-        async def counting_dispatch(prompt, repo_path, branch, timeout):
+        async def counting_dispatch(prompt, repo_path, branch, timeout, **kwargs):
             nonlocal dispatch_count
             dispatch_count += 1
             if dispatch_count >= 3:

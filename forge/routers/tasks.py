@@ -108,7 +108,9 @@ def delete_task(task_id: str) -> None:
         if row is None:
             raise HTTPException(status_code=404, detail="Task not found")
         if row["status"] != "backlog":
-            raise HTTPException(status_code=400, detail="Only backlog tasks can be deleted")
+            raise HTTPException(
+                status_code=400, detail="Only backlog tasks can be deleted"
+            )
 
         database.delete_task(conn, task_id)
     finally:
@@ -124,7 +126,9 @@ def activate_task(task_id: str) -> dict:
         if row is None:
             raise HTTPException(status_code=404, detail="Task not found")
         if row["status"] != "backlog":
-            raise HTTPException(status_code=400, detail="Only backlog tasks can be activated")
+            raise HTTPException(
+                status_code=400, detail="Only backlog tasks can be activated"
+            )
 
         first_stage = STAGES[0]
         database.insert_stage_run(
@@ -150,7 +154,9 @@ def resume_task(task_id: str) -> dict:
         if row is None:
             raise HTTPException(status_code=404, detail="Task not found")
         if row["status"] != "needs_human":
-            raise HTTPException(status_code=400, detail="Only needs_human tasks can be resumed")
+            raise HTTPException(
+                status_code=400, detail="Only needs_human tasks can be resumed"
+            )
 
         stage = row["current_stage"]
         if not stage:
@@ -180,7 +186,9 @@ def pause_task(task_id: str) -> dict:
         if row is None:
             raise HTTPException(status_code=404, detail="Task not found")
         if row["status"] != "active":
-            raise HTTPException(status_code=400, detail="Only active tasks can be paused")
+            raise HTTPException(
+                status_code=400, detail="Only active tasks can be paused"
+            )
 
         database.update_task(conn, task_id, status="paused")
         updated_row = database.get_task(conn, task_id)

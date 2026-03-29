@@ -10,7 +10,12 @@ from datetime import datetime, timezone
 
 from forge import database
 from forge.config import STAGES, Settings
-from forge.dispatcher import DispatchResult, create_branch, dispatch_claude, rebase_branch
+from forge.dispatcher import (
+    DispatchResult,
+    create_branch,
+    dispatch_claude,
+    rebase_branch,
+)
 from forge.gate_runner import GateResult, build_gate_env, run_gate
 from forge.prompt_builder import build_prompt, get_git_diff, load_artifact
 
@@ -99,7 +104,9 @@ class PipelineEngine:
 
                 # Get the queued stage_run for this task
                 stage_runs = database.list_stage_runs(
-                    conn, task_id=task_id, status="queued",
+                    conn,
+                    task_id=task_id,
+                    status="queued",
                 )
                 if not stage_runs:
                     conn.close()
@@ -129,7 +136,9 @@ class PipelineEngine:
                 if not branch_name:
                     branch_name = _make_branch_name(task_id, task["title"])
                     ok = await create_branch(
-                        project["repo_path"], branch_name, project["default_branch"],
+                        project["repo_path"],
+                        branch_name,
+                        project["default_branch"],
                     )
                     if not ok:
                         self._log(
@@ -139,7 +148,8 @@ class PipelineEngine:
                             stage_run_id=stage_run_id,
                         )
                         database.update_stage_run(
-                            conn, stage_run_id,
+                            conn,
+                            stage_run_id,
                             status="error",
                             error_message=f"Failed to create branch {branch_name}",
                             finished_at=_now(),
@@ -154,7 +164,9 @@ class PipelineEngine:
                 # Rebase before implement stage
                 if stage == "implement":
                     rebase_ok = await rebase_branch(
-                        project["repo_path"], branch_name, project["default_branch"],
+                        project["repo_path"],
+                        branch_name,
+                        project["default_branch"],
                     )
                     if not rebase_ok:
                         self._log(
@@ -163,7 +175,8 @@ class PipelineEngine:
                             task_id=task_id,
                         )
                         database.update_stage_run(
-                            conn, stage_run_id,
+                            conn,
+                            stage_run_id,
                             status="error",
                             error_message="Rebase failed — conflicts need human resolution",
                             finished_at=_now(),
@@ -181,16 +194,25 @@ class PipelineEngine:
 
                 # Step 3: Build prompt
                 artifacts = self._load_artifacts(
-                    task, project, stage, stage_run, conn,
+                    task,
+                    project,
+                    stage,
+                    stage_run,
+                    conn,
                 )
                 prompt = build_prompt(
-                    stage, task, project, stage_run, artifacts,
+                    stage,
+                    task,
+                    project,
+                    stage_run,
+                    artifacts,
                 )
 
                 # Mark stage_run as running
                 started_at = _now()
                 database.update_stage_run(
-                    conn, stage_run_id,
+                    conn,
+                    stage_run_id,
                     status="running",
                     started_at=started_at,
                     prompt_sent=prompt,
@@ -208,6 +230,7 @@ class PipelineEngine:
                     repo_path=project["repo_path"],
                     branch=branch_name,
                     timeout=timeout,
+                    headless_flags=self.settings.claude.headless_flags,
                 )
 
                 finished_at = _now()
@@ -215,7 +238,8 @@ class PipelineEngine:
                 # Handle dispatch error
                 if result.error:
                     database.update_stage_run(
-                        conn, stage_run_id,
+                        conn,
+                        stage_run_id,
                         status="error",
                         finished_at=finished_at,
                         duration_seconds=result.duration_seconds,
@@ -236,11 +260,14 @@ class PipelineEngine:
 
                 # Step 5: Run gate
                 gate_env = build_gate_env(
-                    task_row, stage_runs[0], project_row,
+                    task_row,
+                    stage_runs[0],
+                    project_row,
                 )
                 gate_dir = project["gate_dir"]
                 # Resolve relative gate_dir against repo_path
                 import os
+
                 if not os.path.isabs(gate_dir):
                     gate_dir = os.path.join(project["repo_path"], gate_dir)
 
@@ -252,7 +279,8 @@ class PipelineEngine:
 
                 # Step 6: Record results and advance or bounce
                 database.update_stage_run(
-                    conn, stage_run_id,
+                    conn,
+                    stage_run_id,
                     finished_at=finished_at,
                     duration_seconds=result.duration_seconds,
                     claude_output=result.output,
@@ -266,7 +294,9 @@ class PipelineEngine:
                 if gate_result.passed:
                     # Gate passed
                     database.update_stage_run(
-                        conn, stage_run_id, status="passed",
+                        conn,
+                        stage_run_id,
+                        status="passed",
                     )
                     self._log(
                         "info",
@@ -278,7 +308,9 @@ class PipelineEngine:
                 else:
                     # Gate failed — bounce
                     database.update_stage_run(
-                        conn, stage_run_id, status="bounced",
+                        conn,
+                        stage_run_id,
+                        status="bounced",
                     )
                     self._log(
                         "warn",
@@ -311,7 +343,8 @@ class PipelineEngine:
         if next_stage is None:
             # All stages complete
             database.update_task(
-                conn, task_id,
+                conn,
+                task_id,
                 status="done",
                 current_stage=current_stage,
                 completed_at=_now(),
@@ -377,7 +410,8 @@ class PipelineEngine:
         stage = stage_run["stage"]
 
         database.update_stage_run(
-            conn, sr_id,
+            conn,
+            sr_id,
             status="error",
             finished_at=_now(),
             error_message="Stage run timed out",
@@ -426,7 +460,8 @@ class PipelineEngine:
             task_id = task["id"]
             first_stage = STAGES[0]
             database.update_task(
-                conn, task_id,
+                conn,
+                task_id,
                 status="active",
                 current_stage=first_stage,
             )
@@ -506,7 +541,9 @@ class PipelineEngine:
         # Load previous gate stderr for retries
         if stage_run.get("attempt", 1) > 1:
             prev_runs = database.list_stage_runs(
-                conn, task_id=task["id"], stage=stage,
+                conn,
+                task_id=task["id"],
+                stage=stage,
             )
             for prev in reversed(prev_runs):
                 prev_dict = _row_to_dict(prev)
@@ -551,9 +588,7 @@ class PipelineEngine:
                 if sr["duration_seconds"] is not None:
                     durations.append(sr["duration_seconds"])
 
-            avg_duration = (
-                sum(durations) / len(durations) if durations else None
-            )
+            avg_duration = sum(durations) / len(durations) if durations else None
 
             return {
                 "total_tasks": total_tasks,

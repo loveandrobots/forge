@@ -17,12 +17,22 @@ STAGES: list[str] = ["spec", "plan", "implement", "review"]
 
 # Valid task statuses
 TASK_STATUSES: list[str] = [
-    "backlog", "active", "paused", "needs_human", "done", "failed",
+    "backlog",
+    "active",
+    "paused",
+    "needs_human",
+    "done",
+    "failed",
 ]
 
 # Valid stage run statuses
 STAGE_RUN_STATUSES: list[str] = [
-    "queued", "running", "passed", "failed", "bounced", "error",
+    "queued",
+    "running",
+    "passed",
+    "failed",
+    "bounced",
+    "error",
 ]
 
 # Valid task link types

@@ -5,4 +5,4 @@ engine:
   default_max_retries: 3
 claude:
   default_model: "opus"
-  headless_flags: "--output-format stream-json"
+  headless_flags: "--output-format stream-json --verbose"

@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 def _row_to_project(row) -> dict:
     """Convert a sqlite3.Row to a ProjectResponse-compatible dict."""
     import json
+
     d = dict(row)
     if isinstance(d.get("skill_refs"), str):
         d["skill_refs"] = json.loads(d["skill_refs"])
@@ -38,14 +39,18 @@ def list_projects() -> list[dict]:
 def create_project(body: ProjectCreate) -> dict:
     # Validate repo_path exists
     if not os.path.isdir(body.repo_path):
-        raise HTTPException(status_code=400, detail=f"repo_path does not exist: {body.repo_path}")
+        raise HTTPException(
+            status_code=400, detail=f"repo_path does not exist: {body.repo_path}"
+        )
 
     conn = database.get_connection(str(DB_PATH))
     try:
         # Check name uniqueness
         existing = database.get_project_by_name(conn, body.name)
         if existing:
-            raise HTTPException(status_code=409, detail=f"Project name '{body.name}' already exists")
+            raise HTTPException(
+                status_code=409, detail=f"Project name '{body.name}' already exists"
+            )
 
         project_id = database.insert_project(
             conn,
@@ -88,13 +93,19 @@ def update_project(project_id: str, body: ProjectUpdate) -> dict:
 
         # Validate repo_path if being updated
         if "repo_path" in updates and not os.path.isdir(updates["repo_path"]):
-            raise HTTPException(status_code=400, detail=f"repo_path does not exist: {updates['repo_path']}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"repo_path does not exist: {updates['repo_path']}",
+            )
 
         # Check name uniqueness if being updated
         if "name" in updates:
             existing = database.get_project_by_name(conn, updates["name"])
             if existing and existing["id"] != project_id:
-                raise HTTPException(status_code=409, detail=f"Project name '{updates['name']}' already exists")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Project name '{updates['name']}' already exists",
+                )
 
         database.update_project(conn, project_id, **updates)
         updated_row = database.get_project(conn, project_id)

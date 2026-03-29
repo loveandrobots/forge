@@ -203,6 +203,7 @@ def build_prompt(
     if isinstance(skill_refs, str):
         # Handle JSON-serialised lists stored as strings
         import json
+
         try:
             skill_refs = json.loads(skill_refs)
         except (json.JSONDecodeError, TypeError):

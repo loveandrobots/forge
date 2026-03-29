@@ -77,7 +77,8 @@ async def run_gate(
     start = time.monotonic()
 
     proc = await asyncio.create_subprocess_exec(
-        "bash", gate_path,
+        "bash",
+        gate_path,
         cwd=env_vars.get("FORGE_REPO_PATH"),
         env=full_env,
         stdout=asyncio.subprocess.PIPE,
@@ -98,7 +99,10 @@ async def run_gate(
     else:
         logger.warning(
             "Gate %s failed (exit %d, %.1fs): %s",
-            gate_name, exit_code, duration, stderr_text,
+            gate_name,
+            exit_code,
+            duration,
+            stderr_text,
         )
 
     return GateResult(

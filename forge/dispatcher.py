@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 import time
 from dataclasses import dataclass
 
@@ -79,6 +80,7 @@ async def dispatch_claude(
     repo_path: str,
     branch: str,
     timeout: int,
+    headless_flags: str = "--output-format stream-json",
 ) -> DispatchResult:
     """Spawn a Claude Code CLI session and capture output.
 
@@ -89,7 +91,9 @@ async def dispatch_claude(
 
     # Checkout branch (create from current if needed)
     checkout_proc = await asyncio.create_subprocess_exec(
-        "git", "checkout", branch,
+        "git",
+        "checkout",
+        branch,
         cwd=repo_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -97,14 +101,19 @@ async def dispatch_claude(
     await checkout_proc.wait()
     if checkout_proc.returncode != 0:
         create_proc = await asyncio.create_subprocess_exec(
-            "git", "checkout", "-b", branch,
+            "git",
+            "checkout",
+            "-b",
+            branch,
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         await create_proc.wait()
         if create_proc.returncode != 0:
-            stderr_bytes = await create_proc.stderr.read() if create_proc.stderr else b""
+            stderr_bytes = (
+                await create_proc.stderr.read() if create_proc.stderr else b""
+            )
             return DispatchResult(
                 output="",
                 exit_code=create_proc.returncode or 1,
@@ -114,8 +123,12 @@ async def dispatch_claude(
 
     # Run claude CLI
     try:
+        extra_flags = shlex.split(headless_flags)
         proc = await asyncio.create_subprocess_exec(
-            "claude", "-p", prompt, "--output-format", "stream-json",
+            "claude",
+            "-p",
+            prompt,
+            *extra_flags,
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -174,7 +187,9 @@ async def create_branch(
     """Create a feature branch from base_branch. Returns True on success."""
     # Ensure we're on the base branch first
     proc = await asyncio.create_subprocess_exec(
-        "git", "checkout", base_branch,
+        "git",
+        "checkout",
+        base_branch,
         cwd=repo_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -185,7 +200,10 @@ async def create_branch(
 
     # Create the new branch
     proc = await asyncio.create_subprocess_exec(
-        "git", "checkout", "-b", branch,
+        "git",
+        "checkout",
+        "-b",
+        branch,
         cwd=repo_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -202,7 +220,9 @@ async def rebase_branch(
     """Rebase feature branch on base_branch. Returns False if conflicts (needs_human)."""
     # Checkout the feature branch
     proc = await asyncio.create_subprocess_exec(
-        "git", "checkout", branch,
+        "git",
+        "checkout",
+        branch,
         cwd=repo_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -213,7 +233,9 @@ async def rebase_branch(
 
     # Rebase onto base
     proc = await asyncio.create_subprocess_exec(
-        "git", "rebase", base_branch,
+        "git",
+        "rebase",
+        base_branch,
         cwd=repo_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -222,7 +244,9 @@ async def rebase_branch(
     if proc.returncode != 0:
         # Abort the failed rebase
         abort_proc = await asyncio.create_subprocess_exec(
-            "git", "rebase", "--abort",
+            "git",
+            "rebase",
+            "--abort",
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

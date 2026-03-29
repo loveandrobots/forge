@@ -21,7 +21,13 @@ router = APIRouter(tags=["dashboard"])
 def _row_to_dict(row) -> dict:
     """Convert a sqlite3.Row to a plain dict with JSON fields decoded."""
     d = dict(row)
-    for key in ("skill_refs", "config", "skill_overrides", "artifacts_produced", "metadata"):
+    for key in (
+        "skill_refs",
+        "config",
+        "skill_overrides",
+        "artifacts_produced",
+        "metadata",
+    ):
         if isinstance(d.get(key), str):
             d[key] = json.loads(d[key])
     return d
@@ -67,13 +73,17 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
                     latest = _row_to_dict(runs[-1])
                     stage_run_info[t["id"]] = latest
 
-        return templates.TemplateResponse(request, "pipeline.html", {
-            "columns": columns,
-            "column_names": ["backlog"] + STAGES + ["done"],
-            "projects": projects,
-            "selected_project_id": project_id,
-            "stage_run_info": stage_run_info,
-        })
+        return templates.TemplateResponse(
+            request,
+            "pipeline.html",
+            {
+                "columns": columns,
+                "column_names": ["backlog"] + STAGES + ["done"],
+                "projects": projects,
+                "selected_project_id": project_id,
+                "stage_run_info": stage_run_info,
+            },
+        )
     finally:
         conn.close()
 
@@ -91,13 +101,19 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
         project_row = database.get_project(conn, task["project_id"])
         project = _row_to_dict(project_row) if project_row else {}
 
-        stage_runs = [_row_to_dict(r) for r in database.list_stage_runs(conn, task_id=task_id)]
+        stage_runs = [
+            _row_to_dict(r) for r in database.list_stage_runs(conn, task_id=task_id)
+        ]
 
-        return templates.TemplateResponse(request, "task_detail.html", {
-            "task": task,
-            "project": project,
-            "stage_runs": stage_runs,
-        })
+        return templates.TemplateResponse(
+            request,
+            "task_detail.html",
+            {
+                "task": task,
+                "project": project,
+                "stage_runs": stage_runs,
+            },
+        )
     finally:
         conn.close()
 
@@ -117,10 +133,14 @@ def backlog_page(request: Request) -> HTMLResponse:
             pname = project_map.get(t["project_id"], "Unknown")
             by_project.setdefault(pname, []).append(t)
 
-        return templates.TemplateResponse(request, "backlog.html", {
-            "projects": projects,
-            "tasks_by_project": by_project,
-        })
+        return templates.TemplateResponse(
+            request,
+            "backlog.html",
+            {
+                "projects": projects,
+                "tasks_by_project": by_project,
+            },
+        )
     finally:
         conn.close()
 
@@ -134,10 +154,14 @@ def settings_page(request: Request) -> HTMLResponse:
     try:
         projects = [_row_to_dict(r) for r in database.list_projects(conn)]
         settings = get_settings()
-        return templates.TemplateResponse(request, "settings.html", {
-            "projects": projects,
-            "settings": settings,
-        })
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {
+                "projects": projects,
+                "settings": settings,
+            },
+        )
     finally:
         conn.close()
 
@@ -154,16 +178,25 @@ def logs_page(
     try:
         projects = [_row_to_dict(r) for r in database.list_projects(conn)]
         logs = [
-            _row_to_dict(r) for r in database.get_logs(
-                conn, level=level, task_id=task_id, project_id=project_id, limit=200,
+            _row_to_dict(r)
+            for r in database.get_logs(
+                conn,
+                level=level,
+                task_id=task_id,
+                project_id=project_id,
+                limit=200,
             )
         ]
-        return templates.TemplateResponse(request, "logs.html", {
-            "logs": logs,
-            "projects": projects,
-            "selected_level": level,
-            "selected_task_id": task_id,
-            "selected_project_id": project_id,
-        })
+        return templates.TemplateResponse(
+            request,
+            "logs.html",
+            {
+                "logs": logs,
+                "projects": projects,
+                "selected_level": level,
+                "selected_task_id": task_id,
+                "selected_project_id": project_id,
+            },
+        )
     finally:
         conn.close()
