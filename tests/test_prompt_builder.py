@@ -13,6 +13,7 @@ from forge.prompt_builder import (
     STAGE_TEMPLATES,
     build_prompt,
     build_retry_context,
+    build_review_feedback_context,
     get_git_diff,
     load_artifact,
 )
@@ -350,3 +351,117 @@ class TestBuildPromptSkills:
         prompt = build_prompt("spec", task, project, sample_stage_run, empty_artifacts)
         assert "A.md" in prompt
         assert "B.md" in prompt
+
+
+# ---------------------------------------------------------------------------
+# build_review_feedback_context
+# ---------------------------------------------------------------------------
+
+
+class TestBuildReviewFeedbackContext:
+    def test_empty_content_returns_empty(self) -> None:
+        assert build_review_feedback_context("") == ""
+
+    def test_formats_review_feedback(self) -> None:
+        result = build_review_feedback_context("- Issue 1\n- Issue 2")
+        assert result.startswith("## Review feedback")
+        assert "- Issue 1" in result
+        assert "- Issue 2" in result
+        assert "Fix all issues listed below" in result
+
+
+# ---------------------------------------------------------------------------
+# build_prompt — review feedback in implement template
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPromptReviewFeedback:
+    def test_implement_prompt_includes_review_feedback(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        """AC 5, 6, 17: Implement prompt includes review feedback section."""
+        artifacts = {
+            "spec_content": "Spec.",
+            "plan_content": "Plan.",
+            "review_feedback": "- Bug in parser\n- Missing test",
+        }
+        prompt = build_prompt(
+            "implement", sample_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "## Review feedback" in prompt
+        assert "- Bug in parser" in prompt
+        assert "- Missing test" in prompt
+
+    def test_implement_prompt_no_unfilled_review_feedback_placeholder(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """AC 6: No unfilled {review_feedback} placeholder when no feedback."""
+        prompt = build_prompt(
+            "implement", sample_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "{review_feedback}" not in prompt
+
+    def test_review_feedback_distinct_from_retry_context(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+    ) -> None:
+        """AC 6: Review feedback section is distinct from gate-failure retry context."""
+        stage_run = {"attempt": 2}
+        artifacts = {
+            "spec_content": "Spec.",
+            "plan_content": "Plan.",
+            "review_feedback": "- Review issue here",
+            "previous_gate_stderr": "lint failed",
+        }
+        prompt = build_prompt(
+            "implement", sample_task, sample_project, stage_run, artifacts
+        )
+        assert "## Review feedback" in prompt
+        assert "## Previous attempt failed" in prompt
+        assert "- Review issue here" in prompt
+        assert "lint failed" in prompt
+
+
+# ---------------------------------------------------------------------------
+# build_prompt — review template issue categorization
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPromptReviewCategorization:
+    def test_review_prompt_has_issue_categorization(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        """AC 7, 9: Review prompt instructs separating pre-existing from task-related issues."""
+        artifacts = {"spec_content": "Spec.", "git_diff": "diff"}
+        prompt = build_prompt(
+            "review", sample_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "Task-related issues" in prompt
+        assert "Pre-existing issues" in prompt
+        assert "do NOT affect your verdict" in prompt
+
+    def test_review_prompt_specifies_follow_ups_json(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        """AC 8: Review prompt instructs writing pre-existing issues to follow-ups JSON."""
+        artifacts = {"spec_content": "Spec.", "git_diff": "diff"}
+        prompt = build_prompt(
+            "review", sample_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "_forge/follow-ups/" in prompt
+        assert "title" in prompt
+        assert "description" in prompt

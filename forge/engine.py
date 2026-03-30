@@ -470,6 +470,10 @@ class PipelineEngine:
         """Create the next stage_run or mark the task done."""
         next_stage = _next_stage(current_stage)
         if next_stage is None:
+            # Process follow-ups from review before completing
+            if current_stage == "review" and project is not None:
+                self._process_follow_ups(conn, task_id, project)
+
             # Attempt auto-merge before marking done
             if project is not None:
                 task_row = database.get_task(conn, task_id)
@@ -516,31 +520,62 @@ class PipelineEngine:
         """Handle gate failure: retry or mark needs_human."""
         task_id = task["id"]
         max_retries = task.get("max_retries", self.settings.engine.default_max_retries)
-        retry_count = database.get_retry_count(conn, task_id, stage)
 
-        if retry_count >= max_retries:
-            database.update_task(conn, task_id, status="needs_human")
-            self._log(
-                "warn",
-                f"Task {task_id} stage {stage} exceeded max retries ({max_retries}) — needs human",
-                task_id=task_id,
-            )
-            if project is not None:
-                await self._maybe_auto_pause(conn, task_id, project)
+        if stage == "review":
+            # Review bounces go back to implement with shared retry budget
+            retry_count = database.get_implement_review_retry_count(conn, task_id)
+            if retry_count >= max_retries:
+                database.update_task(conn, task_id, status="needs_human")
+                self._log(
+                    "warn",
+                    f"Task {task_id} implement→review loop exceeded max retries ({max_retries}) — needs human",
+                    task_id=task_id,
+                )
+                if project is not None:
+                    await self._maybe_auto_pause(conn, task_id, project)
+            else:
+                # Bounce back to implement stage
+                implement_retry_count = database.get_retry_count(conn, task_id, "implement")
+                new_attempt = implement_retry_count + 2  # +1 for original, +1 for this retry
+                database.update_task(conn, task_id, current_stage="implement")
+                database.insert_stage_run(
+                    conn,
+                    task_id=task_id,
+                    stage="implement",
+                    attempt=new_attempt,
+                    status="queued",
+                )
+                self._log(
+                    "info",
+                    f"Task {task_id} review bounced to implement (attempt {new_attempt})",
+                    task_id=task_id,
+                )
         else:
-            new_attempt = retry_count + 1
-            database.insert_stage_run(
-                conn,
-                task_id=task_id,
-                stage=stage,
-                attempt=new_attempt + 1,
-                status="queued",
-            )
-            self._log(
-                "info",
-                f"Task {task_id} stage {stage} queued for retry (attempt {new_attempt + 1})",
-                task_id=task_id,
-            )
+            # Existing behavior for spec, plan, implement
+            retry_count = database.get_retry_count(conn, task_id, stage)
+            if retry_count >= max_retries:
+                database.update_task(conn, task_id, status="needs_human")
+                self._log(
+                    "warn",
+                    f"Task {task_id} stage {stage} exceeded max retries ({max_retries}) — needs human",
+                    task_id=task_id,
+                )
+                if project is not None:
+                    await self._maybe_auto_pause(conn, task_id, project)
+            else:
+                new_attempt = retry_count + 1
+                database.insert_stage_run(
+                    conn,
+                    task_id=task_id,
+                    stage=stage,
+                    attempt=new_attempt + 1,
+                    status="queued",
+                )
+                self._log(
+                    "info",
+                    f"Task {task_id} stage {stage} queued for retry (attempt {new_attempt + 1})",
+                    task_id=task_id,
+                )
 
     async def handle_timeout(
         self,
@@ -660,6 +695,52 @@ class PipelineEngine:
                 stage_run_id=stage_run_id,
             )
 
+    def _process_follow_ups(
+        self,
+        conn: sqlite3.Connection,
+        task_id: str,
+        project: dict,
+    ) -> None:
+        """Create backlog tasks from follow-ups JSON written by the reviewer."""
+        import json
+        import os
+
+        repo_path = project.get("repo_path", "")
+        if not repo_path:
+            return
+        path = os.path.join(repo_path, f"_forge/follow-ups/{task_id}.json")
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                entries = json.load(f)
+            if not isinstance(entries, list) or not entries:
+                os.remove(path)
+                return
+            for entry in entries:
+                title = entry.get("title", "Follow-up")
+                description = entry.get("description", "")
+                new_task_id = database.insert_task(
+                    conn,
+                    project_id=project["id"],
+                    title=title,
+                    description=description,
+                )
+                database.insert_task_link(
+                    conn,
+                    source_task_id=new_task_id,
+                    target_task_id=task_id,
+                    link_type="created_by",
+                )
+            os.remove(path)
+            self._log(
+                "info",
+                f"Created {len(entries)} follow-up task(s) from review of task {task_id}",
+                task_id=task_id,
+            )
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Failed to process follow-ups for task %s", task_id)
+
     def _load_artifacts(
         self,
         task: dict,
@@ -683,6 +764,25 @@ class PipelineEngine:
             repo = project.get("repo_path", "")
             if branch and repo:
                 artifacts["git_diff"] = get_git_diff(repo, branch, base)
+
+        # Load review feedback for implement retries after a review bounce
+        if stage == "implement":
+            bounced_reviews = database.list_stage_runs(
+                conn,
+                task_id=task["id"],
+                stage="review",
+                status="bounced",
+            )
+            if bounced_reviews:
+                import os
+
+                review_path = os.path.join(
+                    project.get("repo_path", ""),
+                    f"_forge/reviews/{task['id']}.md",
+                )
+                review_content = load_artifact(review_path)
+                if review_content:
+                    artifacts["review_feedback"] = review_content
 
         # Load previous gate stderr for retries
         if stage_run.get("attempt", 1) > 1:

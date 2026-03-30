@@ -82,7 +82,8 @@ Rules:
 Load the following skills:
 {skill_references}
 
-{retry_context}"""
+{retry_context}
+{review_feedback}"""
 
 REVIEW_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -111,7 +112,14 @@ Your verdict must be one of:
 
 A separate agent will fix the issues you identify. Your job is to find all of them, not to judge which ones matter.
 
-If you find issues that require new work, write a JSON file to _forge/follow-ups/{task_id}.json with an array of task descriptions the engine should add to the backlog.
+## Issue categorization
+
+Categorize every issue into one of two groups:
+
+1. **Task-related issues** — problems in code this task created or modified. These issues affect your verdict. List them in the "Issues found" section.
+2. **Pre-existing issues** — problems in code the task did NOT create or modify. These do NOT affect your verdict. Write them to `_forge/follow-ups/{task_id}.json` as a JSON array of objects, each with `title` and `description` fields.
+
+Only task-related issues determine your verdict. Pre-existing issues must not cause an ISSUES verdict.
 
 Load the following skills:
 {skill_references}
@@ -140,6 +148,18 @@ def load_artifact(path: str) -> str:
     except (OSError, IOError):
         logger.warning("Could not read artifact: %s", path)
         return ""
+
+
+def build_review_feedback_context(review_content: str) -> str:
+    """Format review feedback for an implement retry after a review bounce."""
+    if not review_content:
+        return ""
+    return (
+        "## Review feedback\n"
+        "A previous review found issues with your implementation. "
+        "Fix all issues listed below:\n\n"
+        f"{review_content}"
+    )
 
 
 def build_retry_context(attempt: int, previous_gate_stderr: str) -> str:
@@ -220,6 +240,9 @@ def build_prompt(
     previous_gate_stderr = artifacts.get("previous_gate_stderr", "")
     retry_context = build_retry_context(attempt, previous_gate_stderr)
 
+    review_feedback_content = artifacts.get("review_feedback", "")
+    review_feedback = build_review_feedback_context(review_feedback_content)
+
     return template.format(
         project_name=project.get("name", ""),
         task_title=task.get("title", ""),
@@ -231,4 +254,5 @@ def build_prompt(
         git_diff=artifacts.get("git_diff", ""),
         skill_references=skill_references,
         retry_context=retry_context,
+        review_feedback=review_feedback,
     )

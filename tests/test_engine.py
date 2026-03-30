@@ -1034,6 +1034,270 @@ class TestAutoPause:
         assert auto_pause_logs[0]["message"] == expected
 
 
+# ---------------------------------------------------------------------------
+# Engine: review bounce to implement
+# ---------------------------------------------------------------------------
+
+
+class TestReviewBounceToImplement:
+    """Tests for the review→implement bounce behavior (AC 1, 2, 3, 4, 13, 14, 15, 16, 18, 20, 21)."""
+
+    @pytest.mark.asyncio
+    async def test_review_bounce_creates_implement_stage_run(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 1, 2, 16: Review ISSUES verdict bounces to implement, not review."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=3
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # Original implement run passed
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="passed"
+        )
+        # Review attempt 1 bounced
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="ISSUES found",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        # Task current_stage should be implement
+        task = db.get_task(conn, task_id)
+        assert task["current_stage"] == "implement"
+
+        # New implement stage_run should be queued
+        queued_implement = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(queued_implement) == 1
+
+        # No new review stage_run should be queued
+        queued_review = db.list_stage_runs(
+            conn, task_id=task_id, stage="review", status="queued"
+        )
+        assert len(queued_review) == 0
+
+    @pytest.mark.asyncio
+    async def test_implement_attempt_increments_after_review_bounce(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 3: Implement attempt number is based on prior implement runs."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=5
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # Original implement passed (attempt 1)
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="passed"
+        )
+        # Review bounced
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="ISSUES",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(queued) == 1
+        # No bounced/error implement runs yet, so retry_count=0, new_attempt = 0+2 = 2
+        assert queued[0]["attempt"] == 2
+
+    @pytest.mark.asyncio
+    async def test_spec_plan_implement_bounces_stay_same_stage(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 4, 21: Non-review bounces stay on the same stage."""
+        engine = PipelineEngine(settings, ":memory:")
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="fail",
+            gate_name="gate.sh", duration_seconds=1.0,
+        )
+
+        for stage in ("spec", "plan", "implement"):
+            task_id = db.insert_task(
+                conn, project_id=project_id, title=f"T-{stage}", priority=1, max_retries=3
+            )
+            db.update_task(conn, task_id, status="active", current_stage=stage)
+            db.insert_stage_run(
+                conn, task_id=task_id, stage=stage, attempt=1, status="bounced"
+            )
+
+            task = dict(db.get_task(conn, task_id))
+            await engine.bounce_task(conn, task, stage, gate_result)
+
+            queued = db.list_stage_runs(
+                conn, task_id=task_id, stage=stage, status="queued"
+            )
+            assert len(queued) == 1, f"{stage} should bounce to same stage"
+
+    @pytest.mark.asyncio
+    async def test_successful_implement_after_review_bounce_advances_to_review(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 15, 18: Successful implement after review bounce advances to review with attempt=1."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        # Prior bounced review exists
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        await engine.advance_task(conn, task_id, "implement")
+
+        task = db.get_task(conn, task_id)
+        assert task["current_stage"] == "review"
+        review_runs = db.list_stage_runs(
+            conn, task_id=task_id, stage="review", status="queued"
+        )
+        assert len(review_runs) == 1
+        assert review_runs[0]["attempt"] == 1
+
+    @pytest.mark.asyncio
+    async def test_max_retries_respected_across_implement_review_loop(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 13, 14, 20: max_retries is shared across implement→review loop."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=2
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # 2 bounced runs across implement+review
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="ISSUES",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+
+# ---------------------------------------------------------------------------
+# Engine: follow-ups processing
+# ---------------------------------------------------------------------------
+
+
+class TestProcessFollowUps:
+    """Tests for follow-up task creation after review passes (AC 10, 11, 12, 19)."""
+
+    @pytest.mark.asyncio
+    async def test_follow_ups_create_backlog_tasks_with_links(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 10, 11, 12, 19: Follow-up JSON entries produce backlog tasks with created_by links."""
+        import json
+        import os
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        # Create follow-ups JSON
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [
+            {"title": "Fix logging", "description": "Add proper logging to module X"},
+            {"title": "Update docs", "description": "Docs are stale"},
+        ]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        # Two new backlog tasks should exist
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] in ("Fix logging", "Update docs")]
+        assert len(new_tasks) == 2
+
+        # Each should be linked to the source task
+        for new_task in new_tasks:
+            links = db.get_task_links(conn, new_task["id"])
+            assert len(links) == 1
+            assert links[0]["link_type"] == "created_by"
+            assert links[0]["target_task_id"] == task_id
+
+        # File should be deleted
+        assert not os.path.exists(str(follow_ups_file))
+
+    @pytest.mark.asyncio
+    async def test_no_follow_ups_file_completes_normally(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 13 (no follow-ups): Task completes normally without follow-ups file."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        # Should not raise
+        engine._process_follow_ups(conn, task_id, project)
+
+        # No new backlog tasks created
+        backlog = db.list_tasks(conn, status="backlog")
+        assert len(backlog) == 0
+
+
 class TestTaskPriority:
     def test_highest_priority_picked(
         self,
