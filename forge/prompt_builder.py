@@ -105,6 +105,12 @@ Your review must include:
 
 Your job is to find problems, not confirm success. Look for: unverified acceptance criteria, missing edge case tests, violations of project conventions or brand guidelines, dead code, and scope creep.
 
+Your verdict must be one of:
+- PASS: The implementation fully satisfies every acceptance criterion and you found zero issues.
+- ISSUES: You found one or more problems. List every issue, no matter how small. There is no "non-blocking" category — every issue is blocking. Even minor issues like naming, missing edge case tests, or inconsistent patterns must be flagged.
+
+A separate agent will fix the issues you identify. Your job is to find all of them, not to judge which ones matter.
+
 If you find issues that require new work, write a JSON file to _forge/follow-ups/{task_id}.json with an array of task descriptions the engine should add to the backlog.
 
 Load the following skills:

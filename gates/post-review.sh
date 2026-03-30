@@ -29,6 +29,15 @@ if [ "$HAS_PASS" -eq 0 ] && [ "$HAS_ISSUES" -eq 0 ]; then
     exit 1
 fi
 
+VERDICT=$(grep -i "^## verdict\|^\*\*verdict\*\*" "$REVIEW" | head -1)
+if echo "$VERDICT" | grep -qi "pass"; then
+    # Check if the review mentions issues despite passing
+    if grep -qi "issue\|problem\|concern\|improvement\|should\|could\|missing" "$REVIEW" | grep -vi "no issue\|no problem\|zero issue"; then
+        echo "Review verdict is PASS but body contains identified issues. Change verdict to ISSUES or remove the issue descriptions." >&2
+        exit 1
+    fi
+fi
+
 # If verdict is ISSUES, check for actionable items
 if [ "$HAS_ISSUES" -gt 0 ] && [ "$HAS_PASS" -eq 0 ]; then
     # Look for list items (lines starting with - or * or numbered) after ISSUES
