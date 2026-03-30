@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import sqlite3
 from datetime import datetime, timezone
 
 from forge import database
-from forge.config import STAGES, Settings
+from forge.config import STAGES, Settings, resolve_stage_timeout
 from forge.dispatcher import (
     DispatchResult,
     checkout_and_pull,
@@ -83,13 +84,12 @@ class PipelineEngine:
     async def run_loop(self) -> None:
         """Main engine loop."""
         poll_interval = self.settings.engine.poll_interval_seconds
-        timeout = self.settings.engine.stage_timeout_seconds
 
         while self.running:
             conn = database.get_connection(self.db_path)
             try:
                 # Step 1: Check for timed-out running stage_runs
-                await self._check_timeouts(conn, timeout)
+                await self._check_timeouts(conn)
 
                 # Step 1b: Activate backlog tasks up to concurrency limit
                 self._activate_backlog_tasks(conn)
@@ -231,11 +231,19 @@ class PipelineEngine:
                 )
 
                 # Step 4: Dispatch to Claude Code
+                proj_timeouts = (
+                    json.loads(project["stage_timeouts"])
+                    if project.get("stage_timeouts")
+                    else None
+                )
+                stage_timeout = resolve_stage_timeout(
+                    stage, proj_timeouts, self.settings.engine
+                )
                 result: DispatchResult = await dispatch_claude(
                     prompt=prompt,
                     repo_path=project["repo_path"],
                     branch=branch_name,
-                    timeout=timeout,
+                    timeout=stage_timeout,
                     headless_flags=self.settings.claude.headless_flags,
                 )
 
@@ -608,11 +616,12 @@ class PipelineEngine:
     async def _check_timeouts(
         self,
         conn: sqlite3.Connection,
-        timeout_seconds: int,
     ) -> None:
-        """Find and handle running stage_runs that have exceeded the timeout."""
+        """Find and handle running stage_runs that have exceeded their timeout."""
         running_runs = database.list_stage_runs(conn, status="running")
         now = datetime.now(timezone.utc)
+        # Cache project lookups to avoid repeated queries
+        project_cache: dict[str, dict | None] = {}
         for sr in running_runs:
             started_at = sr["started_at"]
             if not started_at:
@@ -621,6 +630,22 @@ class PipelineEngine:
             if start_dt.tzinfo is None:
                 start_dt = start_dt.replace(tzinfo=timezone.utc)
             elapsed = (now - start_dt).total_seconds()
+
+            # Resolve per-stage timeout
+            task_row = database.get_task(conn, sr["task_id"])
+            proj_timeouts = None
+            if task_row:
+                pid = task_row["project_id"]
+                if pid not in project_cache:
+                    proj_row = database.get_project(conn, pid)
+                    project_cache[pid] = _row_to_dict(proj_row) if proj_row else None
+                project = project_cache[pid]
+                if project and project.get("stage_timeouts"):
+                    proj_timeouts = json.loads(project["stage_timeouts"])
+
+            timeout_seconds = resolve_stage_timeout(
+                sr["stage"], proj_timeouts, self.settings.engine
+            )
             if elapsed > timeout_seconds:
                 await self.handle_timeout(conn, sr)
 

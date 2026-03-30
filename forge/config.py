@@ -46,7 +46,21 @@ class EngineSettings(BaseModel):
     poll_interval_seconds: int = 30
     max_concurrent_tasks: int = 1
     stage_timeout_seconds: int = 600
+    stage_timeouts: dict[str, int] = Field(default_factory=lambda: {"implement": 900})
     default_max_retries: int = 3
+
+
+def resolve_stage_timeout(
+    stage: str,
+    project_stage_timeouts: dict[str, int] | None,
+    engine: EngineSettings,
+) -> int:
+    """Resolve timeout for a stage: project override > per-stage config > global default."""
+    if project_stage_timeouts and stage in project_stage_timeouts:
+        return project_stage_timeouts[stage]
+    if engine.stage_timeouts and stage in engine.stage_timeouts:
+        return engine.stage_timeouts[stage]
+    return engine.stage_timeout_seconds
 
 
 class ClaudeSettings(BaseModel):

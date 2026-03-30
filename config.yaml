@@ -2,6 +2,8 @@ engine:
   poll_interval_seconds: 30
   max_concurrent_tasks: 1
   stage_timeout_seconds: 600
+  stage_timeouts:
+    implement: 900
   default_max_retries: 3
 claude:
   default_model: "opus"

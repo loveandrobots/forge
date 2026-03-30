@@ -330,7 +330,7 @@ class TestTimeoutDetection:
         )
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
-        await engine._check_timeouts(conn, timeout_seconds=600)
+        await engine._check_timeouts(conn)
 
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "error"
@@ -362,7 +362,7 @@ class TestTimeoutDetection:
         )
         db.update_stage_run(conn, sr_id, started_at=recent_time)
 
-        await engine._check_timeouts(conn, timeout_seconds=600)
+        await engine._check_timeouts(conn)
 
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "running"

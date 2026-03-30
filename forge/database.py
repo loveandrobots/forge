@@ -33,7 +33,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             skill_refs TEXT,
             created_at TEXT NOT NULL,
             config TEXT,
-            pause_after_completion INTEGER NOT NULL DEFAULT 0
+            pause_after_completion INTEGER NOT NULL DEFAULT 0,
+            stage_timeouts TEXT
         );
 
         CREATE TABLE IF NOT EXISTS tasks (
@@ -102,6 +103,11 @@ def migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    try:
+        conn.execute("ALTER TABLE projects ADD COLUMN stage_timeouts TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # Enable pause_after_completion for Forge's own project
     conn.execute("UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'")
     conn.commit()
@@ -142,12 +148,13 @@ def insert_project(
     skill_refs: list[str] | None = None,
     config: dict | None = None,
     pause_after_completion: bool = False,
+    stage_timeouts: dict[str, int] | None = None,
 ) -> str:
     """Insert a new project. Returns the project id."""
     project_id = _new_id()
     conn.execute(
-        """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config, pause_after_completion)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config, pause_after_completion, stage_timeouts)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             project_id,
             name,
@@ -158,6 +165,7 @@ def insert_project(
             _now(),
             _json_encode(config),
             int(pause_after_completion),
+            _json_encode(stage_timeouts),
         ),
     )
     conn.commit()
@@ -196,6 +204,7 @@ def update_project(
     skill_refs: list[str] | None = None,
     config: dict | None = None,
     pause_after_completion: bool | None = _SENTINEL,
+    stage_timeouts: dict[str, int] | None = _SENTINEL,
 ) -> bool:
     """Update only the provided fields. Returns True if a row was modified."""
     fields: list[str] = []
@@ -214,6 +223,9 @@ def update_project(
     if pause_after_completion is not _SENTINEL:
         fields.append("pause_after_completion = ?")
         values.append(int(pause_after_completion))
+    if stage_timeouts is not _SENTINEL:
+        fields.append("stage_timeouts = ?")
+        values.append(_json_encode(stage_timeouts))
     if not fields:
         return False
     values.append(project_id)
