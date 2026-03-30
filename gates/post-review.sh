@@ -37,6 +37,10 @@ if [ "$HAS_ISSUES" -gt 0 ] && [ "$HAS_PASS" -eq 0 ]; then
         echo "FAIL: Review with ISSUES verdict must include specific actionable items" >&2
         exit 1
     fi
+    # ISSUES verdict with actionable items — fail the gate so the engine
+    # bounces the task back to implement for fixes.
+    echo "FAIL: Review verdict is ISSUES with $ACTIONABLE_COUNT actionable item(s). Bouncing to implement." >&2
+    exit 1
 fi
 
 echo "post-review gate passed"

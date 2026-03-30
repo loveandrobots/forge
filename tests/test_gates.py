@@ -293,7 +293,7 @@ class TestPostReview:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_passes_with_issues_verdict_and_actionable_items(
+    def test_fails_with_issues_verdict_and_actionable_items(
         self, tmp_path: object
     ) -> None:
         repo = str(tmp_path)
@@ -309,8 +309,9 @@ class TestPostReview:
             """,
         )
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 0
-        assert "passed" in result.stdout
+        assert result.returncode == 1
+        assert "ISSUES" in result.stderr
+        assert "actionable" in result.stderr.lower()
 
     def test_fails_when_review_missing(self, tmp_path: object) -> None:
         repo = str(tmp_path)
@@ -343,3 +344,46 @@ class TestPostReview:
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 1
         assert "actionable" in result.stderr.lower()
+
+    def test_passes_with_pass_verdict_no_issues_mentioned(
+        self, tmp_path: object
+    ) -> None:
+        """A PASS-only review with no mention of ISSUES exits 0."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            ## Verdict: PASS
+
+            Everything looks good. All acceptance criteria met.
+            Code is clean and well-tested.
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+    def test_fails_with_issues_verdict_stderr_message(
+        self, tmp_path: object
+    ) -> None:
+        """Stderr includes human-readable message with ISSUES and Bouncing."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            ## Verdict: ISSUES
+
+            - Fix error handling in widget.py line 42
+            - Add test for empty input case
+            - Missing docstring on public API
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "ISSUES" in result.stderr
+        assert "Bouncing" in result.stderr
+        assert "actionable item(s)" in result.stderr
