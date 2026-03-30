@@ -7,6 +7,10 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 
 # Testing conventions
 
+## Stage flow changes
+
+For any change to the engine's stage flow or bounce logic, tests must include an integration test that creates a task, advances it through the relevant stages, triggers the condition being changed, and verifies the resulting database state. Unit tests of helper functions are not sufficient.
+
 ## Database isolation
 
 All tests use an isolated temporary database. This is handled by the `_use_tmp_db` autouse fixture in `tests/conftest.py`. The fixture:

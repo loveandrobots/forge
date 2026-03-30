@@ -597,7 +597,7 @@ class PipelineEngine:
         """Handle gate failure: retry or mark needs_human."""
         task_id = task["id"]
         max_retries = task.get("max_retries", self.settings.engine.default_max_retries)
-
+        self._log("info", f"bounce_task called with stage={stage!r} type={type(stage).__name__}")
         if stage == "review":
             # Review bounces go back to implement with shared retry budget
             retry_count = database.get_implement_review_retry_count(conn, task_id)

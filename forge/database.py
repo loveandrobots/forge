@@ -523,15 +523,14 @@ def get_retry_count(conn: sqlite3.Connection, task_id: str, stage: str) -> int:
     return cur.fetchone()[0]
 
 
-def get_implement_review_retry_count(conn: sqlite3.Connection, task_id: str) -> int:
-    """Count stage_runs across implement+review with status in ('bounced', 'error')."""
+def get_implement_review_retry_count(conn, task_id):
     cur = conn.execute(
         """SELECT COUNT(*) FROM stage_runs
-           WHERE task_id = ? AND stage IN ('implement', 'review') AND status IN ('bounced', 'error')""",
+           WHERE task_id = ? AND stage IN ('implement', 'review') 
+           AND status = 'bounced'""",
         (task_id,),
     )
     return cur.fetchone()[0]
-
 
 # ---------------------------------------------------------------------------
 # Task links

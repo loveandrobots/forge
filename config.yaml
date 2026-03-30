@@ -4,7 +4,7 @@ engine:
   stage_timeout_seconds: 600
   stage_timeouts:
     implement: 900
-  default_max_retries: 3
+  default_max_retries: 6
 claude:
   default_model: "opus"
   headless_flags: "--output-format stream-json --verbose"
