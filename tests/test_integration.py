@@ -181,6 +181,15 @@ class TestFullPipelineFlow:
             patch(
                 "forge.engine.rebase_branch", new_callable=AsyncMock, return_value=True
             ),
+            patch(
+                "forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=True
+            ),
+            patch(
+                "forge.engine.ff_merge", new_callable=AsyncMock, return_value=True
+            ),
+            patch(
+                "forge.engine.delete_branch", new_callable=AsyncMock, return_value=True
+            ),
         ):
             await _run_engine_iterations(engine, max_seconds=8.0)
 

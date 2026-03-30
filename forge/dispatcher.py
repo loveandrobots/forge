@@ -255,3 +255,66 @@ async def rebase_branch(
         return False
 
     return True
+
+
+async def checkout_and_pull(repo_path: str, branch: str) -> bool:
+    """Checkout a branch and pull latest (ff-only).
+
+    Pull failure is tolerated for local-only repos with no remote.
+    Returns False on checkout failure or if repo_path is invalid.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "checkout", branch,
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            return False
+    except OSError:
+        return False
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "pull", "--ff-only",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+    except OSError:
+        pass
+    # pull may fail if no remote configured — that's OK for local-only repos
+    return True
+
+
+async def ff_merge(repo_path: str, branch: str) -> bool:
+    """Fast-forward merge branch into the currently checked-out branch."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "merge", "--ff-only", branch,
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        return proc.returncode == 0
+    except OSError:
+        return False
+
+
+async def delete_branch(repo_path: str, branch: str) -> bool:
+    """Delete a local branch."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "branch", "-d", branch,
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        return proc.returncode == 0
+    except OSError:
+        return False

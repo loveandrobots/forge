@@ -12,8 +12,11 @@ from forge import database
 from forge.config import STAGES, Settings
 from forge.dispatcher import (
     DispatchResult,
+    checkout_and_pull,
     create_branch,
+    delete_branch,
     dispatch_claude,
+    ff_merge,
     rebase_branch,
 )
 from forge.gate_runner import GateResult, build_gate_env, run_gate
@@ -359,6 +362,104 @@ class PipelineEngine:
         )
         self.running = False
 
+    async def _auto_merge(
+        self,
+        conn: sqlite3.Connection,
+        task: dict,
+        project: dict,
+    ) -> bool:
+        """Attempt to rebase and merge the feature branch into the default branch.
+
+        Returns True if merge succeeded, False if the task was set to needs_human.
+        """
+        import os
+
+        task_id = task["id"]
+        branch_name = task["branch_name"]
+        default_branch = project["default_branch"]
+        repo_path = project["repo_path"]
+        gate_dir = project["gate_dir"]
+
+        if not branch_name:
+            return True  # No branch to merge
+
+        # Step 1: Checkout default branch and pull latest
+        if not await checkout_and_pull(repo_path, default_branch):
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                f"Failed to checkout/pull {default_branch}",
+                task_id=task_id,
+            )
+            return False
+
+        # Step 2: Rebase feature branch onto default
+        if not await rebase_branch(repo_path, branch_name, default_branch):
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                f"Merge conflict rebasing {branch_name} onto {default_branch}. Resolve manually.",
+                task_id=task_id,
+            )
+            return False
+
+        # Step 3: Re-run post-implement gate
+        if not os.path.isabs(gate_dir):
+            gate_dir = os.path.join(repo_path, gate_dir)
+
+        # Find the most recent passed implement stage_run for gate env
+        stage_runs = database.list_stage_runs(conn, task_id=task_id)
+        implement_run = None
+        for sr in stage_runs:
+            if sr["stage"] == "implement" and sr["status"] == "passed":
+                implement_run = sr
+        if implement_run is None:
+            implement_run = stage_runs[-1] if stage_runs else None
+
+        project_row = database.get_project(conn, task["project_id"])
+        task_row = database.get_task(conn, task_id)
+        gate_env = build_gate_env(task_row, implement_run, project_row)
+        gate_result = await run_gate(gate_dir, "implement", gate_env)
+
+        if not gate_result.passed:
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                f"Post-merge gate failed after rebasing onto {default_branch}. Gate output: {gate_result.stderr}",
+                task_id=task_id,
+            )
+            return False
+
+        # Step 4: Checkout default branch and fast-forward merge
+        if not await checkout_and_pull(repo_path, default_branch):
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                f"Failed to checkout {default_branch} for merge",
+                task_id=task_id,
+            )
+            return False
+
+        if not await ff_merge(repo_path, branch_name):
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                f"Fast-forward merge of {branch_name} into {default_branch} failed",
+                task_id=task_id,
+            )
+            return False
+
+        # Step 5: Delete feature branch (best-effort)
+        await delete_branch(repo_path, branch_name)
+
+        # Step 6: Log success
+        self._log(
+            "info",
+            f"Merged {branch_name} into {default_branch}",
+            task_id=task_id,
+        )
+        return True
+
     async def advance_task(
         self,
         conn: sqlite3.Connection,
@@ -369,6 +470,15 @@ class PipelineEngine:
         """Create the next stage_run or mark the task done."""
         next_stage = _next_stage(current_stage)
         if next_stage is None:
+            # Attempt auto-merge before marking done
+            if project is not None:
+                task_row = database.get_task(conn, task_id)
+                if task_row and task_row["branch_name"]:
+                    merge_ok = await self._auto_merge(
+                        conn, _row_to_dict(task_row), project
+                    )
+                    if not merge_ok:
+                        return  # Task set to needs_human by _auto_merge
             # All stages complete
             database.update_task(
                 conn,
