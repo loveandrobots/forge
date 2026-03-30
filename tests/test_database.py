@@ -341,6 +341,81 @@ class TestStageRuns:
 # Task links
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Stats query functions
+# ---------------------------------------------------------------------------
+
+class TestCountTasksByExactStatus:
+    def test_counts_done(self, conn: sqlite3.Connection, project_id: str) -> None:
+        db.insert_task(conn, project_id=project_id, title="T1")
+        t2 = db.insert_task(conn, project_id=project_id, title="T2")
+        t3 = db.insert_task(conn, project_id=project_id, title="T3")
+        db.update_task(conn, t2, status="done")
+        db.update_task(conn, t3, status="done")
+        assert db.count_tasks_by_exact_status(conn, "done") == 2
+
+    def test_counts_active(self, conn: sqlite3.Connection, project_id: str) -> None:
+        t1 = db.insert_task(conn, project_id=project_id, title="T1")
+        db.update_task(conn, t1, status="active")
+        assert db.count_tasks_by_exact_status(conn, "active") == 1
+
+    def test_returns_zero_when_empty(self, conn: sqlite3.Connection) -> None:
+        assert db.count_tasks_by_exact_status(conn, "done") == 0
+
+
+class TestGetAvgDurationByStage:
+    def test_with_data(self, conn: sqlite3.Connection, task_id: str) -> None:
+        sr1 = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
+        db.update_stage_run(conn, sr1, status="passed", duration_seconds=10.0)
+        sr2 = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=2)
+        db.update_stage_run(conn, sr2, status="passed", duration_seconds=20.0)
+        sr3 = db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1)
+        db.update_stage_run(conn, sr3, status="passed", duration_seconds=30.0)
+        # Bounced run with duration should also be included (finished run)
+        sr4 = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=3)
+        db.update_stage_run(conn, sr4, status="bounced", duration_seconds=6.0)
+
+        result = db.get_avg_duration_by_stage(conn)
+        assert result["plan"] == 30.0
+        # spec: (10 + 20 + 6) / 3 = 12.0
+        assert abs(result["spec"] - 12.0) < 0.01
+
+    def test_empty(self, conn: sqlite3.Connection) -> None:
+        assert db.get_avg_duration_by_stage(conn) == {}
+
+    def test_excludes_null_duration(self, conn: sqlite3.Connection, task_id: str) -> None:
+        sr1 = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
+        db.update_stage_run(conn, sr1, status="passed", duration_seconds=10.0)
+        # Queued run with no duration
+        db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=2)
+        result = db.get_avg_duration_by_stage(conn)
+        assert result["spec"] == 10.0
+
+
+class TestGetBounceRateByStage:
+    def test_with_data(self, conn: sqlite3.Connection, task_id: str) -> None:
+        sr1 = db.insert_stage_run(conn, task_id=task_id, stage="implement", attempt=1)
+        db.update_stage_run(conn, sr1, status="passed")
+        sr2 = db.insert_stage_run(conn, task_id=task_id, stage="implement", attempt=2)
+        db.update_stage_run(conn, sr2, status="passed")
+        sr3 = db.insert_stage_run(conn, task_id=task_id, stage="implement", attempt=3)
+        db.update_stage_run(conn, sr3, status="bounced")
+        sr4 = db.insert_stage_run(conn, task_id=task_id, stage="implement", attempt=4)
+        db.update_stage_run(conn, sr4, status="error")
+        result = db.get_bounce_rate_by_stage(conn)
+        assert abs(result["implement"] - 0.25) < 0.01
+
+    def test_empty(self, conn: sqlite3.Connection) -> None:
+        assert db.get_bounce_rate_by_stage(conn) == {}
+
+    def test_no_bounces(self, conn: sqlite3.Connection, task_id: str) -> None:
+        for i in range(3):
+            sr = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=i + 1)
+            db.update_stage_run(conn, sr, status="passed")
+        result = db.get_bounce_rate_by_stage(conn)
+        assert result["spec"] == 0.0
+
+
 class TestTaskLinks:
     def test_insert_and_get(self, conn: sqlite3.Connection, project_id: str) -> None:
         t1 = db.insert_task(conn, project_id=project_id, title="A")

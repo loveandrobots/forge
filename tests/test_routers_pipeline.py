@@ -29,6 +29,10 @@ def _make_mock_engine(running: bool = False) -> MagicMock:
         "total_stage_runs": 0,
         "stage_runs_by_status": {},
         "avg_stage_duration_seconds": None,
+        "total_completed": 0,
+        "total_active": 0,
+        "avg_duration_by_stage": {},
+        "bounce_rate_by_stage": {},
     }
     return engine
 
@@ -95,6 +99,24 @@ class TestEngineStats:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_tasks"] == 0
+
+
+    def test_stats_includes_new_fields(self, client: TestClient) -> None:
+        engine = _make_mock_engine()
+        pipeline.set_engine(engine)
+        resp = client.get("/api/engine/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_completed"] == 0
+        assert data["total_active"] == 0
+        assert data["avg_duration_by_stage"] == {}
+        assert data["bounce_rate_by_stage"] == {}
+        # Backward compatibility
+        assert "total_tasks" in data
+        assert "tasks_by_status" in data
+        assert "total_stage_runs" in data
+        assert "stage_runs_by_status" in data
+        assert "avg_stage_duration_seconds" in data
 
 
 class TestStageRuns:

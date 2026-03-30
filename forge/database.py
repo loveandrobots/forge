@@ -464,6 +464,37 @@ def update_stage_run(
     return cur.rowcount > 0
 
 
+def count_tasks_by_exact_status(conn: sqlite3.Connection, status: str) -> int:
+    """Count tasks matching an exact status value."""
+    cur = conn.execute("SELECT COUNT(*) FROM tasks WHERE status = ?", (status,))
+    return cur.fetchone()[0]
+
+
+def get_avg_duration_by_stage(conn: sqlite3.Connection) -> dict[str, float]:
+    """Return average duration_seconds grouped by stage for finished runs.
+
+    Includes all runs where duration_seconds IS NOT NULL, regardless of status.
+    """
+    cur = conn.execute(
+        """SELECT stage, AVG(duration_seconds)
+           FROM stage_runs
+           WHERE duration_seconds IS NOT NULL
+           GROUP BY stage""",
+    )
+    return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def get_bounce_rate_by_stage(conn: sqlite3.Connection) -> dict[str, float]:
+    """Return bounce rate (bounced / total) grouped by stage."""
+    cur = conn.execute(
+        """SELECT stage,
+                  SUM(CASE WHEN status = 'bounced' THEN 1 ELSE 0 END) * 1.0 / COUNT(*)
+           FROM stage_runs
+           GROUP BY stage""",
+    )
+    return {row[0]: row[1] for row in cur.fetchall()}
+
+
 def get_retry_count(conn: sqlite3.Connection, task_id: str, stage: str) -> int:
     """Count stage_runs for this task+stage with status in ('bounced', 'error')."""
     cur = conn.execute(

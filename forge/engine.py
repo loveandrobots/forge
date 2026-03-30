@@ -629,12 +629,21 @@ class PipelineEngine:
 
             avg_duration = sum(durations) / len(durations) if durations else None
 
+            total_completed = database.count_tasks_by_exact_status(conn, "done")
+            total_active = database.count_tasks_by_exact_status(conn, "active")
+            avg_duration_by_stage = database.get_avg_duration_by_stage(conn)
+            bounce_rate_by_stage = database.get_bounce_rate_by_stage(conn)
+
             return {
                 "total_tasks": total_tasks,
                 "tasks_by_status": tasks_by_status,
                 "total_stage_runs": total_stage_runs,
                 "stage_runs_by_status": runs_by_status,
                 "avg_stage_duration_seconds": avg_duration,
+                "total_completed": total_completed,
+                "total_active": total_active,
+                "avg_duration_by_stage": avg_duration_by_stage,
+                "bounce_rate_by_stage": bounce_rate_by_stage,
             }
         finally:
             conn.close()
