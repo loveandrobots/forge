@@ -207,4 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # Database
-forge.db
+forge.db*
+_forge/plans
+_forge/follow-ups
+_forge/reviews
+_forge/prompts
