@@ -31,6 +31,16 @@ def _real_engine_methods(monkeypatch):
     monkeypatch.setattr(PipelineEngine, "pause", _real_pause)
 
 
+@pytest.fixture(autouse=True)
+def _mock_reset_repo_state(monkeypatch):
+    """Mock reset_repo_state so engine tests don't need real git repos."""
+
+    async def _noop_reset(repo_path: str, default_branch: str) -> dict:
+        return {"success": True, "output": "mocked reset"}
+
+    monkeypatch.setattr("forge.engine.reset_repo_state", _noop_reset)
+
+
 class _UnclosableConnection:
     """Wraps a sqlite3.Connection so that close() is a no-op.
 

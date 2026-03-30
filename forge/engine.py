@@ -53,6 +53,57 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
 
 
+async def reset_repo_state(repo_path: str, default_branch: str) -> dict:
+    """Reset a git repo to a clean state on the default branch.
+
+    Runs (in order): git rebase --abort, git merge --abort,
+    git checkout -- ., git clean -fd, git checkout {default_branch}.
+    The abort commands ignore failures (no rebase/merge may be active).
+    The remaining commands must all succeed.
+
+    Returns {"success": True/False, "output": str with combined command logs}.
+    """
+    log_lines: list[str] = []
+
+    async def _run(
+        *cmd: str, allow_failure: bool = False
+    ) -> bool:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        out = stdout.decode(errors="replace").strip()
+        err = stderr.decode(errors="replace").strip()
+        label = " ".join(cmd)
+        rc = proc.returncode
+        log_lines.append(f"$ {label} -> rc={rc}")
+        if out:
+            log_lines.append(f"  stdout: {out}")
+        if err:
+            log_lines.append(f"  stderr: {err}")
+        if rc != 0 and not allow_failure:
+            return False
+        return True
+
+    # Abort any in-progress rebase or merge (ignore failures)
+    await _run("git", "rebase", "--abort", allow_failure=True)
+    await _run("git", "merge", "--abort", allow_failure=True)
+
+    # These must succeed
+    for cmd in [
+        ("git", "checkout", "--", "."),
+        ("git", "clean", "-fd"),
+        ("git", "checkout", default_branch),
+    ]:
+        if not await _run(*cmd):
+            return {"success": False, "output": "\n".join(log_lines)}
+
+    return {"success": True, "output": "\n".join(log_lines)}
+
+
 class PipelineEngine:
     """Core async loop that drives tasks through the pipeline stages."""
 
@@ -133,6 +184,18 @@ class PipelineEngine:
                     await asyncio.sleep(poll_interval)
                     continue
                 project = _row_to_dict(project_row)
+
+                # Safety check: ensure clean working directory before dispatch
+                reset_ok = await self._reset_and_log(
+                    project["repo_path"],
+                    project["default_branch"],
+                    conn,
+                    task_id,
+                )
+                if not reset_ok:
+                    conn.close()
+                    self.current_task_id = None
+                    continue
 
                 # Ensure branch exists
                 branch_name = task.get("branch_name")
@@ -266,6 +329,12 @@ class PipelineEngine:
                         f"Dispatch error for {stage}: {result.error}",
                         task_id=task_id,
                         stage_run_id=stage_run_id,
+                    )
+                    await self._reset_and_log(
+                        project["repo_path"],
+                        project["default_branch"],
+                        conn,
+                        task_id,
                     )
                     await self._handle_error_retry(
                         conn, task, stage, stage_run_id, project=project
@@ -611,6 +680,15 @@ class PipelineEngine:
 
         task_row = database.get_task(conn, task_id)
         if task_row:
+            project_row = database.get_project(conn, task_row["project_id"])
+            if project_row:
+                project = _row_to_dict(project_row)
+                await self._reset_and_log(
+                    project["repo_path"],
+                    project["default_branch"],
+                    conn,
+                    task_id,
+                )
             await self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id)
 
     async def _check_timeouts(
@@ -912,3 +990,35 @@ class PipelineEngine:
                 conn.close()
         except Exception:
             logger.exception("Failed to write to run_log")
+
+    async def _reset_and_log(
+        self,
+        repo_path: str,
+        default_branch: str,
+        conn: sqlite3.Connection,
+        task_id: str | None = None,
+    ) -> bool:
+        """Run reset_repo_state and log the outcome.
+
+        If the reset fails, marks the task as needs_human (when task_id is given).
+        Returns True if the reset succeeded.
+        """
+        result = await reset_repo_state(repo_path, default_branch)
+        self._log(
+            "info" if result["success"] else "error",
+            f"reset_repo_state: success={result['success']}\n{result['output']}",
+            task_id=task_id,
+        )
+        if not result["success"] and task_id:
+            database.update_task(
+                conn,
+                task_id,
+                status="needs_human",
+            )
+            self._log(
+                "error",
+                f"Task {task_id} marked needs_human — repo cleanup failed",
+                task_id=task_id,
+            )
+            return False
+        return True

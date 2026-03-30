@@ -18,6 +18,16 @@ from forge.engine import PipelineEngine
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _mock_reset_repo_state(monkeypatch):
+    """Mock reset_repo_state so timeout tests don't need real git repos."""
+
+    async def _noop_reset(repo_path: str, default_branch: str) -> dict:
+        return {"success": True, "output": "mocked reset"}
+
+    monkeypatch.setattr("forge.engine.reset_repo_state", _noop_reset)
+
+
 @pytest.fixture
 def conn() -> sqlite3.Connection:
     """In-memory database with schema applied."""
