@@ -38,8 +38,8 @@
                     <span class="badge badge-info">Paused</span>
                     {% endif %}
                     <span class="priority">P{{ task.priority }}</span>
-                    {% if task.id in stage_run_info %}
-                    <span class="attempt">Attempt {{ stage_run_info[task.id].attempt }}</span>
+                    {% if task.id in stage_run_info and stage_run_info[task.id].attempt > 1 %}
+                    <span class="attempt">Attempt {{ stage_run_info[task.id].attempt }}/{{ stage_run_info[task.id].max_retries }}</span>
                     {% endif %}
                 </div>
             </a>

@@ -72,6 +72,7 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
                 runs = database.list_stage_runs(conn, task_id=t["id"])
                 if runs:
                     latest = _row_to_dict(runs[-1])
+                    latest["max_retries"] = t["max_retries"]
                     stage_run_info[t["id"]] = latest
 
         return templates.TemplateResponse(
