@@ -6,7 +6,6 @@ import os
 import subprocess
 import textwrap
 
-import pytest
 
 # Absolute path to the gates directory in the repo root.
 GATES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "gates")
