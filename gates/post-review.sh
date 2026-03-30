@@ -32,7 +32,7 @@ fi
 # If verdict is ISSUES, check for actionable items
 if [ "$HAS_ISSUES" -gt 0 ] && [ "$HAS_PASS" -eq 0 ]; then
     # Look for list items (lines starting with - or * or numbered) after ISSUES
-    ACTIONABLE_COUNT=$(grep -cE '^\s*[-*]\s+\S|^\s*[0-9]+\.\s+\S' "$REVIEW_FILE" || true)
+    ACTIONABLE_COUNT=$(grep -cE '^\s*[-*]\s+\S|^#*\s*[0-9]+\.\s+\S' "$REVIEW_FILE" || true)
     if [ "$ACTIONABLE_COUNT" -eq 0 ]; then
         echo "FAIL: Review with ISSUES verdict must include specific actionable items" >&2
         exit 1
