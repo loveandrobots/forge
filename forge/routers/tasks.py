@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 
 from forge import database
 from forge.config import DB_PATH, STAGES
-from forge.models import TaskCreate, TaskResponse, TaskUpdate
+from forge.models import CancelRequest, TaskCreate, TaskResponse, TaskUpdate
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -88,7 +88,7 @@ def update_task(task_id: str, body: TaskUpdate) -> dict:
         if "status" in updates:
             raise HTTPException(
                 status_code=400,
-                detail="Use /activate, /pause, /resume, or /retry to change task status",
+                detail="Use /activate, /pause, /resume, /retry, or /cancel to change task status",
             )
         if not updates:
             return _row_to_task(row)
@@ -155,7 +155,8 @@ def resume_task(task_id: str) -> dict:
             raise HTTPException(status_code=404, detail="Task not found")
         if row["status"] != "needs_human":
             raise HTTPException(
-                status_code=400, detail="Only needs_human tasks can be resumed"
+                status_code=400,
+                detail="Only needs_human tasks can be resumed (cancelled tasks cannot be resumed)",
             )
 
         stage = row["current_stage"]
@@ -208,7 +209,7 @@ def retry_task(task_id: str) -> dict:
         if row["status"] not in ("active", "needs_human"):
             raise HTTPException(
                 status_code=400,
-                detail="Only active or needs_human tasks can be retried",
+                detail="Only active or needs_human tasks can be retried (cancelled tasks cannot be retried)",
             )
 
         stage = row["current_stage"]
@@ -224,6 +225,51 @@ def retry_task(task_id: str) -> dict:
             status="queued",
         )
         database.update_task(conn, task_id, status="active")
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_task(updated_row)
+    finally:
+        conn.close()
+
+
+_CANCELLABLE_STATUSES = {"backlog", "active", "paused", "needs_human"}
+
+
+@router.post("/{task_id}/cancel", response_model=TaskResponse)
+def cancel_task(
+    task_id: str, body: CancelRequest | None = Body(default=None)
+) -> dict:
+    """Cancel a task that is in a cancellable state."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if row["status"] not in _CANCELLABLE_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel a task with status '{row['status']}'. "
+                "Only backlog, active, paused, or needs_human tasks can be cancelled.",
+            )
+
+        # Mark any running stage runs as errored
+        running_runs = database.list_stage_runs(
+            conn, task_id=task_id, status="running"
+        )
+        for sr in running_runs:
+            database.update_stage_run(
+                conn, sr["id"], status="error", error_message="Task cancelled"
+            )
+
+        # Update task status
+        database.update_task(conn, task_id, status="cancelled")
+
+        # Log the cancellation
+        reason = body.reason if body else None
+        message = "Task cancelled"
+        if reason:
+            message = f"Task cancelled: {reason}"
+        database.insert_log(conn, level="info", task_id=task_id, message=message)
+
         updated_row = database.get_task(conn, task_id)
         return _row_to_task(updated_row)
     finally:
