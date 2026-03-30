@@ -86,7 +86,7 @@ class PipelineEngine:
             conn = database.get_connection(self.db_path)
             try:
                 # Step 1: Check for timed-out running stage_runs
-                self._check_timeouts(conn, timeout)
+                await self._check_timeouts(conn, timeout)
 
                 # Step 1b: Activate backlog tasks up to concurrency limit
                 self._activate_backlog_tasks(conn)
@@ -154,7 +154,7 @@ class PipelineEngine:
                             error_message=f"Failed to create branch {branch_name}",
                             finished_at=_now(),
                         )
-                        self._handle_error_retry(conn, task, stage, stage_run_id)
+                        await self._handle_error_retry(conn, task, stage, stage_run_id, project=project)
                         conn.close()
                         self.current_task_id = None
                         continue
@@ -188,6 +188,7 @@ class PipelineEngine:
                             task_id=task_id,
                             stage_run_id=stage_run_id,
                         )
+                        await self._maybe_auto_pause(conn, task_id, project)
                         conn.close()
                         self.current_task_id = None
                         continue
@@ -253,7 +254,7 @@ class PipelineEngine:
                         task_id=task_id,
                         stage_run_id=stage_run_id,
                     )
-                    self._handle_error_retry(conn, task, stage, stage_run_id)
+                    await self._handle_error_retry(conn, task, stage, stage_run_id, project=project)
                     conn.close()
                     self.current_task_id = None
                     continue
@@ -304,7 +305,7 @@ class PipelineEngine:
                         task_id=task_id,
                         stage_run_id=stage_run_id,
                     )
-                    await self.advance_task(conn, task_id, stage)
+                    await self.advance_task(conn, task_id, stage, project=project)
                 else:
                     # Gate failed — bounce
                     database.update_stage_run(
@@ -318,7 +319,7 @@ class PipelineEngine:
                         task_id=task_id,
                         stage_run_id=stage_run_id,
                     )
-                    await self.bounce_task(conn, task, stage, gate_result)
+                    await self.bounce_task(conn, task, stage, gate_result, project=project)
 
             except Exception:
                 logger.exception("Unhandled error in engine loop")
@@ -332,11 +333,32 @@ class PipelineEngine:
             # Small sleep to avoid tight-looping when there's work
             await asyncio.sleep(1)
 
+    async def _maybe_auto_pause(
+        self,
+        conn: sqlite3.Connection,
+        task_id: str,
+        project: dict,
+    ) -> None:
+        """Pause the engine if the project has pause_after_completion enabled."""
+        if not project.get("pause_after_completion"):
+            return
+        task = database.get_task(conn, task_id)
+        task_title = task["title"] if task else task_id
+        project_name = project.get("name", "unknown")
+        self._log(
+            "info",
+            f"Engine auto-paused after completing task '{task_title}' for project "
+            f"'{project_name}'. Restart the service and unpause to continue.",
+            task_id=task_id,
+        )
+        self.running = False
+
     async def advance_task(
         self,
         conn: sqlite3.Connection,
         task_id: str,
         current_stage: str,
+        project: dict | None = None,
     ) -> None:
         """Create the next stage_run or mark the task done."""
         next_stage = _next_stage(current_stage)
@@ -350,6 +372,8 @@ class PipelineEngine:
                 completed_at=_now(),
             )
             self._log("info", f"Task {task_id} completed", task_id=task_id)
+            if project is not None:
+                await self._maybe_auto_pause(conn, task_id, project)
         else:
             database.update_task(conn, task_id, current_stage=next_stage)
             database.insert_stage_run(
@@ -371,6 +395,7 @@ class PipelineEngine:
         task: dict,
         stage: str,
         gate_result: GateResult,
+        project: dict | None = None,
     ) -> None:
         """Handle gate failure: retry or mark needs_human."""
         task_id = task["id"]
@@ -384,6 +409,8 @@ class PipelineEngine:
                 f"Task {task_id} stage {stage} exceeded max retries ({max_retries}) — needs human",
                 task_id=task_id,
             )
+            if project is not None:
+                await self._maybe_auto_pause(conn, task_id, project)
         else:
             new_attempt = retry_count + 1
             database.insert_stage_run(
@@ -399,7 +426,7 @@ class PipelineEngine:
                 task_id=task_id,
             )
 
-    def handle_timeout(
+    async def handle_timeout(
         self,
         conn: sqlite3.Connection,
         stage_run: sqlite3.Row,
@@ -425,9 +452,9 @@ class PipelineEngine:
 
         task_row = database.get_task(conn, task_id)
         if task_row:
-            self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id)
+            await self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id)
 
-    def _check_timeouts(
+    async def _check_timeouts(
         self,
         conn: sqlite3.Connection,
         timeout_seconds: int,
@@ -444,7 +471,7 @@ class PipelineEngine:
                 start_dt = start_dt.replace(tzinfo=timezone.utc)
             elapsed = (now - start_dt).total_seconds()
             if elapsed > timeout_seconds:
-                self.handle_timeout(conn, sr)
+                await self.handle_timeout(conn, sr)
 
     def _activate_backlog_tasks(self, conn: sqlite3.Connection) -> None:
         """Pick up backlog tasks: set status='active', current_stage to first stage, create initial stage_run."""
@@ -478,12 +505,13 @@ class PipelineEngine:
                 task_id=task_id,
             )
 
-    def _handle_error_retry(
+    async def _handle_error_retry(
         self,
         conn: sqlite3.Connection,
         task: dict,
         stage: str,
         stage_run_id: str,
+        project: dict | None = None,
     ) -> None:
         """After an error, retry or mark failed."""
         task_id = task["id"]
@@ -498,6 +526,8 @@ class PipelineEngine:
                 task_id=task_id,
                 stage_run_id=stage_run_id,
             )
+            if project is not None:
+                await self._maybe_auto_pause(conn, task_id, project)
         else:
             new_attempt = retry_count + 1
             database.insert_stage_run(

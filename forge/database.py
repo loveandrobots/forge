@@ -32,7 +32,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             gate_dir TEXT NOT NULL DEFAULT 'gates',
             skill_refs TEXT,
             created_at TEXT NOT NULL,
-            config TEXT
+            config TEXT,
+            pause_after_completion INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS tasks (
@@ -93,6 +94,20 @@ def migrate(conn: sqlite3.Connection) -> None:
         );
     """)
 
+    # Migrations for existing databases
+    try:
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN pause_after_completion INTEGER NOT NULL DEFAULT 0"
+        )
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Enable pause_after_completion for Forge's own project
+    conn.execute(
+        "UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'"
+    )
+    conn.commit()
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -128,22 +143,16 @@ def insert_project(
     gate_dir: str = "gates",
     skill_refs: list[str] | None = None,
     config: dict | None = None,
+    pause_after_completion: bool = False,
 ) -> str:
     """Insert a new project. Returns the project id."""
     project_id = _new_id()
     conn.execute(
-        """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            project_id,
-            name,
-            repo_path,
-            default_branch,
-            gate_dir,
-            _json_encode(skill_refs),
-            _now(),
-            _json_encode(config),
-        ),
+        """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config, pause_after_completion)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (project_id, name, repo_path, default_branch, gate_dir,
+         _json_encode(skill_refs), _now(), _json_encode(config),
+         int(pause_after_completion)),
     )
     conn.commit()
     return project_id
@@ -167,6 +176,9 @@ def list_projects(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return cur.fetchall()
 
 
+_SENTINEL = object()
+
+
 def update_project(
     conn: sqlite3.Connection,
     project_id: str,
@@ -177,11 +189,11 @@ def update_project(
     gate_dir: str | None = None,
     skill_refs: list[str] | None = None,
     config: dict | None = None,
+    pause_after_completion: bool | None = _SENTINEL,
 ) -> bool:
     """Update only the provided fields. Returns True if a row was modified."""
     fields: list[str] = []
     values: list = []
-    _SENTINEL = object()
     for col, val, encoder in [
         ("name", name, None),
         ("repo_path", repo_path, None),
@@ -193,6 +205,9 @@ def update_project(
         if val is not None:
             fields.append(f"{col} = ?")
             values.append(encoder(val) if encoder else val)
+    if pause_after_completion is not _SENTINEL:
+        fields.append("pause_after_completion = ?")
+        values.append(int(pause_after_completion))
     if not fields:
         return False
     values.append(project_id)

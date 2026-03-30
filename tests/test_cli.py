@@ -88,6 +88,56 @@ class TestInitProject:
         assert skills == ["python", "testing"]
 
 
+class TestUpdateProject:
+    def test_enable_pause_after_completion(self, db_path, capsys):
+        main(["migrate"])
+        main(["init-project", "--name", "Proj", "--repo-path", "/tmp/repo"])
+        main(["update-project", "--name", "Proj", "--pause-after-completion"])
+        out = capsys.readouterr().out
+        assert "updated" in out
+
+        conn = _get_conn(db_path)
+        proj = database.get_project_by_name(conn, "Proj")
+        conn.close()
+        assert proj["pause_after_completion"] == 1
+
+    def test_disable_pause_after_completion(self, db_path, capsys):
+        main(["migrate"])
+        main(["init-project", "--name", "Proj", "--repo-path", "/tmp/repo", "--pause-after-completion"])
+        main(["update-project", "--name", "Proj", "--no-pause-after-completion"])
+        capsys.readouterr()
+
+        conn = _get_conn(db_path)
+        proj = database.get_project_by_name(conn, "Proj")
+        conn.close()
+        assert proj["pause_after_completion"] == 0
+
+    def test_update_project_not_found(self, db_path, capsys):
+        main(["migrate"])
+        with pytest.raises(SystemExit, match="1"):
+            main(["update-project", "--name", "NonExistent", "--pause-after-completion"])
+        err = capsys.readouterr().err
+        assert "not found" in err
+
+
+class TestInitProjectPauseAfterCompletion:
+    def test_pause_after_completion_flag(self, db_path, capsys):
+        main(["migrate"])
+        main(["init-project", "--name", "PauseProj", "--repo-path", "/tmp/repo", "--pause-after-completion"])
+        conn = _get_conn(db_path)
+        proj = database.get_project_by_name(conn, "PauseProj")
+        conn.close()
+        assert proj["pause_after_completion"] == 1
+
+    def test_default_no_pause(self, db_path, capsys):
+        main(["migrate"])
+        main(["init-project", "--name", "NoPause", "--repo-path", "/tmp/repo"])
+        conn = _get_conn(db_path)
+        proj = database.get_project_by_name(conn, "NoPause")
+        conn.close()
+        assert proj["pause_after_completion"] == 0
+
+
 class TestAddTask:
     def test_creates_task(self, db_path, capsys):
         main(["migrate"])

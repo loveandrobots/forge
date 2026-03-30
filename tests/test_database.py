@@ -50,6 +50,85 @@ class TestMigrate:
         fk = conn.execute("PRAGMA foreign_keys").fetchone()[0]
         assert fk == 1
 
+    def test_migrate_adds_pause_after_completion_column(self) -> None:
+        """Migration adds pause_after_completion to an existing DB without the column."""
+        c = db.get_connection(":memory:")
+        # Create old schema without the column
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                repo_path TEXT NOT NULL,
+                default_branch TEXT NOT NULL DEFAULT 'main',
+                gate_dir TEXT NOT NULL DEFAULT 'gates',
+                skill_refs TEXT,
+                created_at TEXT NOT NULL,
+                config TEXT
+            );
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id),
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                priority INTEGER NOT NULL DEFAULT 0,
+                current_stage TEXT,
+                status TEXT NOT NULL DEFAULT 'backlog',
+                branch_name TEXT,
+                spec_path TEXT,
+                plan_path TEXT,
+                review_path TEXT,
+                skill_overrides TEXT,
+                max_retries INTEGER NOT NULL DEFAULT 3,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS stage_runs (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL REFERENCES tasks(id),
+                stage TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                prompt_sent TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_seconds REAL,
+                claude_output TEXT,
+                artifacts_produced TEXT,
+                gate_name TEXT,
+                gate_exit_code INTEGER,
+                gate_stdout TEXT,
+                gate_stderr TEXT,
+                tokens_used INTEGER,
+                error_message TEXT
+            );
+            CREATE TABLE IF NOT EXISTS task_links (
+                id TEXT PRIMARY KEY,
+                source_task_id TEXT NOT NULL REFERENCES tasks(id),
+                target_task_id TEXT NOT NULL REFERENCES tasks(id),
+                link_type TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS run_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                level TEXT NOT NULL,
+                message TEXT NOT NULL,
+                task_id TEXT,
+                stage_run_id TEXT,
+                metadata TEXT
+            );
+        """)
+        # Insert a project with old schema
+        c.execute(
+            "INSERT INTO projects (id, name, repo_path, created_at) VALUES ('p1', 'Old', '/tmp', '2025-01-01')"
+        )
+        c.commit()
+        # Run migrate — should add the column
+        db.migrate(c)
+        row = c.execute("SELECT pause_after_completion FROM projects WHERE id = 'p1'").fetchone()
+        assert row[0] == 0
+
 
 # ---------------------------------------------------------------------------
 # Projects
@@ -100,6 +179,29 @@ class TestProjects:
         db.insert_project(conn, name="Dup", repo_path="/a")
         with pytest.raises(sqlite3.IntegrityError):
             db.insert_project(conn, name="Dup", repo_path="/b")
+
+    def test_insert_project_default_pause_after_completion(self, conn: sqlite3.Connection) -> None:
+        pid = db.insert_project(conn, name="NoPause", repo_path="/tmp")
+        row = db.get_project(conn, pid)
+        assert row["pause_after_completion"] == 0
+
+    def test_insert_project_with_pause_after_completion(self, conn: sqlite3.Connection) -> None:
+        pid = db.insert_project(conn, name="WithPause", repo_path="/tmp", pause_after_completion=True)
+        row = db.get_project(conn, pid)
+        assert row["pause_after_completion"] == 1
+
+    def test_update_project_pause_after_completion(self, conn: sqlite3.Connection) -> None:
+        pid = db.insert_project(conn, name="Toggle", repo_path="/tmp")
+        row = db.get_project(conn, pid)
+        assert row["pause_after_completion"] == 0
+        # Enable
+        db.update_project(conn, pid, pause_after_completion=True)
+        row = db.get_project(conn, pid)
+        assert row["pause_after_completion"] == 1
+        # Disable
+        db.update_project(conn, pid, pause_after_completion=False)
+        row = db.get_project(conn, pid)
+        assert row["pause_after_completion"] == 0
 
     def test_skill_refs_and_config(self, conn: sqlite3.Connection) -> None:
         pid = db.insert_project(
