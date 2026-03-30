@@ -41,6 +41,15 @@
                     {% if task.id in stage_run_info and stage_run_info[task.id].attempt > 1 %}
                     <span class="attempt">Attempt {{ stage_run_info[task.id].attempt }}/{{ stage_run_info[task.id].max_retries }}</span>
                     {% endif %}
+                    {% if task.created_ago %}
+                    <span class="timestamp">Created {{ task.created_ago }}</span>
+                    {% endif %}
+                    {% if task.stage_duration %}
+                    <span class="timestamp">In stage for {{ task.stage_duration }}</span>
+                    {% endif %}
+                    {% if task.completed_ago %}
+                    <span class="timestamp">Completed {{ task.completed_ago }}</span>
+                    {% endif %}
                 </div>
             </a>
             {% endfor %}

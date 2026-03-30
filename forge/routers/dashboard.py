@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from forge import database
 from forge.config import DB_PATH, STAGES
 from forge.routers.pipeline import _get_engine
+from forge.utils import relative_time
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
@@ -74,6 +75,15 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
                     latest = _row_to_dict(runs[-1])
                     latest["max_retries"] = t["max_retries"]
                     stage_run_info[t["id"]] = latest
+
+        # Attach pre-formatted relative timestamps to each task dict
+        for t in task_list:
+            t["created_ago"] = relative_time(t.get("created_at"))
+            t["completed_ago"] = relative_time(t.get("completed_at"))
+            if t["id"] in stage_run_info:
+                t["stage_duration"] = relative_time(
+                    stage_run_info[t["id"]].get("started_at"), suffix=""
+                )
 
         return templates.TemplateResponse(
             request,
