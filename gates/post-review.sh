@@ -29,10 +29,12 @@ if [ "$HAS_PASS" -eq 0 ] && [ "$HAS_ISSUES" -eq 0 ]; then
     exit 1
 fi
 
-VERDICT=$(grep -i "^## verdict\|^\*\*verdict\*\*" "$REVIEW" | head -1)
+VERDICT=$(grep -i "^## verdict\|^\*\*verdict\*\*" "$REVIEW_FILE" | head -1)
 if echo "$VERDICT" | grep -qi "pass"; then
     # Check if the review mentions issues despite passing
-    if grep -qi "issue\|problem\|concern\|improvement\|should\|could\|missing" "$REVIEW" | grep -vi "no issue\|no problem\|zero issue"; then
+    ISSUE_LINES=$(grep -ci "issue\|problem\|concern\|improvement\|should\|could\|missing" "$REVIEW_FILE" || true)
+    NEGATED_LINES=$(grep -ci "no issue\|no problem\|zero issue" "$REVIEW_FILE" || true)
+    if [ "$ISSUE_LINES" -gt 0 ] && [ "$ISSUE_LINES" -gt "$NEGATED_LINES" ]; then
         echo "Review verdict is PASS but body contains identified issues. Change verdict to ISSUES or remove the issue descriptions." >&2
         exit 1
     fi
