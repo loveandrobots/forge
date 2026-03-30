@@ -12,8 +12,12 @@ import pytest
 
 from forge.dispatcher import (
     DispatchResult,
+    GitResult,
+    checkout_and_pull,
     create_branch,
+    delete_branch,
     dispatch_claude,
+    ff_merge,
     parse_stream_json,
     rebase_branch,
 )
@@ -142,7 +146,9 @@ class TestCreateBranch:
     @pytest.mark.asyncio
     async def test_create_branch_success(self, git_repo):
         result = await create_branch(git_repo, "forge/test-branch", "main")
-        assert result is True
+        assert isinstance(result, GitResult)
+        assert result.success is True
+        assert result.returncode == 0
         # Verify we're on the new branch
         proc = subprocess.run(
             ["git", "branch", "--show-current"],
@@ -155,7 +161,9 @@ class TestCreateBranch:
     @pytest.mark.asyncio
     async def test_create_branch_bad_base(self, git_repo):
         result = await create_branch(git_repo, "forge/x", "nonexistent-base")
-        assert result is False
+        assert result.success is False
+        assert result.returncode != 0
+        assert result.stderr  # should contain git error text
 
     @pytest.mark.asyncio
     async def test_create_branch_already_exists(self, git_repo):
@@ -164,7 +172,7 @@ class TestCreateBranch:
         subprocess.run(["git", "checkout", "main"], cwd=git_repo, capture_output=True)
         # Creating the same branch again should fail
         result = await create_branch(git_repo, "forge/dup", "main")
-        assert result is False
+        assert result.success is False
 
 
 class TestRebaseBranch:
@@ -184,10 +192,11 @@ class TestRebaseBranch:
         )
         # Rebase feature onto main
         result = await rebase_branch(git_repo, "forge/feature", "main")
-        assert result is True
+        assert isinstance(result, GitResult)
+        assert result.success is True
 
     @pytest.mark.asyncio
-    async def test_rebase_conflict_returns_false(self, git_repo):
+    async def test_rebase_conflict_returns_failure_with_stderr(self, git_repo):
         # Create feature branch and modify a file
         await create_branch(git_repo, "forge/conflict", "main")
         with open(os.path.join(git_repo, "README.md"), "w") as f:
@@ -208,14 +217,90 @@ class TestRebaseBranch:
             cwd=git_repo,
             capture_output=True,
         )
-        # Rebase should fail
+        # Rebase should fail with conflict info in stderr
         result = await rebase_branch(git_repo, "forge/conflict", "main")
-        assert result is False
+        assert result.success is False
+        assert result.stderr  # should contain conflict-related text
+        assert result.returncode != 0
 
     @pytest.mark.asyncio
     async def test_rebase_nonexistent_branch(self, git_repo):
         result = await rebase_branch(git_repo, "no-such-branch", "main")
-        assert result is False
+        assert result.success is False
+        assert result.stderr  # should have error text
+
+
+class TestCheckoutAndPull:
+    @pytest.mark.asyncio
+    async def test_checkout_and_pull_success(self, git_repo):
+        result = await checkout_and_pull(git_repo, "main")
+        assert isinstance(result, GitResult)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_checkout_and_pull_bad_branch(self, git_repo):
+        result = await checkout_and_pull(git_repo, "nonexistent-branch")
+        assert result.success is False
+        assert result.stderr
+
+
+class TestFfMerge:
+    @pytest.mark.asyncio
+    async def test_ff_merge_success(self, git_repo):
+        # Create a branch with a commit, then ff-merge back
+        await create_branch(git_repo, "forge/ff-test", "main")
+        with open(os.path.join(git_repo, "ff_file.txt"), "w") as f:
+            f.write("ff content")
+        subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "ff commit"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+        subprocess.run(["git", "checkout", "main"], cwd=git_repo, capture_output=True)
+        result = await ff_merge(git_repo, "forge/ff-test")
+        assert isinstance(result, GitResult)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_ff_merge_not_ff(self, git_repo):
+        # Create diverged branches
+        await create_branch(git_repo, "forge/diverge", "main")
+        with open(os.path.join(git_repo, "diverge.txt"), "w") as f:
+            f.write("branch content")
+        subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "branch commit"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+        subprocess.run(["git", "checkout", "main"], cwd=git_repo, capture_output=True)
+        with open(os.path.join(git_repo, "main_only.txt"), "w") as f:
+            f.write("main content")
+        subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "main commit"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+        result = await ff_merge(git_repo, "forge/diverge")
+        assert result.success is False
+        assert result.stderr
+
+
+class TestDeleteBranch:
+    @pytest.mark.asyncio
+    async def test_delete_branch_success(self, git_repo):
+        await create_branch(git_repo, "forge/to-delete", "main")
+        subprocess.run(["git", "checkout", "main"], cwd=git_repo, capture_output=True)
+        result = await delete_branch(git_repo, "forge/to-delete")
+        assert isinstance(result, GitResult)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_delete_branch_nonexistent(self, git_repo):
+        result = await delete_branch(git_repo, "no-such-branch")
+        assert result.success is False
 
 
 # ---------------------------------------------------------------------------

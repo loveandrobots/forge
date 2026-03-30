@@ -14,6 +14,7 @@ from forge import database
 from forge.config import STAGES, Settings, resolve_stage_timeout
 from forge.dispatcher import (
     DispatchResult,
+    GitResult,
     checkout_and_pull,
     create_branch,
     delete_branch,
@@ -103,6 +104,23 @@ async def reset_repo_state(repo_path: str, default_branch: str) -> dict:
             return {"success": False, "output": "\n".join(log_lines)}
 
     return {"success": True, "output": "\n".join(log_lines)}
+
+
+_STDERR_MAX_BYTES = 4096
+
+
+def _truncate_stderr(stderr: str) -> str:
+    """Truncate stderr to at most 4 KB."""
+    return stderr[:_STDERR_MAX_BYTES]
+
+
+def _git_metadata(result: GitResult) -> dict:
+    """Build metadata dict from a GitResult for log entries."""
+    return {
+        "git_stdout": result.stdout,
+        "git_stderr": result.stderr,
+        "git_returncode": result.returncode,
+    }
 
 
 class PipelineEngine:
@@ -202,23 +220,26 @@ class PipelineEngine:
                 branch_name = task.get("branch_name")
                 if not branch_name:
                     branch_name = _make_branch_name(task_id, task["title"])
-                    ok = await create_branch(
+                    branch_result = await create_branch(
                         project["repo_path"],
                         branch_name,
                         project["default_branch"],
                     )
-                    if not ok:
+                    if not branch_result.success:
+                        error_detail = _truncate_stderr(branch_result.stderr)
+                        error_msg = f"Failed to create branch {branch_name}:\n{error_detail}"
                         self._log(
                             "error",
-                            f"Failed to create branch {branch_name}",
+                            error_msg,
                             task_id=task_id,
                             stage_run_id=stage_run_id,
+                            metadata=_git_metadata(branch_result),
                         )
                         database.update_stage_run(
                             conn,
                             stage_run_id,
                             status="error",
-                            error_message=f"Failed to create branch {branch_name}",
+                            error_message=error_msg,
                             finished_at=_now(),
                         )
                         await self._handle_error_retry(
@@ -232,22 +253,26 @@ class PipelineEngine:
 
                 # Rebase before implement stage
                 if stage == "implement":
-                    rebase_ok = await rebase_branch(
+                    rebase_result = await rebase_branch(
                         project["repo_path"],
                         branch_name,
                         project["default_branch"],
                     )
-                    if not rebase_ok:
+                    if not rebase_result.success:
+                        error_detail = _truncate_stderr(rebase_result.stderr)
+                        error_msg = f"Rebase failed for {branch_name} — conflicts need human resolution:\n{error_detail}"
+                        git_meta = _git_metadata(rebase_result)
                         self._log(
                             "warn",
                             f"Rebase failed for {branch_name} — needs human",
                             task_id=task_id,
+                            metadata=git_meta,
                         )
                         database.update_stage_run(
                             conn,
                             stage_run_id,
                             status="error",
-                            error_message="Rebase failed — conflicts need human resolution",
+                            error_message=error_msg,
                             finished_at=_now(),
                         )
                         database.update_task(conn, task_id, status="needs_human")
@@ -256,6 +281,7 @@ class PipelineEngine:
                             f"Task {task_id} marked needs_human due to rebase conflict",
                             task_id=task_id,
                             stage_run_id=stage_run_id,
+                            metadata=git_meta,
                         )
                         await self._maybe_auto_pause(conn, task_id, project)
                         conn.close()
@@ -462,22 +488,28 @@ class PipelineEngine:
             return True  # No branch to merge
 
         # Step 1: Checkout default branch and pull latest
-        if not await checkout_and_pull(repo_path, default_branch):
+        cop_result = await checkout_and_pull(repo_path, default_branch)
+        if not cop_result.success:
+            error_detail = _truncate_stderr(cop_result.stderr)
             database.update_task(conn, task_id, status="needs_human")
             self._log(
                 "error",
-                f"Failed to checkout/pull {default_branch}",
+                f"Failed to checkout/pull {default_branch}:\n{error_detail}",
                 task_id=task_id,
+                metadata=_git_metadata(cop_result),
             )
             return False
 
         # Step 2: Rebase feature branch onto default
-        if not await rebase_branch(repo_path, branch_name, default_branch):
+        rebase_result = await rebase_branch(repo_path, branch_name, default_branch)
+        if not rebase_result.success:
+            error_detail = _truncate_stderr(rebase_result.stderr)
             database.update_task(conn, task_id, status="needs_human")
             self._log(
                 "error",
-                f"Merge conflict rebasing {branch_name} onto {default_branch}. Resolve manually.",
+                f"Merge conflict rebasing {branch_name} onto {default_branch}. Resolve manually.:\n{error_detail}",
                 task_id=task_id,
+                metadata=_git_metadata(rebase_result),
             )
             return False
 
@@ -509,21 +541,27 @@ class PipelineEngine:
             return False
 
         # Step 4: Checkout default branch and fast-forward merge
-        if not await checkout_and_pull(repo_path, default_branch):
+        cop_result2 = await checkout_and_pull(repo_path, default_branch)
+        if not cop_result2.success:
+            error_detail = _truncate_stderr(cop_result2.stderr)
             database.update_task(conn, task_id, status="needs_human")
             self._log(
                 "error",
-                f"Failed to checkout {default_branch} for merge",
+                f"Failed to checkout {default_branch} for merge:\n{error_detail}",
                 task_id=task_id,
+                metadata=_git_metadata(cop_result2),
             )
             return False
 
-        if not await ff_merge(repo_path, branch_name):
+        merge_result = await ff_merge(repo_path, branch_name)
+        if not merge_result.success:
+            error_detail = _truncate_stderr(merge_result.stderr)
             database.update_task(conn, task_id, status="needs_human")
             self._log(
                 "error",
-                f"Fast-forward merge of {branch_name} into {default_branch} failed",
+                f"Fast-forward merge of {branch_name} into {default_branch} failed:\n{error_detail}",
                 task_id=task_id,
+                metadata=_git_metadata(merge_result),
             )
             return False
 
@@ -986,6 +1024,7 @@ class PipelineEngine:
         message: str,
         task_id: str | None = None,
         stage_run_id: str | None = None,
+        metadata: dict | None = None,
     ) -> None:
         """Log to both Python logger and the run_log database table."""
         getattr(logger, level if level != "warn" else "warning")(message)
@@ -998,6 +1037,7 @@ class PipelineEngine:
                     message=message,
                     task_id=task_id,
                     stage_run_id=stage_run_id,
+                    metadata=metadata,
                 )
             finally:
                 conn.close()

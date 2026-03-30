@@ -13,6 +13,16 @@ from dataclasses import dataclass
 
 
 @dataclass
+class GitResult:
+    """Result of a git subprocess operation."""
+
+    success: bool
+    stdout: str = ""
+    stderr: str = ""
+    returncode: int = 0
+
+
+@dataclass
 class DispatchResult:
     """Result of a Claude Code dispatch."""
 
@@ -183,8 +193,8 @@ async def create_branch(
     repo_path: str,
     branch: str,
     base_branch: str,
-) -> bool:
-    """Create a feature branch from base_branch. Returns True on success."""
+) -> GitResult:
+    """Create a feature branch from base_branch. Returns GitResult."""
     # Ensure we're on the base branch first
     proc = await asyncio.create_subprocess_exec(
         "git",
@@ -194,9 +204,14 @@ async def create_branch(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    await proc.wait()
+    stdout_bytes, stderr_bytes = await proc.communicate()
     if proc.returncode != 0:
-        return False
+        return GitResult(
+            success=False,
+            stdout=stdout_bytes.decode(errors="replace"),
+            stderr=stderr_bytes.decode(errors="replace"),
+            returncode=proc.returncode or 1,
+        )
 
     # Create the new branch
     proc = await asyncio.create_subprocess_exec(
@@ -208,16 +223,21 @@ async def create_branch(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    await proc.wait()
-    return proc.returncode == 0
+    stdout_bytes, stderr_bytes = await proc.communicate()
+    return GitResult(
+        success=proc.returncode == 0,
+        stdout=stdout_bytes.decode(errors="replace"),
+        stderr=stderr_bytes.decode(errors="replace"),
+        returncode=proc.returncode or 0,
+    )
 
 
 async def rebase_branch(
     repo_path: str,
     branch: str,
     base_branch: str,
-) -> bool:
-    """Rebase feature branch on base_branch. Returns False if conflicts (needs_human)."""
+) -> GitResult:
+    """Rebase feature branch on base_branch. Returns GitResult with conflict details."""
     # Checkout the feature branch
     proc = await asyncio.create_subprocess_exec(
         "git",
@@ -227,9 +247,14 @@ async def rebase_branch(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    await proc.wait()
+    stdout_bytes, stderr_bytes = await proc.communicate()
     if proc.returncode != 0:
-        return False
+        return GitResult(
+            success=False,
+            stdout=stdout_bytes.decode(errors="replace"),
+            stderr=stderr_bytes.decode(errors="replace"),
+            returncode=proc.returncode or 1,
+        )
 
     # Rebase onto base
     proc = await asyncio.create_subprocess_exec(
@@ -240,8 +265,12 @@ async def rebase_branch(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    await proc.wait()
+    rebase_stdout, rebase_stderr = await proc.communicate()
     if proc.returncode != 0:
+        # Capture conflict stderr before abort
+        conflict_stdout = rebase_stdout.decode(errors="replace")
+        conflict_stderr = rebase_stderr.decode(errors="replace")
+
         # Abort the failed rebase
         abort_proc = await asyncio.create_subprocess_exec(
             "git",
@@ -251,17 +280,31 @@ async def rebase_branch(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await abort_proc.wait()
-        return False
+        abort_stdout, abort_stderr = await abort_proc.communicate()
+        if abort_proc.returncode != 0:
+            abort_err = abort_stderr.decode(errors="replace")
+            conflict_stderr += f"\n(abort also failed: {abort_err})"
 
-    return True
+        return GitResult(
+            success=False,
+            stdout=conflict_stdout,
+            stderr=conflict_stderr,
+            returncode=proc.returncode or 1,
+        )
+
+    return GitResult(
+        success=True,
+        stdout=rebase_stdout.decode(errors="replace"),
+        stderr=rebase_stderr.decode(errors="replace"),
+        returncode=0,
+    )
 
 
-async def checkout_and_pull(repo_path: str, branch: str) -> bool:
+async def checkout_and_pull(repo_path: str, branch: str) -> GitResult:
     """Checkout a branch and pull latest (ff-only).
 
     Pull failure is tolerated for local-only repos with no remote.
-    Returns False on checkout failure or if repo_path is invalid.
+    Returns GitResult with success=False only on checkout failure.
     """
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -270,11 +313,23 @@ async def checkout_and_pull(repo_path: str, branch: str) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        stdout_bytes, stderr_bytes = await proc.communicate()
         if proc.returncode != 0:
-            return False
-    except OSError:
-        return False
+            return GitResult(
+                success=False,
+                stdout=stdout_bytes.decode(errors="replace"),
+                stderr=stderr_bytes.decode(errors="replace"),
+                returncode=proc.returncode or 1,
+            )
+    except OSError as e:
+        return GitResult(
+            success=False,
+            stderr=str(e),
+            returncode=1,
+        )
+
+    all_stdout = stdout_bytes.decode(errors="replace")
+    all_stderr = stderr_bytes.decode(errors="replace")
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -283,14 +338,21 @@ async def checkout_and_pull(repo_path: str, branch: str) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        pull_stdout, pull_stderr = await proc.communicate()
+        all_stdout += pull_stdout.decode(errors="replace")
+        all_stderr += pull_stderr.decode(errors="replace")
     except OSError:
         pass
     # pull may fail if no remote configured — that's OK for local-only repos
-    return True
+    return GitResult(
+        success=True,
+        stdout=all_stdout,
+        stderr=all_stderr,
+        returncode=0,
+    )
 
 
-async def ff_merge(repo_path: str, branch: str) -> bool:
+async def ff_merge(repo_path: str, branch: str) -> GitResult:
     """Fast-forward merge branch into the currently checked-out branch."""
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -299,13 +361,22 @@ async def ff_merge(repo_path: str, branch: str) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
-        return proc.returncode == 0
-    except OSError:
-        return False
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        return GitResult(
+            success=proc.returncode == 0,
+            stdout=stdout_bytes.decode(errors="replace"),
+            stderr=stderr_bytes.decode(errors="replace"),
+            returncode=proc.returncode or 0,
+        )
+    except OSError as e:
+        return GitResult(
+            success=False,
+            stderr=str(e),
+            returncode=1,
+        )
 
 
-async def delete_branch(repo_path: str, branch: str) -> bool:
+async def delete_branch(repo_path: str, branch: str) -> GitResult:
     """Delete a local branch."""
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -314,7 +385,16 @@ async def delete_branch(repo_path: str, branch: str) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
-        return proc.returncode == 0
-    except OSError:
-        return False
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        return GitResult(
+            success=proc.returncode == 0,
+            stdout=stdout_bytes.decode(errors="replace"),
+            stderr=stderr_bytes.decode(errors="replace"),
+            returncode=proc.returncode or 0,
+        )
+    except OSError as e:
+        return GitResult(
+            success=False,
+            stderr=str(e),
+            returncode=1,
+        )

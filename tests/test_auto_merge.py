@@ -69,11 +69,11 @@ class TestCleanMerge:
         _make_feature_branch(git_repo, "feature", "feature.txt", "hello")
 
         # checkout default, rebase feature onto main, checkout default, ff merge, delete
-        assert await checkout_and_pull(git_repo, "main") is True
-        assert await rebase_branch(git_repo, "feature", "main") is True
-        assert await checkout_and_pull(git_repo, "main") is True
-        assert await ff_merge(git_repo, "feature") is True
-        assert await delete_branch(git_repo, "feature") is True
+        assert (await checkout_and_pull(git_repo, "main")).success is True
+        assert (await rebase_branch(git_repo, "feature", "main")).success is True
+        assert (await checkout_and_pull(git_repo, "main")).success is True
+        assert (await ff_merge(git_repo, "feature")).success is True
+        assert (await delete_branch(git_repo, "feature")).success is True
 
         # Feature file should be on main
         assert os.path.exists(os.path.join(git_repo, "feature.txt"))
@@ -117,7 +117,7 @@ class TestRebaseConflict:
 
         # Rebase should fail
         result = await rebase_branch(git_repo, "feature", "main")
-        assert result is False
+        assert result.success is False
 
         # Repo should be clean (rebase aborted)
         assert not os.path.exists(os.path.join(git_repo, ".git", "rebase-merge"))
@@ -205,8 +205,8 @@ class TestBranchDeletion:
         _make_feature_branch(git_repo, "to-delete", "file.txt", "data")
 
         # Merge first (can't delete checked-out branch)
-        assert await ff_merge(git_repo, "to-delete") is True
-        assert await delete_branch(git_repo, "to-delete") is True
+        assert (await ff_merge(git_repo, "to-delete")).success is True
+        assert (await delete_branch(git_repo, "to-delete")).success is True
 
         result = subprocess.run(
             ["git", "branch", "--list", "to-delete"],
@@ -304,12 +304,12 @@ class TestGitOperationFailure:
     async def test_checkout_nonexistent_dir_fails(self, tmp_path):
         bad_path = str(tmp_path / "nonexistent")
         result = await checkout_and_pull(bad_path, "main")
-        assert result is False
+        assert result.success is False
 
     @pytest.mark.asyncio
     async def test_ff_merge_nonexistent_branch(self, git_repo):
         result = await ff_merge(git_repo, "no-such-branch")
-        assert result is False
+        assert result.success is False
 
 
 # ---------------------------------------------------------------------------
@@ -360,4 +360,4 @@ class TestCheckoutAndPullNoRemote:
     async def test_local_only_repo_succeeds(self, git_repo):
         """checkout_and_pull returns True even without a remote (pull fails but is tolerated)."""
         result = await checkout_and_pull(git_repo, "main")
-        assert result is True
+        assert result.success is True

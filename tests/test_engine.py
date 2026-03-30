@@ -11,7 +11,7 @@ import pytest
 
 from forge import database as db
 from forge.config import Settings
-from forge.dispatcher import DispatchResult
+from forge.dispatcher import DispatchResult, GitResult
 from forge.engine import (
     PipelineEngine,
     _make_branch_name,
@@ -843,7 +843,7 @@ class TestActivateBacklogTasks:
             ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
             patch(
-                "forge.engine.create_branch", new_callable=AsyncMock, return_value=True
+                "forge.engine.create_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
             ),
         ):
             engine.running = True
@@ -1474,3 +1474,181 @@ class TestTaskPriority:
         picked = db.get_next_queued_task(conn)
         assert picked is not None
         assert picked["id"] == t2
+
+
+# ---------------------------------------------------------------------------
+# Engine: GitResult error context in stage_runs and run_log
+# ---------------------------------------------------------------------------
+
+
+class TestGitResultErrorContext:
+    @pytest.mark.asyncio
+    async def test_create_branch_failure_includes_stderr_in_error_message(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC #4, #9, #11: create_branch failure puts stderr into stage_runs.error_message."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="queued"
+        )
+
+        git_fail = GitResult(
+            success=False, stdout="", stderr="fatal: bad ref", returncode=128
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.create_branch",
+                new_callable=AsyncMock,
+                return_value=git_fail,
+            ),
+        ):
+            engine.running = True
+            loop_task = asyncio.create_task(engine.run_loop())
+            await asyncio.sleep(0.5)
+            engine.running = False
+            try:
+                await asyncio.wait_for(loop_task, timeout=3.0)
+            except asyncio.TimeoutError:
+                loop_task.cancel()
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert "fatal: bad ref" in sr["error_message"]
+        assert sr["error_message"].startswith("Failed to create branch")
+
+    @pytest.mark.asyncio
+    async def test_rebase_failure_includes_stderr_and_metadata(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC #4, #5, #8, #11: rebase failure includes stderr in error_message and metadata in run_log."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            branch_name="forge/test-branch",
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="queued"
+        )
+
+        rebase_fail = GitResult(
+            success=False, stdout="", stderr="CONFLICT in README.md", returncode=1
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=rebase_fail,
+            ),
+        ):
+            engine.running = True
+            loop_task = asyncio.create_task(engine.run_loop())
+            await asyncio.sleep(0.5)
+            engine.running = False
+            try:
+                await asyncio.wait_for(loop_task, timeout=3.0)
+            except asyncio.TimeoutError:
+                loop_task.cancel()
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert "CONFLICT in README.md" in sr["error_message"]
+        assert sr["error_message"].startswith("Rebase failed")
+
+        # Check run_log has metadata with git details
+        import json
+
+        logs = db.get_logs(conn, task_id=task_id)
+        meta_logs = [
+            row for row in logs if row["metadata"] is not None
+        ]
+        assert len(meta_logs) > 0
+        meta = json.loads(meta_logs[0]["metadata"])
+        assert meta["git_stderr"] == "CONFLICT in README.md"
+        assert meta["git_returncode"] == 1
+
+    @pytest.mark.asyncio
+    async def test_log_helper_passes_metadata(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+    ) -> None:
+        """AC #6: _log passes metadata through to database.insert_log."""
+        import json
+
+        engine = PipelineEngine(settings, ":memory:")
+        safe_conn = _UnclosableConnection(conn)
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            engine._log("info", "test message", metadata={"key": "val"})
+
+        logs = db.get_logs(conn)
+        assert len(logs) >= 1
+        meta_log = [row for row in logs if row["message"] == "test message"][0]
+        meta = json.loads(meta_log["metadata"])
+        assert meta["key"] == "val"
+
+    @pytest.mark.asyncio
+    async def test_error_message_truncated_to_4kb(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC #4: stderr in error_message is truncated to at most 4 KB."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            branch_name="forge/test-branch",
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="queued"
+        )
+
+        big_stderr = "X" * 10000  # 10 KB
+        rebase_fail = GitResult(
+            success=False, stdout="", stderr=big_stderr, returncode=1
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=rebase_fail,
+            ),
+        ):
+            engine.running = True
+            loop_task = asyncio.create_task(engine.run_loop())
+            await asyncio.sleep(0.5)
+            engine.running = False
+            try:
+                await asyncio.wait_for(loop_task, timeout=3.0)
+            except asyncio.TimeoutError:
+                loop_task.cancel()
+
+        sr = db.get_stage_run(conn, sr_id)
+        # The error_message includes the description prefix + truncated stderr
+        # The stderr portion should be at most 4096 chars
+        assert len(sr["error_message"]) <= 4096 + 200  # prefix + truncated stderr
