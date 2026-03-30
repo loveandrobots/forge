@@ -17,20 +17,26 @@ def client():
 
 @pytest.fixture()
 def project_id(client: TestClient, tmp_path) -> str:
-    resp = client.post("/api/projects", json={
-        "name": "TestProject",
-        "repo_path": str(tmp_path),
-    })
+    resp = client.post(
+        "/api/projects",
+        json={
+            "name": "TestProject",
+            "repo_path": str(tmp_path),
+        },
+    )
     return resp.json()["id"]
 
 
 @pytest.fixture()
 def task_id(client: TestClient, project_id: str) -> str:
-    resp = client.post("/api/tasks", json={
-        "project_id": project_id,
-        "title": "Test task",
-        "priority": 5,
-    })
+    resp = client.post(
+        "/api/tasks",
+        json={
+            "project_id": project_id,
+            "title": "Test task",
+            "priority": 5,
+        },
+    )
     return resp.json()["id"]
 
 
@@ -40,7 +46,9 @@ class TestListTasks:
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_filter_by_project(self, client: TestClient, project_id: str, task_id: str) -> None:
+    def test_filter_by_project(
+        self, client: TestClient, project_id: str, task_id: str
+    ) -> None:
         resp = client.get(f"/api/tasks?project_id={project_id}")
         assert resp.status_code == 200
         assert len(resp.json()) == 1
@@ -57,12 +65,15 @@ class TestListTasks:
 
 class TestCreateTask:
     def test_success(self, client: TestClient, project_id: str) -> None:
-        resp = client.post("/api/tasks", json={
-            "project_id": project_id,
-            "title": "New task",
-            "description": "Details",
-            "priority": 3,
-        })
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "New task",
+                "description": "Details",
+                "priority": 3,
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["title"] == "New task"
@@ -70,10 +81,13 @@ class TestCreateTask:
         assert data["priority"] == 3
 
     def test_invalid_project(self, client: TestClient) -> None:
-        resp = client.post("/api/tasks", json={
-            "project_id": "nonexistent",
-            "title": "Bad task",
-        })
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": "nonexistent",
+                "title": "Bad task",
+            },
+        )
         assert resp.status_code == 404
 
 
@@ -132,7 +146,9 @@ class TestDeleteTask:
         resp = client.get(f"/api/tasks/{task_id}")
         assert resp.status_code == 404
 
-    def test_cannot_delete_non_backlog(self, client: TestClient, task_id: str, tmp_path) -> None:
+    def test_cannot_delete_non_backlog(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
         # Manually set task to active status
         db_path = tmp_path / "test.db"
         conn = database.get_connection(str(db_path))
@@ -149,11 +165,15 @@ class TestDeleteTask:
 
 
 class TestResumeTask:
-    def test_resume_needs_human(self, client: TestClient, task_id: str, tmp_path) -> None:
+    def test_resume_needs_human(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
         db_path = tmp_path / "test.db"
         conn = database.get_connection(str(db_path))
         try:
-            database.update_task(conn, task_id, status="needs_human", current_stage="plan")
+            database.update_task(
+                conn, task_id, status="needs_human", current_stage="plan"
+            )
         finally:
             conn.close()
 
@@ -189,7 +209,9 @@ class TestRetryTask:
         db_path = tmp_path / "test.db"
         conn = database.get_connection(str(db_path))
         try:
-            database.update_task(conn, task_id, status="active", current_stage="implement")
+            database.update_task(
+                conn, task_id, status="active", current_stage="implement"
+            )
         finally:
             conn.close()
 

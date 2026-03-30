@@ -27,23 +27,27 @@ from forge.dispatcher import (
 
 class TestParseStreamJson:
     def test_result_message(self):
-        data = json.dumps({
-            "type": "result",
-            "result": "Hello, world!",
-            "usage": {"input_tokens": 100, "output_tokens": 50},
-        })
+        data = json.dumps(
+            {
+                "type": "result",
+                "result": "Hello, world!",
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+            }
+        )
         text, tokens = parse_stream_json(data)
         assert text == "Hello, world!"
         assert tokens == 150
 
     def test_assistant_message(self):
-        data = json.dumps({
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "text", "text": "Some output"}],
-                "usage": {"input_tokens": 200, "output_tokens": 100},
-            },
-        })
+        data = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "Some output"}],
+                    "usage": {"input_tokens": 200, "output_tokens": 100},
+                },
+            }
+        )
         text, tokens = parse_stream_json(data)
         assert text == "Some output"
         assert tokens == 300
@@ -51,17 +55,21 @@ class TestParseStreamJson:
     def test_multi_line_stream(self):
         lines = [
             json.dumps({"type": "system", "data": "init"}),
-            json.dumps({
-                "type": "assistant",
-                "message": {
-                    "content": [{"type": "text", "text": "partial"}],
-                },
-            }),
-            json.dumps({
-                "type": "result",
-                "result": "final answer",
-                "usage": {"input_tokens": 10, "output_tokens": 5},
-            }),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "partial"}],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": "final answer",
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                }
+            ),
         ]
         text, tokens = parse_stream_json("\n".join(lines))
         assert text == "final answer"
@@ -73,10 +81,12 @@ class TestParseStreamJson:
         assert tokens is None
 
     def test_invalid_json_lines_skipped(self):
-        lines = "not json\n" + json.dumps({
-            "type": "result",
-            "result": "ok",
-        })
+        lines = "not json\n" + json.dumps(
+            {
+                "type": "result",
+                "result": "ok",
+            }
+        )
         text, tokens = parse_stream_json(lines)
         assert text == "ok"
         assert tokens is None
@@ -101,22 +111,30 @@ def git_repo(tmp_path):
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
-        cwd=repo, check=True, capture_output=True,
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test"],
-        cwd=repo, check=True, capture_output=True,
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     # Create initial commit on main
     (repo / "README.md").write_text("init")
     subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
     subprocess.run(
         ["git", "commit", "-m", "init"],
-        cwd=repo, check=True, capture_output=True,
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "branch", "-M", "main"],
-        cwd=repo, check=True, capture_output=True,
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     return str(repo)
 
@@ -129,7 +147,9 @@ class TestCreateBranch:
         # Verify we're on the new branch
         proc = subprocess.run(
             ["git", "branch", "--show-current"],
-            cwd=git_repo, capture_output=True, text=True,
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
         )
         assert proc.stdout.strip() == "forge/test-branch"
 
@@ -160,7 +180,8 @@ class TestRebaseBranch:
         subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "main change"],
-            cwd=git_repo, capture_output=True,
+            cwd=git_repo,
+            capture_output=True,
         )
         # Rebase feature onto main
         result = await rebase_branch(git_repo, "forge/feature", "main")
@@ -175,7 +196,8 @@ class TestRebaseBranch:
         subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "feature"],
-            cwd=git_repo, capture_output=True,
+            cwd=git_repo,
+            capture_output=True,
         )
         # Modify same file on main
         subprocess.run(["git", "checkout", "main"], cwd=git_repo, capture_output=True)
@@ -184,7 +206,8 @@ class TestRebaseBranch:
         subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "main conflict"],
-            cwd=git_repo, capture_output=True,
+            cwd=git_repo,
+            capture_output=True,
         )
         # Rebase should fail
         result = await rebase_branch(git_repo, "forge/conflict", "main")
@@ -205,11 +228,13 @@ class TestDispatchClaude:
     @pytest.mark.asyncio
     async def test_successful_dispatch(self, git_repo):
         """Test successful dispatch with mocked claude CLI."""
-        result_json = json.dumps({
-            "type": "result",
-            "result": "Task completed successfully",
-            "usage": {"input_tokens": 500, "output_tokens": 200},
-        })
+        result_json = json.dumps(
+            {
+                "type": "result",
+                "result": "Task completed successfully",
+                "usage": {"input_tokens": 500, "output_tokens": 200},
+            }
+        )
 
         async def mock_create_subprocess_exec(*args, **kwargs):
             mock_proc = AsyncMock()
@@ -368,7 +393,11 @@ class TestDispatchClaude:
             if cmd == "git":
                 subcmd = args[1] if len(args) > 1 else ""
                 git_calls.append(list(args))
-                if subcmd == "checkout" and len(args) > 2 and args[2] == "forge/new-branch":
+                if (
+                    subcmd == "checkout"
+                    and len(args) > 2
+                    and args[2] == "forge/new-branch"
+                ):
                     # First checkout fails (branch doesn't exist)
                     mock_proc.wait = AsyncMock(return_value=1)
                     mock_proc.returncode = 1
@@ -392,10 +421,12 @@ class TestDispatchClaude:
                     mock_proc.stderr = AsyncMock()
                     mock_proc.stderr.read = AsyncMock(return_value=b"")
             elif cmd == "claude":
-                result_json = json.dumps({
-                    "type": "result",
-                    "result": "done",
-                })
+                result_json = json.dumps(
+                    {
+                        "type": "result",
+                        "result": "done",
+                    }
+                )
                 mock_proc.communicate = AsyncMock(
                     return_value=(result_json.encode(), b"")
                 )

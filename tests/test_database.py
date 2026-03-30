@@ -31,6 +31,7 @@ def task_id(conn: sqlite3.Connection, project_id: str) -> str:
 # Schema / migrate
 # ---------------------------------------------------------------------------
 
+
 class TestMigrate:
     def test_idempotent(self, conn: sqlite3.Connection) -> None:
         # Calling migrate a second time should not error
@@ -126,13 +127,16 @@ class TestMigrate:
         c.commit()
         # Run migrate — should add the column
         db.migrate(c)
-        row = c.execute("SELECT pause_after_completion FROM projects WHERE id = 'p1'").fetchone()
+        row = c.execute(
+            "SELECT pause_after_completion FROM projects WHERE id = 'p1'"
+        ).fetchone()
         assert row[0] == 0
 
 
 # ---------------------------------------------------------------------------
 # Projects
 # ---------------------------------------------------------------------------
+
 
 class TestProjects:
     def test_insert_and_get(self, conn: sqlite3.Connection) -> None:
@@ -180,17 +184,25 @@ class TestProjects:
         with pytest.raises(sqlite3.IntegrityError):
             db.insert_project(conn, name="Dup", repo_path="/b")
 
-    def test_insert_project_default_pause_after_completion(self, conn: sqlite3.Connection) -> None:
+    def test_insert_project_default_pause_after_completion(
+        self, conn: sqlite3.Connection
+    ) -> None:
         pid = db.insert_project(conn, name="NoPause", repo_path="/tmp")
         row = db.get_project(conn, pid)
         assert row["pause_after_completion"] == 0
 
-    def test_insert_project_with_pause_after_completion(self, conn: sqlite3.Connection) -> None:
-        pid = db.insert_project(conn, name="WithPause", repo_path="/tmp", pause_after_completion=True)
+    def test_insert_project_with_pause_after_completion(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        pid = db.insert_project(
+            conn, name="WithPause", repo_path="/tmp", pause_after_completion=True
+        )
         row = db.get_project(conn, pid)
         assert row["pause_after_completion"] == 1
 
-    def test_update_project_pause_after_completion(self, conn: sqlite3.Connection) -> None:
+    def test_update_project_pause_after_completion(
+        self, conn: sqlite3.Connection
+    ) -> None:
         pid = db.insert_project(conn, name="Toggle", repo_path="/tmp")
         row = db.get_project(conn, pid)
         assert row["pause_after_completion"] == 0
@@ -205,11 +217,15 @@ class TestProjects:
 
     def test_skill_refs_and_config(self, conn: sqlite3.Connection) -> None:
         pid = db.insert_project(
-            conn, name="WithJSON", repo_path="/j",
-            skill_refs=["a", "b"], config={"key": "val"},
+            conn,
+            name="WithJSON",
+            repo_path="/j",
+            skill_refs=["a", "b"],
+            config={"key": "val"},
         )
         row = db.get_project(conn, pid)
         import json
+
         assert json.loads(row["skill_refs"]) == ["a", "b"]
         assert json.loads(row["config"]) == {"key": "val"}
 
@@ -218,9 +234,12 @@ class TestProjects:
 # Tasks
 # ---------------------------------------------------------------------------
 
+
 class TestTasks:
     def test_insert_and_get(self, conn: sqlite3.Connection, project_id: str) -> None:
-        tid = db.insert_task(conn, project_id=project_id, title="T1", description="desc", priority=3)
+        tid = db.insert_task(
+            conn, project_id=project_id, title="T1", description="desc", priority=3
+        )
         row = db.get_task(conn, tid)
         assert row is not None
         assert row["title"] == "T1"
@@ -228,14 +247,18 @@ class TestTasks:
         assert row["priority"] == 3
         assert row["current_stage"] is None
 
-    def test_list_tasks_ordered(self, conn: sqlite3.Connection, project_id: str) -> None:
+    def test_list_tasks_ordered(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
         db.insert_task(conn, project_id=project_id, title="Low", priority=1)
         db.insert_task(conn, project_id=project_id, title="High", priority=10)
         rows = db.list_tasks(conn, project_id=project_id)
         assert rows[0]["title"] == "High"
         assert rows[1]["title"] == "Low"
 
-    def test_list_tasks_filter_status(self, conn: sqlite3.Connection, project_id: str) -> None:
+    def test_list_tasks_filter_status(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
         tid = db.insert_task(conn, project_id=project_id, title="A")
         db.update_task(conn, tid, status="active")
         db.insert_task(conn, project_id=project_id, title="B")
@@ -243,7 +266,9 @@ class TestTasks:
         assert len(rows) == 1
         assert rows[0]["title"] == "B"
 
-    def test_list_tasks_filter_priority_gte(self, conn: sqlite3.Connection, project_id: str) -> None:
+    def test_list_tasks_filter_priority_gte(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
         db.insert_task(conn, project_id=project_id, title="Low", priority=1)
         db.insert_task(conn, project_id=project_id, title="High", priority=5)
         rows = db.list_tasks(conn, priority_gte=5)
@@ -262,7 +287,9 @@ class TestTasks:
         assert db.delete_task(conn, task_id) is True
         assert db.get_task(conn, task_id) is None
 
-    def test_delete_non_backlog_task(self, conn: sqlite3.Connection, task_id: str) -> None:
+    def test_delete_non_backlog_task(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
         db.update_task(conn, task_id, status="active")
         assert db.delete_task(conn, task_id) is False
         assert db.get_task(conn, task_id) is not None
@@ -271,7 +298,9 @@ class TestTasks:
         with pytest.raises(sqlite3.IntegrityError):
             db.insert_task(conn, project_id="nonexistent", title="Bad")
 
-    def test_get_next_queued_task(self, conn: sqlite3.Connection, project_id: str) -> None:
+    def test_get_next_queued_task(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
         t1 = db.insert_task(conn, project_id=project_id, title="Low", priority=1)
         t2 = db.insert_task(conn, project_id=project_id, title="High", priority=10)
         db.update_task(conn, t1, status="active")
@@ -290,6 +319,7 @@ class TestTasks:
 # Stage runs
 # ---------------------------------------------------------------------------
 
+
 class TestStageRuns:
     def test_insert_and_get(self, conn: sqlite3.Connection, task_id: str) -> None:
         sr_id = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
@@ -305,35 +335,54 @@ class TestStageRuns:
         rows = db.list_stage_runs(conn, task_id=task_id)
         assert len(rows) == 2
 
-    def test_list_stage_runs_filter(self, conn: sqlite3.Connection, task_id: str) -> None:
-        db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1, status="queued")
-        db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=2, status="passed")
+    def test_list_stage_runs_filter(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="queued"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=2, status="passed"
+        )
         rows = db.list_stage_runs(conn, task_id=task_id, status="passed")
         assert len(rows) == 1
 
     def test_update_stage_run(self, conn: sqlite3.Connection, task_id: str) -> None:
         sr_id = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
-        ok = db.update_stage_run(conn, sr_id, status="running", started_at="2025-01-01T00:00:00Z")
+        ok = db.update_stage_run(
+            conn, sr_id, status="running", started_at="2025-01-01T00:00:00Z"
+        )
         assert ok is True
         row = db.get_stage_run(conn, sr_id)
         assert row["status"] == "running"
         assert row["started_at"] == "2025-01-01T00:00:00Z"
 
-    def test_update_stage_run_no_fields(self, conn: sqlite3.Connection, task_id: str) -> None:
+    def test_update_stage_run_no_fields(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
         sr_id = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
         assert db.update_stage_run(conn, sr_id) is False
 
     def test_get_retry_count(self, conn: sqlite3.Connection, task_id: str) -> None:
-        db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1, status="bounced")
-        db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=2, status="error")
-        db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=3, status="passed")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="bounced"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=2, status="error"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=3, status="passed"
+        )
         assert db.get_retry_count(conn, task_id, "spec") == 2
 
-    def test_update_with_artifacts(self, conn: sqlite3.Connection, task_id: str) -> None:
+    def test_update_with_artifacts(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
         sr_id = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
         db.update_stage_run(conn, sr_id, artifacts_produced=["spec.md", "notes.md"])
         row = db.get_stage_run(conn, sr_id)
         import json
+
         assert json.loads(row["artifacts_produced"]) == ["spec.md", "notes.md"]
 
 
@@ -344,6 +393,7 @@ class TestStageRuns:
 # ---------------------------------------------------------------------------
 # Stats query functions
 # ---------------------------------------------------------------------------
+
 
 class TestCountTasksByExactStatus:
     def test_counts_done(self, conn: sqlite3.Connection, project_id: str) -> None:
@@ -383,7 +433,9 @@ class TestGetAvgDurationByStage:
     def test_empty(self, conn: sqlite3.Connection) -> None:
         assert db.get_avg_duration_by_stage(conn) == {}
 
-    def test_excludes_null_duration(self, conn: sqlite3.Connection, task_id: str) -> None:
+    def test_excludes_null_duration(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
         sr1 = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
         db.update_stage_run(conn, sr1, status="passed", duration_seconds=10.0)
         # Queued run with no duration
@@ -420,16 +472,22 @@ class TestTaskLinks:
     def test_insert_and_get(self, conn: sqlite3.Connection, project_id: str) -> None:
         t1 = db.insert_task(conn, project_id=project_id, title="A")
         t2 = db.insert_task(conn, project_id=project_id, title="B")
-        link_id = db.insert_task_link(conn, source_task_id=t1, target_task_id=t2, link_type="blocks")
+        link_id = db.insert_task_link(
+            conn, source_task_id=t1, target_task_id=t2, link_type="blocks"
+        )
         links = db.get_task_links(conn, t1)
         assert len(links) == 1
         assert links[0]["id"] == link_id
         assert links[0]["link_type"] == "blocks"
 
-    def test_get_links_as_target(self, conn: sqlite3.Connection, project_id: str) -> None:
+    def test_get_links_as_target(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
         t1 = db.insert_task(conn, project_id=project_id, title="A")
         t2 = db.insert_task(conn, project_id=project_id, title="B")
-        db.insert_task_link(conn, source_task_id=t1, target_task_id=t2, link_type="blocks")
+        db.insert_task_link(
+            conn, source_task_id=t1, target_task_id=t2, link_type="blocks"
+        )
         links = db.get_task_links(conn, t2)
         assert len(links) == 1
 
@@ -437,12 +495,15 @@ class TestTaskLinks:
         t1 = db.insert_task(conn, project_id=project_id, title="A")
         t2 = db.insert_task(conn, project_id=project_id, title="B")
         with pytest.raises(ValueError, match="Invalid link_type"):
-            db.insert_task_link(conn, source_task_id=t1, target_task_id=t2, link_type="invalid")
+            db.insert_task_link(
+                conn, source_task_id=t1, target_task_id=t2, link_type="invalid"
+            )
 
 
 # ---------------------------------------------------------------------------
 # Run log
 # ---------------------------------------------------------------------------
+
 
 class TestRunLog:
     def test_insert_and_get(self, conn: sqlite3.Connection) -> None:
@@ -470,7 +531,9 @@ class TestRunLog:
         assert len(rows) == 1
         assert rows[0]["message"] == "with task"
 
-    def test_filter_by_project_id(self, conn: sqlite3.Connection, project_id: str, task_id: str) -> None:
+    def test_filter_by_project_id(
+        self, conn: sqlite3.Connection, project_id: str, task_id: str
+    ) -> None:
         db.insert_log(conn, level="info", message="proj log", task_id=task_id)
         db.insert_log(conn, level="info", message="no proj")
         rows = db.get_logs(conn, project_id=project_id)
@@ -489,6 +552,7 @@ class TestRunLog:
         db.insert_log(conn, level="info", message="meta", metadata={"key": "val"})
         rows = db.get_logs(conn)
         import json
+
         assert json.loads(rows[0]["metadata"]) == {"key": "val"}
 
     def test_order_desc(self, conn: sqlite3.Connection) -> None:

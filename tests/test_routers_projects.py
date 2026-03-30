@@ -56,10 +56,13 @@ class TestCreateProject:
         assert resp.status_code == 409
 
     def test_invalid_repo_path(self, client: TestClient) -> None:
-        resp = client.post("/api/projects", json={
-            "name": "Bad",
-            "repo_path": "/nonexistent/path/xyz",
-        })
+        resp = client.post(
+            "/api/projects",
+            json={
+                "name": "Bad",
+                "repo_path": "/nonexistent/path/xyz",
+            },
+        )
         assert resp.status_code == 400
 
 

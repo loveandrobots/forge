@@ -100,7 +100,6 @@ class TestEngineStats:
         data = resp.json()
         assert data["total_tasks"] == 0
 
-
     def test_stats_includes_new_fields(self, client: TestClient) -> None:
         engine = _make_mock_engine()
         pipeline.set_engine(engine)
@@ -149,7 +148,9 @@ class TestStageRuns:
         try:
             pid = database.insert_project(conn, name="P", repo_path=str(tmp_path))
             tid = database.insert_task(conn, project_id=pid, title="T")
-            sr_id = database.insert_stage_run(conn, task_id=tid, stage="spec", attempt=1)
+            sr_id = database.insert_stage_run(
+                conn, task_id=tid, stage="spec", attempt=1
+            )
         finally:
             conn.close()
 

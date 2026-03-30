@@ -24,19 +24,36 @@ def main(argv: list[str] | None = None) -> None:
     init_p.add_argument("--name", required=True, help="Project name (unique)")
     init_p.add_argument("--repo-path", required=True, help="Path to project repository")
     init_p.add_argument("--default-branch", default="main", help="Default git branch")
-    init_p.add_argument("--gate-dir", default="gates", help="Directory containing gate scripts")
-    init_p.add_argument("--skills", default=None, help="Comma-separated skill references")
-    init_p.add_argument("--pause-after-completion", action="store_true", default=False,
-                        help="Pause the engine after completing tasks for this project")
+    init_p.add_argument(
+        "--gate-dir", default="gates", help="Directory containing gate scripts"
+    )
+    init_p.add_argument(
+        "--skills", default=None, help="Comma-separated skill references"
+    )
+    init_p.add_argument(
+        "--pause-after-completion",
+        action="store_true",
+        default=False,
+        help="Pause the engine after completing tasks for this project",
+    )
 
     # update-project
     update_p = sub.add_parser("update-project", help="Update an existing project")
     update_p.add_argument("--name", required=True, help="Project name to update")
     pause_group = update_p.add_mutually_exclusive_group()
-    pause_group.add_argument("--pause-after-completion", action="store_true", dest="pause_after_completion", default=None,
-                             help="Enable auto-pause after task completion")
-    pause_group.add_argument("--no-pause-after-completion", action="store_false", dest="pause_after_completion",
-                             help="Disable auto-pause after task completion")
+    pause_group.add_argument(
+        "--pause-after-completion",
+        action="store_true",
+        dest="pause_after_completion",
+        default=None,
+        help="Enable auto-pause after task completion",
+    )
+    pause_group.add_argument(
+        "--no-pause-after-completion",
+        action="store_false",
+        dest="pause_after_completion",
+        help="Disable auto-pause after task completion",
+    )
 
     # list-projects
     sub.add_parser("list-projects", help="List registered projects")

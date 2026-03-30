@@ -23,6 +23,7 @@ from forge.models import (
 # Projects
 # ---------------------------------------------------------------------------
 
+
 class TestProjectCreate:
     def test_minimal(self) -> None:
         p = ProjectCreate(name="Forge", repo_path="/home/user/forge")
@@ -81,6 +82,7 @@ class TestProjectResponse:
 # Tasks
 # ---------------------------------------------------------------------------
 
+
 class TestTaskCreate:
     def test_minimal(self) -> None:
         t = TaskCreate(project_id="p1", title="Do thing")
@@ -126,10 +128,15 @@ class TestTaskResponse:
 # Stage runs
 # ---------------------------------------------------------------------------
 
+
 class TestStageRunResponse:
     def test_minimal(self) -> None:
         sr = StageRunResponse(
-            id="sr1", task_id="t1", stage="spec", attempt=1, status="queued",
+            id="sr1",
+            task_id="t1",
+            stage="spec",
+            attempt=1,
+            status="queued",
         )
         assert sr.prompt_sent is None
         assert sr.gate_exit_code is None
@@ -157,11 +164,15 @@ class TestStageRunResponse:
 # Run log
 # ---------------------------------------------------------------------------
 
+
 class TestRunLogEntry:
     def test_valid(self) -> None:
         now = datetime.now()
         entry = RunLogEntry(
-            id=1, timestamp=now, level="info", message="Engine started",
+            id=1,
+            timestamp=now,
+            level="info",
+            message="Engine started",
         )
         assert entry.task_id is None
         assert entry.metadata is None
@@ -182,6 +193,7 @@ class TestRunLogEntry:
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
+
 
 class TestEngineStatus:
     def test_defaults(self) -> None:

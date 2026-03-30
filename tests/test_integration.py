@@ -43,21 +43,32 @@ class _UnclosableConnection:
 
 def _passing_gate(stage: str) -> GateResult:
     return GateResult(
-        passed=True, exit_code=0, stdout="ok", stderr="",
-        gate_name=f"post-{stage}.sh", duration_seconds=0.5,
+        passed=True,
+        exit_code=0,
+        stdout="ok",
+        stderr="",
+        gate_name=f"post-{stage}.sh",
+        duration_seconds=0.5,
     )
 
 
 def _failing_gate(stage: str, reason: str = "gate check failed") -> GateResult:
     return GateResult(
-        passed=False, exit_code=1, stdout="", stderr=reason,
-        gate_name=f"post-{stage}.sh", duration_seconds=0.5,
+        passed=False,
+        exit_code=1,
+        stdout="",
+        stderr=reason,
+        gate_name=f"post-{stage}.sh",
+        duration_seconds=0.5,
     )
 
 
 def _dispatch_ok(output: str = "canned output") -> DispatchResult:
     return DispatchResult(
-        output=output, exit_code=0, duration_seconds=3.0, tokens_used=100,
+        output=output,
+        exit_code=0,
+        duration_seconds=3.0,
+        tokens_used=100,
     )
 
 
@@ -77,8 +88,11 @@ def settings() -> Settings:
 @pytest.fixture()
 def project_id(conn: sqlite3.Connection) -> str:
     return db.insert_project(
-        conn, name="IntegrationProject", repo_path="/tmp/repo",
-        default_branch="main", gate_dir="/tmp/repo/gates",
+        conn,
+        name="IntegrationProject",
+        repo_path="/tmp/repo",
+        default_branch="main",
+        gate_dir="/tmp/repo/gates",
     )
 
 
@@ -92,8 +106,10 @@ def client():
 # Helper to run the engine for a controlled number of iterations
 # ---------------------------------------------------------------------------
 
+
 async def _run_engine_iterations(
-    engine: PipelineEngine, max_seconds: float = 2.0,
+    engine: PipelineEngine,
+    max_seconds: float = 2.0,
 ) -> None:
     """Start the engine loop, let it run briefly, then stop."""
     engine.running = True
@@ -116,15 +132,25 @@ class TestFullPipelineFlow:
 
     @pytest.mark.asyncio
     async def test_task_completes_all_stages(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         """A task goes through spec→plan→implement→review→done."""
         task_id = db.insert_task(
-            conn, project_id=project_id, title="Full flow task", priority=5,
+            conn,
+            project_id=project_id,
+            title="Full flow task",
+            priority=5,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
         db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="queued",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="queued",
         )
         db.update_task(conn, task_id, branch_name="forge/test-full-flow")
 
@@ -149,8 +175,12 @@ class TestFullPipelineFlow:
             patch("forge.engine.dispatch_claude", side_effect=mock_dispatch),
             patch("forge.engine.run_gate", side_effect=mock_gate),
             patch("forge.engine.build_prompt", return_value="test prompt"),
-            patch("forge.engine.create_branch", new_callable=AsyncMock, return_value=True),
-            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=True),
+            patch(
+                "forge.engine.create_branch", new_callable=AsyncMock, return_value=True
+            ),
+            patch(
+                "forge.engine.rebase_branch", new_callable=AsyncMock, return_value=True
+            ),
         ):
             await _run_engine_iterations(engine, max_seconds=8.0)
 
@@ -164,20 +194,32 @@ class TestFullPipelineFlow:
 
         # Each stage should have a passed stage_run
         for stage in STAGES:
-            runs = db.list_stage_runs(conn, task_id=task_id, stage=stage, status="passed")
+            runs = db.list_stage_runs(
+                conn, task_id=task_id, stage=stage, status="passed"
+            )
             assert len(runs) == 1, f"Expected 1 passed run for {stage}, got {len(runs)}"
 
     @pytest.mark.asyncio
     async def test_stage_advancement_order(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         """Verify stages advance in the correct order."""
         task_id = db.insert_task(
-            conn, project_id=project_id, title="Order check", priority=1,
+            conn,
+            project_id=project_id,
+            title="Order check",
+            priority=1,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
         db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="queued",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="queued",
         )
         db.update_task(conn, task_id, branch_name="forge/test-order")
 
@@ -201,8 +243,12 @@ class TestFullPipelineFlow:
             patch("forge.engine.dispatch_claude", side_effect=tracking_dispatch),
             patch("forge.engine.run_gate", side_effect=mock_gate),
             patch("forge.engine.build_prompt", return_value="prompt"),
-            patch("forge.engine.create_branch", new_callable=AsyncMock, return_value=True),
-            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=True),
+            patch(
+                "forge.engine.create_branch", new_callable=AsyncMock, return_value=True
+            ),
+            patch(
+                "forge.engine.rebase_branch", new_callable=AsyncMock, return_value=True
+            ),
         ):
             await _run_engine_iterations(engine, max_seconds=8.0)
 
@@ -217,15 +263,26 @@ class TestFullPipelineFlow:
 class TestBounceFlow:
     @pytest.mark.asyncio
     async def test_gate_failure_triggers_retry(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         """When a gate fails, the task gets a new queued stage_run for retry."""
         task_id = db.insert_task(
-            conn, project_id=project_id, title="Bounce test", priority=5, max_retries=3,
+            conn,
+            project_id=project_id,
+            title="Bounce test",
+            priority=5,
+            max_retries=3,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
         db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="queued",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="queued",
         )
         db.update_task(conn, task_id, branch_name="forge/test-bounce")
 
@@ -244,21 +301,33 @@ class TestBounceFlow:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=_dispatch_ok()),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=_dispatch_ok(),
+            ),
             patch("forge.engine.run_gate", side_effect=mock_gate),
             patch("forge.engine.build_prompt", return_value="prompt"),
-            patch("forge.engine.create_branch", new_callable=AsyncMock, return_value=True),
-            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=True),
+            patch(
+                "forge.engine.create_branch", new_callable=AsyncMock, return_value=True
+            ),
+            patch(
+                "forge.engine.rebase_branch", new_callable=AsyncMock, return_value=True
+            ),
         ):
             await _run_engine_iterations(engine, max_seconds=3.0)
 
         # First spec run should be bounced
-        bounced = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="bounced")
+        bounced = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="bounced"
+        )
         assert len(bounced) == 1
         assert bounced[0]["gate_stderr"] == "spec too short"
 
         # Second spec run should have passed
-        passed = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="passed")
+        passed = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="passed"
+        )
         assert len(passed) == 1
 
         # Task should have advanced past spec
@@ -274,16 +343,26 @@ class TestBounceFlow:
 class TestNeedsHumanFlow:
     @pytest.mark.asyncio
     async def test_max_retries_marks_needs_human(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         """Exceeding max retries sets the task to needs_human."""
         task_id = db.insert_task(
-            conn, project_id=project_id, title="Max retry test",
-            priority=5, max_retries=1,
+            conn,
+            project_id=project_id,
+            title="Max retry test",
+            priority=5,
+            max_retries=1,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
         db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="queued",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="queued",
         )
         db.update_task(conn, task_id, branch_name="forge/test-needs-human")
 
@@ -307,7 +386,9 @@ class TestNeedsHumanFlow:
             patch("forge.engine.dispatch_claude", side_effect=counting_dispatch),
             patch("forge.engine.run_gate", side_effect=always_fail_gate),
             patch("forge.engine.build_prompt", return_value="prompt"),
-            patch("forge.engine.create_branch", new_callable=AsyncMock, return_value=True),
+            patch(
+                "forge.engine.create_branch", new_callable=AsyncMock, return_value=True
+            ),
         ):
             await _run_engine_iterations(engine, max_seconds=4.0)
 
@@ -368,20 +449,28 @@ class TestAPIDuringPipeline:
         assert "total_tasks" in data
         assert "total_stage_runs" in data
 
-    def test_create_project_and_task_via_api(self, client: TestClient, tmp_path) -> None:
+    def test_create_project_and_task_via_api(
+        self, client: TestClient, tmp_path
+    ) -> None:
         """Create a project and task via API, verify they appear in lists."""
-        resp = client.post("/api/projects", json={
-            "name": "APITestProject",
-            "repo_path": str(tmp_path),
-        })
+        resp = client.post(
+            "/api/projects",
+            json={
+                "name": "APITestProject",
+                "repo_path": str(tmp_path),
+            },
+        )
         assert resp.status_code == 201
         project_id = resp.json()["id"]
 
-        resp = client.post("/api/tasks", json={
-            "project_id": project_id,
-            "title": "API integration task",
-            "priority": 5,
-        })
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "API integration task",
+                "priority": 5,
+            },
+        )
         assert resp.status_code == 201
         task_id = resp.json()["id"]
         assert resp.json()["status"] == "backlog"
@@ -444,13 +533,19 @@ class TestSelfRegistration:
         monkeypatch.setattr("forge.cli.DB_PATH", db_path)
 
         repo_path = str(tmp_path)
-        cli_main([
-            "init-project",
-            "--name", "Forge",
-            "--repo-path", repo_path,
-            "--default-branch", "main",
-            "--gate-dir", "gates",
-        ])
+        cli_main(
+            [
+                "init-project",
+                "--name",
+                "Forge",
+                "--repo-path",
+                repo_path,
+                "--default-branch",
+                "main",
+                "--gate-dir",
+                "gates",
+            ]
+        )
 
         # Verify project exists in DB
         conn = db.get_connection(str(db_path))
@@ -464,7 +559,9 @@ class TestSelfRegistration:
         finally:
             conn.close()
 
-    def test_forge_appears_in_list_projects(self, tmp_path, monkeypatch, capsys) -> None:
+    def test_forge_appears_in_list_projects(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
         """After init-project, Forge appears in list-projects output."""
         from forge.cli import main as cli_main
 
@@ -472,13 +569,19 @@ class TestSelfRegistration:
         monkeypatch.setattr("forge.cli.DB_PATH", db_path)
 
         cli_main(["migrate"])
-        cli_main([
-            "init-project",
-            "--name", "Forge",
-            "--repo-path", str(tmp_path),
-            "--default-branch", "main",
-            "--gate-dir", "gates",
-        ])
+        cli_main(
+            [
+                "init-project",
+                "--name",
+                "Forge",
+                "--repo-path",
+                str(tmp_path),
+                "--default-branch",
+                "main",
+                "--gate-dir",
+                "gates",
+            ]
+        )
 
         cli_main(["list-projects"])
         captured = capsys.readouterr()
@@ -488,12 +591,15 @@ class TestSelfRegistration:
     def test_forge_appears_in_dashboard(self, client: TestClient, tmp_path) -> None:
         """After registering via API, the project appears in the dashboard."""
         # Register via API
-        resp = client.post("/api/projects", json={
-            "name": "Forge",
-            "repo_path": str(tmp_path),
-            "default_branch": "main",
-            "gate_dir": "gates",
-        })
+        resp = client.post(
+            "/api/projects",
+            json={
+                "name": "Forge",
+                "repo_path": str(tmp_path),
+                "default_branch": "main",
+                "gate_dir": "gates",
+            },
+        )
         assert resp.status_code == 201
 
         # Check API listing

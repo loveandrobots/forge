@@ -103,9 +103,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         pass  # Column already exists
 
     # Enable pause_after_completion for Forge's own project
-    conn.execute(
-        "UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'"
-    )
+    conn.execute("UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'")
     conn.commit()
 
 
@@ -150,9 +148,17 @@ def insert_project(
     conn.execute(
         """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config, pause_after_completion)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (project_id, name, repo_path, default_branch, gate_dir,
-         _json_encode(skill_refs), _now(), _json_encode(config),
-         int(pause_after_completion)),
+        (
+            project_id,
+            name,
+            repo_path,
+            default_branch,
+            gate_dir,
+            _json_encode(skill_refs),
+            _now(),
+            _json_encode(config),
+            int(pause_after_completion),
+        ),
     )
     conn.commit()
     return project_id

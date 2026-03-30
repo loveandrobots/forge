@@ -86,9 +86,13 @@ class TestGetStatusPopulation:
         conn = database.get_connection(db_path)
         database.migrate(conn)
         pid = database.insert_project(conn, name="P", repo_path="/tmp")
-        tid = database.insert_task(conn, project_id=pid, title="Fix login bug", priority=1)
+        tid = database.insert_task(
+            conn, project_id=pid, title="Fix login bug", priority=1
+        )
         database.update_task(conn, tid, status="active", current_stage="plan")
-        database.insert_stage_run(conn, task_id=tid, stage="plan", attempt=1, status="queued")
+        database.insert_stage_run(
+            conn, task_id=tid, stage="plan", attempt=1, status="queued"
+        )
         conn.close()
 
         engine = PipelineEngine(Settings(), db_path)
@@ -308,13 +312,15 @@ class TestStyling:
     def test_css_has_engine_status_rules(self) -> None:
         import pathlib
 
-        css_path = pathlib.Path(__file__).resolve().parent.parent / "static" / "styles.css"
+        css_path = (
+            pathlib.Path(__file__).resolve().parent.parent / "static" / "styles.css"
+        )
         css = css_path.read_text()
         assert ".engine-status" in css
         assert ".engine-status-dot" in css
         assert "var(--text-secondary)" in css
         # No red or green in engine status styles
-        engine_block = css[css.index(".engine-status-dot"):css.index("/* Content */")]
+        engine_block = css[css.index(".engine-status-dot") : css.index("/* Content */")]
         assert "#ff0000" not in engine_block.lower()
         assert "#00ff00" not in engine_block.lower()
         assert "red" not in engine_block.lower()

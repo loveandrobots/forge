@@ -154,7 +154,9 @@ class PipelineEngine:
                             error_message=f"Failed to create branch {branch_name}",
                             finished_at=_now(),
                         )
-                        await self._handle_error_retry(conn, task, stage, stage_run_id, project=project)
+                        await self._handle_error_retry(
+                            conn, task, stage, stage_run_id, project=project
+                        )
                         conn.close()
                         self.current_task_id = None
                         continue
@@ -254,7 +256,9 @@ class PipelineEngine:
                         task_id=task_id,
                         stage_run_id=stage_run_id,
                     )
-                    await self._handle_error_retry(conn, task, stage, stage_run_id, project=project)
+                    await self._handle_error_retry(
+                        conn, task, stage, stage_run_id, project=project
+                    )
                     conn.close()
                     self.current_task_id = None
                     continue
@@ -319,7 +323,9 @@ class PipelineEngine:
                         task_id=task_id,
                         stage_run_id=stage_run_id,
                     )
-                    await self.bounce_task(conn, task, stage, gate_result, project=project)
+                    await self.bounce_task(
+                        conn, task, stage, gate_result, project=project
+                    )
 
             except Exception:
                 logger.exception("Unhandled error in engine loop")

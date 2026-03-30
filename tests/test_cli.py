@@ -28,7 +28,9 @@ class TestMigrate:
         assert "migrated successfully" in out
 
         conn = _get_conn(db_path)
-        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        )
         tables = {row["name"] for row in cur.fetchall()}
         conn.close()
         assert "projects" in tables
@@ -60,12 +62,19 @@ class TestInitProject:
 
     def test_custom_branch_and_gate_dir(self, db_path, capsys):
         main(["migrate"])
-        main([
-            "init-project", "--name", "Custom",
-            "--repo-path", "/tmp/repo",
-            "--default-branch", "develop",
-            "--gate-dir", "ci/gates",
-        ])
+        main(
+            [
+                "init-project",
+                "--name",
+                "Custom",
+                "--repo-path",
+                "/tmp/repo",
+                "--default-branch",
+                "develop",
+                "--gate-dir",
+                "ci/gates",
+            ]
+        )
         conn = _get_conn(db_path)
         proj = database.get_project_by_name(conn, "Custom")
         conn.close()
@@ -74,16 +83,23 @@ class TestInitProject:
 
     def test_skills_flag(self, db_path, capsys):
         main(["migrate"])
-        main([
-            "init-project", "--name", "Skilled",
-            "--repo-path", "/tmp/repo",
-            "--skills", "python,testing",
-        ])
+        main(
+            [
+                "init-project",
+                "--name",
+                "Skilled",
+                "--repo-path",
+                "/tmp/repo",
+                "--skills",
+                "python,testing",
+            ]
+        )
         conn = _get_conn(db_path)
         proj = database.get_project_by_name(conn, "Skilled")
         conn.close()
         assert proj["skill_refs"] is not None
         import json
+
         skills = json.loads(proj["skill_refs"])
         assert skills == ["python", "testing"]
 
@@ -103,7 +119,16 @@ class TestUpdateProject:
 
     def test_disable_pause_after_completion(self, db_path, capsys):
         main(["migrate"])
-        main(["init-project", "--name", "Proj", "--repo-path", "/tmp/repo", "--pause-after-completion"])
+        main(
+            [
+                "init-project",
+                "--name",
+                "Proj",
+                "--repo-path",
+                "/tmp/repo",
+                "--pause-after-completion",
+            ]
+        )
         main(["update-project", "--name", "Proj", "--no-pause-after-completion"])
         capsys.readouterr()
 
@@ -115,7 +140,9 @@ class TestUpdateProject:
     def test_update_project_not_found(self, db_path, capsys):
         main(["migrate"])
         with pytest.raises(SystemExit, match="1"):
-            main(["update-project", "--name", "NonExistent", "--pause-after-completion"])
+            main(
+                ["update-project", "--name", "NonExistent", "--pause-after-completion"]
+            )
         err = capsys.readouterr().err
         assert "not found" in err
 
@@ -123,7 +150,16 @@ class TestUpdateProject:
 class TestInitProjectPauseAfterCompletion:
     def test_pause_after_completion_flag(self, db_path, capsys):
         main(["migrate"])
-        main(["init-project", "--name", "PauseProj", "--repo-path", "/tmp/repo", "--pause-after-completion"])
+        main(
+            [
+                "init-project",
+                "--name",
+                "PauseProj",
+                "--repo-path",
+                "/tmp/repo",
+                "--pause-after-completion",
+            ]
+        )
         conn = _get_conn(db_path)
         proj = database.get_project_by_name(conn, "PauseProj")
         conn.close()
@@ -142,7 +178,9 @@ class TestAddTask:
     def test_creates_task(self, db_path, capsys):
         main(["migrate"])
         main(["init-project", "--name", "Proj", "--repo-path", "/tmp/repo"])
-        main(["add-task", "--project", "Proj", "--title", "Do stuff", "--priority", "5"])
+        main(
+            ["add-task", "--project", "Proj", "--title", "Do stuff", "--priority", "5"]
+        )
         out = capsys.readouterr().out
         assert "Do stuff" in out
         assert "added" in out

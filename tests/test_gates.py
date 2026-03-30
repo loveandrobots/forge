@@ -16,6 +16,7 @@ GATES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "gates")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _run_gate(
     script_name: str,
     env_overrides: dict[str, str],
@@ -55,6 +56,7 @@ def _write_file(path: str, content: str) -> None:
 # ---------------------------------------------------------------------------
 # post-spec.sh
 # ---------------------------------------------------------------------------
+
 
 class TestPostSpec:
     SCRIPT = "post-spec.sh"
@@ -127,6 +129,7 @@ class TestPostSpec:
 # post-plan.sh
 # ---------------------------------------------------------------------------
 
+
 class TestPostPlan:
     SCRIPT = "post-plan.sh"
 
@@ -170,7 +173,9 @@ class TestPostPlan:
         assert result.returncode == 1
         assert "too short" in result.stderr
 
-    def test_fails_without_acceptance_criteria_reference(self, tmp_path: object) -> None:
+    def test_fails_without_acceptance_criteria_reference(
+        self, tmp_path: object
+    ) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/plans/test-task-42.md"),
@@ -184,7 +189,8 @@ class TestPostPlan:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/plans/test-task-42.md"),
-            "x" * 250 + "\nacceptance criteria reference\n## Files to create\n- foo.py\n",
+            "x" * 250
+            + "\nacceptance criteria reference\n## Files to create\n- foo.py\n",
         )
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "plan"}, repo)
         assert result.returncode == 1
@@ -204,6 +210,7 @@ class TestPostPlan:
 # ---------------------------------------------------------------------------
 # post-implement.sh
 # ---------------------------------------------------------------------------
+
 
 class TestPostImplement:
     SCRIPT = "post-implement.sh"
@@ -266,6 +273,7 @@ class TestPostImplement:
 # post-review.sh
 # ---------------------------------------------------------------------------
 
+
 class TestPostReview:
     SCRIPT = "post-review.sh"
 
@@ -285,7 +293,9 @@ class TestPostReview:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_passes_with_issues_verdict_and_actionable_items(self, tmp_path: object) -> None:
+    def test_passes_with_issues_verdict_and_actionable_items(
+        self, tmp_path: object
+    ) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/reviews/test-task-42.md"),

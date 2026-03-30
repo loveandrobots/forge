@@ -15,6 +15,7 @@ from forge.gate_runner import GateResult, build_gate_env, run_gate
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _write_gate_script(gate_dir: str, stage: str, body: str) -> str:
     """Write a gate script into *gate_dir* and make it executable."""
     path = os.path.join(gate_dir, f"post-{stage}.sh")
@@ -45,6 +46,7 @@ def _make_env(
 # ---------------------------------------------------------------------------
 # build_gate_env
 # ---------------------------------------------------------------------------
+
 
 class _FakeRow(dict):
     """Dict subclass that supports both key access and bracket access."""
@@ -99,15 +101,20 @@ class TestBuildGateEnv:
 # run_gate
 # ---------------------------------------------------------------------------
 
+
 class TestRunGate:
     @pytest.mark.asyncio
     async def test_passing_gate(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
-        _write_gate_script(gate_dir, "spec", """\
+        _write_gate_script(
+            gate_dir,
+            "spec",
+            """\
             #!/bin/bash
             echo "all good"
             exit 0
-        """)
+        """,
+        )
         env = _make_env(gate_dir, stage="spec")
 
         result = await run_gate(gate_dir, "spec", env)
@@ -123,12 +130,16 @@ class TestRunGate:
     @pytest.mark.asyncio
     async def test_failing_gate(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
-        _write_gate_script(gate_dir, "plan", """\
+        _write_gate_script(
+            gate_dir,
+            "plan",
+            """\
             #!/bin/bash
             echo "info output"
             echo "missing required section" >&2
             exit 1
-        """)
+        """,
+        )
         env = _make_env(gate_dir, stage="plan")
 
         result = await run_gate(gate_dir, "plan", env)
@@ -154,7 +165,10 @@ class TestRunGate:
     @pytest.mark.asyncio
     async def test_env_vars_available_in_script(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
-        _write_gate_script(gate_dir, "implement", """\
+        _write_gate_script(
+            gate_dir,
+            "implement",
+            """\
             #!/bin/bash
             echo "TASK=$FORGE_TASK_ID"
             echo "STAGE=$FORGE_STAGE"
@@ -162,7 +176,8 @@ class TestRunGate:
             echo "REPO=$FORGE_REPO_PATH"
             echo "BRANCH=$FORGE_BRANCH"
             exit 0
-        """)
+        """,
+        )
         env = _make_env(gate_dir, stage="implement", attempt=3)
         env["FORGE_BRANCH"] = "forge/my-branch"
 
@@ -177,11 +192,15 @@ class TestRunGate:
     @pytest.mark.asyncio
     async def test_nonzero_exit_code_other_than_one(self, tmp_path: object) -> None:
         gate_dir = str(tmp_path)
-        _write_gate_script(gate_dir, "spec", """\
+        _write_gate_script(
+            gate_dir,
+            "spec",
+            """\
             #!/bin/bash
             echo "crashed" >&2
             exit 2
-        """)
+        """,
+        )
         env = _make_env(gate_dir, stage="spec")
 
         result = await run_gate(gate_dir, "spec", env)

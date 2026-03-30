@@ -63,21 +63,32 @@ def settings() -> Settings:
 @pytest.fixture
 def project_id(conn: sqlite3.Connection) -> str:
     return db.insert_project(
-        conn, name="TestProject", repo_path="/tmp/repo", gate_dir="/tmp/repo/gates",
+        conn,
+        name="TestProject",
+        repo_path="/tmp/repo",
+        gate_dir="/tmp/repo/gates",
     )
 
 
 @pytest.fixture
 def active_task_with_queued_run(
-    conn: sqlite3.Connection, project_id: str,
+    conn: sqlite3.Connection,
+    project_id: str,
 ) -> tuple[str, str]:
     """Create an active task with a queued spec stage_run. Returns (task_id, stage_run_id)."""
     task_id = db.insert_task(
-        conn, project_id=project_id, title="Test task", priority=10,
+        conn,
+        project_id=project_id,
+        title="Test task",
+        priority=10,
     )
     db.update_task(conn, task_id, status="active", current_stage="spec")
     sr_id = db.insert_stage_run(
-        conn, task_id=task_id, stage="spec", attempt=1, status="queued",
+        conn,
+        task_id=task_id,
+        stage="spec",
+        attempt=1,
+        status="queued",
     )
     return task_id, sr_id
 
@@ -106,7 +117,9 @@ class TestNextStage:
 
 class TestMakeBranchName:
     def test_basic(self) -> None:
-        name = _make_branch_name("abcd1234-5678-9abc-def0-123456789abc", "Add login page")
+        name = _make_branch_name(
+            "abcd1234-5678-9abc-def0-123456789abc", "Add login page"
+        )
         assert name.startswith("forge/abcd1234-")
         assert "add-login-page" in name
 
@@ -131,7 +144,10 @@ class TestMakeBranchName:
 class TestAdvanceTask:
     @pytest.mark.asyncio
     async def test_spec_to_plan(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
@@ -147,7 +163,10 @@ class TestAdvanceTask:
 
     @pytest.mark.asyncio
     async def test_plan_to_implement(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
@@ -160,7 +179,10 @@ class TestAdvanceTask:
 
     @pytest.mark.asyncio
     async def test_review_to_done(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
@@ -184,52 +206,88 @@ class TestAdvanceTask:
 class TestBounceTask:
     @pytest.mark.asyncio
     async def test_retry_on_bounce(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1, max_retries=3,
+            conn,
+            project_id=project_id,
+            title="T",
+            priority=1,
+            max_retries=3,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
         # First attempt bounced
         db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="bounced",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="bounced",
         )
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="spec too short",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="spec too short",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "spec", gate_result)
 
         # Should have a new queued stage_run
-        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
         assert len(queued) == 1
         assert queued[0]["attempt"] > 1
 
     @pytest.mark.asyncio
     async def test_needs_human_after_max_retries(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1, max_retries=2,
+            conn,
+            project_id=project_id,
+            title="T",
+            priority=1,
+            max_retries=2,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
         # Simulate 2 bounced attempts (meeting max_retries)
         db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="bounced",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="bounced",
         )
         db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=2, status="bounced",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=2,
+            status="bounced",
         )
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="still failing",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="still failing",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "spec", gate_result)
@@ -246,20 +304,29 @@ class TestBounceTask:
 class TestTimeoutDetection:
     @pytest.mark.asyncio
     async def test_timeout_marks_error(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1, max_retries=3,
+            conn,
+            project_id=project_id,
+            title="T",
+            priority=1,
+            max_retries=3,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         # Create a running stage_run that started long ago
-        old_time = (
-            datetime.now(timezone.utc) - timedelta(seconds=9999)
-        ).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
         sr_id = db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="running",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="running",
         )
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
@@ -271,17 +338,27 @@ class TestTimeoutDetection:
 
     @pytest.mark.asyncio
     async def test_no_timeout_for_recent_run(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1,
+            conn,
+            project_id=project_id,
+            title="T",
+            priority=1,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         recent_time = datetime.now(timezone.utc).isoformat()
         sr_id = db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="running",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="running",
         )
         db.update_stage_run(conn, sr_id, started_at=recent_time)
 
@@ -341,7 +418,10 @@ class TestEnginePause:
 
 class TestEngineStatus:
     def test_get_status(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         engine.running = True
@@ -365,7 +445,9 @@ class TestEngineStatus:
         assert status["queue_depth"] == 1
 
     def test_get_stats_empty(
-        self, conn: sqlite3.Connection, settings: Settings,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         with patch("forge.engine.database.get_connection", return_value=conn):
@@ -407,7 +489,9 @@ class TestEngineStatus:
         # Create a done task and an active task
         t1 = db.insert_task(conn, project_id=project_id, title="Done task", priority=1)
         db.update_task(conn, t1, status="done")
-        t2 = db.insert_task(conn, project_id=project_id, title="Active task", priority=2)
+        t2 = db.insert_task(
+            conn, project_id=project_id, title="Active task", priority=2
+        )
         db.update_task(conn, t2, status="active")
 
         # Create stage runs: 1 passed, 1 bounced for "spec"
@@ -460,8 +544,12 @@ class TestRunLoopIntegration:
             tokens_used=100,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -469,8 +557,16 @@ class TestRunLoopIntegration:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
         ):
             await self._run_one_iteration(engine)
@@ -482,7 +578,9 @@ class TestRunLoopIntegration:
         # Task should have advanced to plan with a new queued stage_run
         task = db.get_task(conn, task_id)
         assert task["current_stage"] == "plan"
-        plan_runs = db.list_stage_runs(conn, task_id=task_id, stage="plan", status="queued")
+        plan_runs = db.list_stage_runs(
+            conn, task_id=task_id, stage="plan", status="queued"
+        )
         assert len(plan_runs) == 1
 
     @pytest.mark.asyncio
@@ -503,8 +601,12 @@ class TestRunLoopIntegration:
             tokens_used=50,
         )
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="spec missing sections",
-            gate_name="post-spec.sh", duration_seconds=0.5,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="spec missing sections",
+            gate_name="post-spec.sh",
+            duration_seconds=0.5,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -512,8 +614,16 @@ class TestRunLoopIntegration:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
         ):
             await self._run_one_iteration(engine)
@@ -523,7 +633,9 @@ class TestRunLoopIntegration:
         assert sr["status"] == "bounced"
 
         # A new queued stage_run for spec should exist
-        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
         assert len(queued) == 1
 
     @pytest.mark.asyncio
@@ -573,7 +685,9 @@ class TestRunLoopIntegration:
         assert sr["status"] == "error"
 
         # A retry should be queued
-        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
         assert len(queued) == 1
 
 
@@ -584,12 +698,18 @@ class TestRunLoopIntegration:
 
 class TestActivateBacklogTasks:
     def test_activates_backlog_task(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         """Backlog task gets activated with a queued stage_run for the first stage."""
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
-            conn, project_id=project_id, title="Backlog task", priority=5,
+            conn,
+            project_id=project_id,
+            title="Backlog task",
+            priority=5,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -604,7 +724,10 @@ class TestActivateBacklogTasks:
         assert runs[0]["attempt"] == 1
 
     def test_respects_concurrency_limit(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         """Only activates up to max_concurrent_tasks backlog tasks."""
         settings.engine.max_concurrent_tasks = 2
@@ -613,7 +736,10 @@ class TestActivateBacklogTasks:
         task_ids = []
         for i in range(4):
             tid = db.insert_task(
-                conn, project_id=project_id, title=f"Task {i}", priority=i,
+                conn,
+                project_id=project_id,
+                title=f"Task {i}",
+                priority=i,
             )
             task_ids.append(tid)
 
@@ -627,7 +753,10 @@ class TestActivateBacklogTasks:
         assert len(backlog) == 2
 
     def test_skips_when_at_capacity(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         """Does not activate backlog tasks when active count meets concurrency limit."""
         settings.engine.max_concurrent_tasks = 1
@@ -635,13 +764,19 @@ class TestActivateBacklogTasks:
 
         # Create one already-active task
         active_id = db.insert_task(
-            conn, project_id=project_id, title="Active", priority=10,
+            conn,
+            project_id=project_id,
+            title="Active",
+            priority=10,
         )
         db.update_task(conn, active_id, status="active", current_stage="spec")
 
         # Create a backlog task
         backlog_id = db.insert_task(
-            conn, project_id=project_id, title="Waiting", priority=5,
+            conn,
+            project_id=project_id,
+            title="Waiting",
+            priority=5,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -653,11 +788,17 @@ class TestActivateBacklogTasks:
 
     @pytest.mark.asyncio
     async def test_engine_loop_picks_up_backlog_task(
-        self, conn: sqlite3.Connection, settings: Settings, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
     ) -> None:
         """Full engine loop activates a backlog task and dispatches it."""
         task_id = db.insert_task(
-            conn, project_id=project_id, title="From backlog", priority=5,
+            conn,
+            project_id=project_id,
+            title="From backlog",
+            priority=5,
         )
 
         dispatch_result = DispatchResult(
@@ -667,8 +808,12 @@ class TestActivateBacklogTasks:
             tokens_used=50,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-spec.sh", duration_seconds=0.5,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-spec.sh",
+            duration_seconds=0.5,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -676,10 +821,20 @@ class TestActivateBacklogTasks:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
-            patch("forge.engine.create_branch", new_callable=AsyncMock, return_value=True),
+            patch(
+                "forge.engine.create_branch", new_callable=AsyncMock, return_value=True
+            ),
         ):
             engine.running = True
             loop_task = asyncio.create_task(engine.run_loop())
@@ -694,7 +849,9 @@ class TestActivateBacklogTasks:
         assert task["status"] == "active"
         assert task["current_stage"] == "plan"
         # The spec stage_run should be passed
-        spec_runs = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="passed")
+        spec_runs = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="passed"
+        )
         assert len(spec_runs) == 1
 
 
@@ -707,26 +864,38 @@ class TestAutoPause:
     @pytest.fixture
     def pause_project_id(self, conn: sqlite3.Connection) -> str:
         return db.insert_project(
-            conn, name="PauseProject", repo_path="/tmp/repo",
-            gate_dir="/tmp/repo/gates", pause_after_completion=True,
+            conn,
+            name="PauseProject",
+            repo_path="/tmp/repo",
+            gate_dir="/tmp/repo/gates",
+            pause_after_completion=True,
         )
 
     @pytest.fixture
     def no_pause_project_id(self, conn: sqlite3.Connection) -> str:
         return db.insert_project(
-            conn, name="NoPauseProject", repo_path="/tmp/repo",
-            gate_dir="/tmp/repo/gates", pause_after_completion=False,
+            conn,
+            name="NoPauseProject",
+            repo_path="/tmp/repo",
+            gate_dir="/tmp/repo/gates",
+            pause_after_completion=False,
         )
 
     @pytest.mark.asyncio
     async def test_auto_pause_on_task_done(
-        self, conn: sqlite3.Connection, settings: Settings, pause_project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        pause_project_id: str,
     ) -> None:
         """Engine pauses when a task completes for a pause-enabled project."""
         engine = PipelineEngine(settings, ":memory:")
         engine.running = True
         task_id = db.insert_task(
-            conn, project_id=pause_project_id, title="My Task", priority=1,
+            conn,
+            project_id=pause_project_id,
+            title="My Task",
+            priority=1,
         )
         db.update_task(conn, task_id, status="active", current_stage="review")
 
@@ -739,13 +908,19 @@ class TestAutoPause:
 
     @pytest.mark.asyncio
     async def test_no_auto_pause_when_flag_is_false(
-        self, conn: sqlite3.Connection, settings: Settings, no_pause_project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        no_pause_project_id: str,
     ) -> None:
         """Engine continues when a task completes for a non-pause project."""
         engine = PipelineEngine(settings, ":memory:")
         engine.running = True
         task_id = db.insert_task(
-            conn, project_id=no_pause_project_id, title="My Task", priority=1,
+            conn,
+            project_id=no_pause_project_id,
+            title="My Task",
+            priority=1,
         )
         db.update_task(conn, task_id, status="active", current_stage="review")
 
@@ -758,23 +933,36 @@ class TestAutoPause:
 
     @pytest.mark.asyncio
     async def test_auto_pause_on_needs_human_from_bounce(
-        self, conn: sqlite3.Connection, settings: Settings, pause_project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        pause_project_id: str,
     ) -> None:
         """Engine pauses when bounce_task marks needs_human for a pause-enabled project."""
         engine = PipelineEngine(settings, ":memory:")
         engine.running = True
         task_id = db.insert_task(
-            conn, project_id=pause_project_id, title="Bounced Task", priority=1, max_retries=1,
+            conn,
+            project_id=pause_project_id,
+            title="Bounced Task",
+            priority=1,
+            max_retries=1,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
         # Create enough bounced runs to exceed max_retries
-        db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1, status="bounced")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="bounced"
+        )
 
         task = dict(db.get_task(conn, task_id))
         project = dict(db.get_project(conn, pause_project_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="fail",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="fail",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
         await engine.bounce_task(conn, task, "spec", gate_result, project=project)
 
@@ -784,16 +972,25 @@ class TestAutoPause:
 
     @pytest.mark.asyncio
     async def test_auto_pause_on_needs_human_from_error_retry(
-        self, conn: sqlite3.Connection, settings: Settings, pause_project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        pause_project_id: str,
     ) -> None:
         """Engine pauses when _handle_error_retry marks needs_human for a pause-enabled project."""
         engine = PipelineEngine(settings, ":memory:")
         engine.running = True
         task_id = db.insert_task(
-            conn, project_id=pause_project_id, title="Error Task", priority=1, max_retries=1,
+            conn,
+            project_id=pause_project_id,
+            title="Error Task",
+            priority=1,
+            max_retries=1,
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
-        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1, status="error")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="error"
+        )
         # One error run already meets max_retries=1
 
         task = dict(db.get_task(conn, task_id))
@@ -806,7 +1003,10 @@ class TestAutoPause:
 
     @pytest.mark.asyncio
     async def test_auto_pause_message_format(
-        self, conn: sqlite3.Connection, settings: Settings, pause_project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        pause_project_id: str,
     ) -> None:
         """Auto-pause log message matches the exact format from the spec."""
         engine = PipelineEngine(settings, ":memory:")
@@ -814,7 +1014,10 @@ class TestAutoPause:
         safe_conn = _UnclosableConnection(conn)
         with patch("forge.engine.database.get_connection", return_value=safe_conn):
             task_id = db.insert_task(
-                conn, project_id=pause_project_id, title="Special Task", priority=1,
+                conn,
+                project_id=pause_project_id,
+                title="Special Task",
+                priority=1,
             )
             db.update_task(conn, task_id, status="active", current_stage="review")
             project = dict(db.get_project(conn, pause_project_id))
@@ -833,17 +1036,25 @@ class TestAutoPause:
 
 class TestTaskPriority:
     def test_highest_priority_picked(
-        self, conn: sqlite3.Connection, project_id: str,
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
     ) -> None:
         """Verify get_next_queued_task returns highest-priority task."""
         t1 = db.insert_task(
-            conn, project_id=project_id, title="Low", priority=1,
+            conn,
+            project_id=project_id,
+            title="Low",
+            priority=1,
         )
         db.update_task(conn, t1, status="active", current_stage="spec")
         db.insert_stage_run(conn, task_id=t1, stage="spec", attempt=1, status="queued")
 
         t2 = db.insert_task(
-            conn, project_id=project_id, title="High", priority=10,
+            conn,
+            project_id=project_id,
+            title="High",
+            priority=10,
         )
         db.update_task(conn, t2, status="active", current_stage="spec")
         db.insert_stage_run(conn, task_id=t2, stage="spec", attempt=1, status="queued")
