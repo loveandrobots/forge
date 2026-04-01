@@ -20,6 +20,7 @@
     --warning: #d97706;
     --error: #dc2626;
     --info: #0891b2;
+    --flow-quick: #7c3aed;
     --radius: 6px;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
@@ -258,7 +259,7 @@ body {
 
 .badge-flow-quick {
     background: #faf5ff;
-    color: #7c3aed;
+    color: var(--flow-quick);
 }
 
 /* Buttons */

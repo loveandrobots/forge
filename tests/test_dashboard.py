@@ -487,7 +487,7 @@ class TestBacklog:
         assert 'value="standard"' in html
         assert 'value="quick"' in html
         # Standard should be selected by default
-        assert "selected" in html
+        assert 'value="standard" selected' in html
 
     def test_create_task_with_quick_flow_via_form(
         self,
