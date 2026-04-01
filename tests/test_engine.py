@@ -986,6 +986,144 @@ class TestActivateBacklogTasks:
         )
         assert len(spec_runs) == 1
 
+    def test_activate_quick_flow_starts_at_implement(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick flow backlog task starts at implement, not spec."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Quick task",
+            priority=5,
+            flow="quick",
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            engine._activate_backlog_tasks(conn)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "active"
+        assert task["current_stage"] == "implement"
+        runs = db.list_stage_runs(conn, task_id=task_id, stage="implement", status="queued")
+        assert len(runs) == 1
+        # No spec or plan stage_runs should exist
+        spec_runs = db.list_stage_runs(conn, task_id=task_id, stage="spec")
+        plan_runs = db.list_stage_runs(conn, task_id=task_id, stage="plan")
+        assert len(spec_runs) == 0
+        assert len(plan_runs) == 0
+
+
+# ---------------------------------------------------------------------------
+# _next_stage with flow parameter
+# ---------------------------------------------------------------------------
+
+
+class TestNextStageFlow:
+    def test_standard_flow_spec_to_plan(self) -> None:
+        assert _next_stage("spec", "standard") == "plan"
+
+    def test_standard_flow_plan_to_implement(self) -> None:
+        assert _next_stage("plan", "standard") == "implement"
+
+    def test_standard_flow_implement_to_review(self) -> None:
+        assert _next_stage("implement", "standard") == "review"
+
+    def test_standard_flow_review_to_none(self) -> None:
+        assert _next_stage("review", "standard") is None
+
+    def test_quick_flow_implement_to_review(self) -> None:
+        assert _next_stage("implement", "quick") == "review"
+
+    def test_quick_flow_review_to_none(self) -> None:
+        assert _next_stage("review", "quick") is None
+
+    def test_quick_flow_spec_returns_none(self) -> None:
+        """spec is not in quick flow, so _next_stage returns None."""
+        assert _next_stage("spec", "quick") is None
+
+    def test_quick_flow_plan_returns_none(self) -> None:
+        """plan is not in quick flow, so _next_stage returns None."""
+        assert _next_stage("plan", "quick") is None
+
+    def test_default_flow_param_is_standard(self) -> None:
+        """Calling without flow param behaves as standard."""
+        assert _next_stage("spec") == "plan"
+
+
+# ---------------------------------------------------------------------------
+# advance_task with flow
+# ---------------------------------------------------------------------------
+
+
+class TestAdvanceTaskFlow:
+    @pytest.mark.asyncio
+    async def test_quick_flow_implement_to_review(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="Quick", priority=1, flow="quick"
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+
+        await engine.advance_task(conn, task_id, "implement")
+
+        task = db.get_task(conn, task_id)
+        assert task["current_stage"] == "review"
+        runs = db.list_stage_runs(conn, task_id=task_id, stage="review", status="queued")
+        assert len(runs) == 1
+
+    @pytest.mark.asyncio
+    async def test_quick_flow_review_to_done(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="Quick", priority=1, flow="quick"
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+
+        await engine.advance_task(conn, task_id, "review")
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "done"
+        assert task["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_quick_flow_no_spec_plan_runs(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Full quick flow progression creates no spec or plan runs."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="Quick", priority=1, flow="quick"
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+
+        # Advance implement -> review
+        await engine.advance_task(conn, task_id, "implement")
+        # Advance review -> done
+        await engine.advance_task(conn, task_id, "review")
+
+        all_runs = db.list_stage_runs(conn, task_id=task_id)
+        stages = {r["stage"] for r in all_runs}
+        assert "spec" not in stages
+        assert "plan" not in stages
+
 
 # ---------------------------------------------------------------------------
 # Engine: auto-pause after task completion

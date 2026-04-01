@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +52,11 @@ class TaskCreate(BaseModel):
     priority: int = 0
     skill_overrides: list[str] | None = None
     max_retries: int = 3
+    flow: Literal["standard", "quick"] = "standard"
+
+
+class BatchTaskCreate(BaseModel):
+    tasks: list[TaskCreate]
 
 
 class TaskUpdate(BaseModel):
@@ -80,6 +86,7 @@ class TaskResponse(BaseModel):
     review_path: str | None = None
     skill_overrides: list[str] | None = None
     max_retries: int
+    flow: str = "standard"
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None

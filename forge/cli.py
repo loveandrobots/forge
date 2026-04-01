@@ -66,6 +66,12 @@ def main(argv: list[str] | None = None) -> None:
     add_t.add_argument(
         "--priority", type=int, default=0, help="Priority (higher = more urgent)"
     )
+    add_t.add_argument(
+        "--flow",
+        choices=["standard", "quick"],
+        default="standard",
+        help="Pipeline flow (standard: spec→plan→implement→review, quick: implement→review)",
+    )
 
     # reset-task
     reset_p = sub.add_parser("reset-task", help="Reset a task to restart from a stage")
@@ -190,6 +196,7 @@ def _cmd_add_task(args: argparse.Namespace) -> None:
             title=args.title,
             description=args.description,
             priority=args.priority,
+            flow=args.flow,
         )
         print(f"Task '{args.title}' added to '{args.project}' (id={task_id}).")
     finally:

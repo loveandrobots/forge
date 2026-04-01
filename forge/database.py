@@ -51,6 +51,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             review_path TEXT,
             skill_overrides TEXT,
             max_retries INTEGER NOT NULL DEFAULT 3,
+            flow TEXT NOT NULL DEFAULT 'standard',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             completed_at TEXT
@@ -105,6 +106,13 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     try:
         conn.execute("ALTER TABLE projects ADD COLUMN stage_timeouts TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN flow TEXT NOT NULL DEFAULT 'standard'"
+        )
     except sqlite3.OperationalError:
         pass  # Column already exists
 
@@ -251,14 +259,21 @@ def insert_task(
     priority: int = 0,
     skill_overrides: list[str] | None = None,
     max_retries: int = 3,
+    flow: str = "standard",
 ) -> str:
     """Insert a new task with status='backlog'. Returns the task id."""
+    from forge.config import VALID_FLOWS
+
+    if flow not in VALID_FLOWS:
+        raise ValueError(
+            f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}"
+        )
     task_id = _new_id()
     now = _now()
     conn.execute(
         """INSERT INTO tasks
-           (id, project_id, title, description, priority, status, skill_overrides, max_retries, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'backlog', ?, ?, ?, ?)""",
+           (id, project_id, title, description, priority, status, skill_overrides, max_retries, flow, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'backlog', ?, ?, ?, ?, ?)""",
         (
             task_id,
             project_id,
@@ -267,6 +282,7 @@ def insert_task(
             priority,
             _json_encode(skill_overrides),
             max_retries,
+            flow,
             now,
             now,
         ),

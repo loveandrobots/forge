@@ -11,7 +11,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from forge import database
-from forge.config import STAGES, Settings, resolve_stage_timeout
+from forge.config import FLOW_STAGES, STAGES, Settings, resolve_stage_timeout
 from forge.dispatcher import (
     DispatchResult,
     GitResult,
@@ -39,14 +39,15 @@ def _make_branch_name(task_id: str, title: str) -> str:
     return f"forge/{short_id}-{slug}"
 
 
-def _next_stage(current_stage: str) -> str | None:
+def _next_stage(current_stage: str, flow: str = "standard") -> str | None:
     """Return the next stage after current_stage, or None if done."""
+    stages = FLOW_STAGES.get(flow, STAGES)
     try:
-        idx = STAGES.index(current_stage)
+        idx = stages.index(current_stage)
     except ValueError:
         return None
-    if idx + 1 < len(STAGES):
-        return STAGES[idx + 1]
+    if idx + 1 < len(stages):
+        return stages[idx + 1]
     return None
 
 
@@ -585,7 +586,9 @@ class PipelineEngine:
         project: dict | None = None,
     ) -> None:
         """Create the next stage_run or mark the task done."""
-        next_stage = _next_stage(current_stage)
+        task_row = database.get_task(conn, task_id)
+        flow = task_row["flow"] if task_row else "standard"
+        next_stage = _next_stage(current_stage, flow=flow)
         if next_stage is None:
             # Process follow-ups from review before completing
             if current_stage == "review" and project is not None:
@@ -780,7 +783,8 @@ class PipelineEngine:
         for task_row in backlog_tasks[:slots]:
             task = _row_to_dict(task_row)
             task_id = task["id"]
-            first_stage = STAGES[0]
+            flow = task.get("flow", "standard")
+            first_stage = FLOW_STAGES.get(flow, STAGES)[0]
             database.update_task(
                 conn,
                 task_id,

@@ -15,6 +15,15 @@ CONFIG_PATH = BASE_DIR / "config.yaml"
 # Pipeline stages in order
 STAGES: list[str] = ["spec", "plan", "implement", "review"]
 
+# Flow definitions: mapping of flow name to ordered stage list
+FLOW_STAGES: dict[str, list[str]] = {
+    "standard": ["spec", "plan", "implement", "review"],
+    "quick": ["implement", "review"],
+}
+
+# Valid flow values
+VALID_FLOWS: tuple[str, ...] = tuple(FLOW_STAGES.keys())
+
 # Valid task statuses
 TASK_STATUSES: list[str] = [
     "backlog",

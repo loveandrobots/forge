@@ -585,3 +585,128 @@ class TestRunLog:
         rows = db.get_logs(conn)
         # Most recent first
         assert rows[0]["message"] == "second"
+
+
+# ---------------------------------------------------------------------------
+# Flow field
+# ---------------------------------------------------------------------------
+
+
+class TestFlowField:
+    def test_migrate_adds_flow_column(self) -> None:
+        """Migration adds flow column to an existing DB without it."""
+        c = db.get_connection(":memory:")
+        # Create old schema without the flow column
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                repo_path TEXT NOT NULL,
+                default_branch TEXT NOT NULL DEFAULT 'main',
+                gate_dir TEXT NOT NULL DEFAULT 'gates',
+                skill_refs TEXT,
+                created_at TEXT NOT NULL,
+                config TEXT,
+                pause_after_completion INTEGER NOT NULL DEFAULT 0,
+                stage_timeouts TEXT
+            );
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id),
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                priority INTEGER NOT NULL DEFAULT 0,
+                current_stage TEXT,
+                status TEXT NOT NULL DEFAULT 'backlog',
+                branch_name TEXT,
+                spec_path TEXT,
+                plan_path TEXT,
+                review_path TEXT,
+                skill_overrides TEXT,
+                max_retries INTEGER NOT NULL DEFAULT 3,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS stage_runs (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL REFERENCES tasks(id),
+                stage TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                prompt_sent TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_seconds REAL,
+                claude_output TEXT,
+                artifacts_produced TEXT,
+                gate_name TEXT,
+                gate_exit_code INTEGER,
+                gate_stdout TEXT,
+                gate_stderr TEXT,
+                tokens_used INTEGER,
+                error_message TEXT
+            );
+            CREATE TABLE IF NOT EXISTS task_links (
+                id TEXT PRIMARY KEY,
+                source_task_id TEXT NOT NULL REFERENCES tasks(id),
+                target_task_id TEXT NOT NULL REFERENCES tasks(id),
+                link_type TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS run_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                level TEXT NOT NULL,
+                message TEXT NOT NULL,
+                task_id TEXT,
+                stage_run_id TEXT,
+                metadata TEXT
+            );
+        """)
+        # Insert a project and task before migration
+        c.execute(
+            "INSERT INTO projects (id, name, repo_path, created_at) VALUES ('p1', 'Old', '/tmp', '2025-01-01')"
+        )
+        c.execute(
+            "INSERT INTO tasks (id, project_id, title, created_at, updated_at) VALUES ('t1', 'p1', 'Old task', '2025-01-01', '2025-01-01')"
+        )
+        c.commit()
+        # Run migrate — should add the flow column
+        db.migrate(c)
+        row = c.execute("SELECT flow FROM tasks WHERE id = 't1'").fetchone()
+        assert row[0] == "standard"
+
+    def test_insert_task_default_flow(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        """insert_task without flow param defaults to 'standard'."""
+        tid = db.insert_task(conn, project_id=project_id, title="Default flow")
+        row = db.get_task(conn, tid)
+        assert row["flow"] == "standard"
+
+    def test_insert_task_with_flow_standard(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(
+            conn, project_id=project_id, title="Std", flow="standard"
+        )
+        row = db.get_task(conn, tid)
+        assert row["flow"] == "standard"
+
+    def test_insert_task_with_flow_quick(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(
+            conn, project_id=project_id, title="Quick", flow="quick"
+        )
+        row = db.get_task(conn, tid)
+        assert row["flow"] == "quick"
+
+    def test_insert_task_invalid_flow_rejected(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        with pytest.raises(ValueError, match="Invalid flow"):
+            db.insert_task(
+                conn, project_id=project_id, title="Bad", flow="invalid"
+            )

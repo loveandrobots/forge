@@ -200,6 +200,43 @@ class TestAddTask:
         assert "not found" in err
 
 
+class TestAddTaskFlow:
+    def test_add_task_with_flow_quick(self, db_path, capsys):
+        main(["migrate"])
+        main(["init-project", "--name", "Proj", "--repo-path", "/tmp/repo"])
+        main(
+            [
+                "add-task",
+                "--project",
+                "Proj",
+                "--title",
+                "Quick task",
+                "--flow",
+                "quick",
+            ]
+        )
+        out = capsys.readouterr().out
+        assert "Quick task" in out
+
+        conn = _get_conn(db_path)
+        tasks = database.list_tasks(conn, status="backlog")
+        conn.close()
+        assert len(tasks) == 1
+        assert tasks[0]["flow"] == "quick"
+
+    def test_add_task_default_flow(self, db_path, capsys):
+        main(["migrate"])
+        main(["init-project", "--name", "Proj", "--repo-path", "/tmp/repo"])
+        main(["add-task", "--project", "Proj", "--title", "Default flow"])
+        capsys.readouterr()
+
+        conn = _get_conn(db_path)
+        tasks = database.list_tasks(conn, status="backlog")
+        conn.close()
+        assert len(tasks) == 1
+        assert tasks[0]["flow"] == "standard"
+
+
 class TestListProjects:
     def test_no_projects(self, db_path, capsys):
         main(["migrate"])

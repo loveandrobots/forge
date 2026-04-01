@@ -462,3 +462,162 @@ class TestCancelTask:
         resp = client.post(f"/api/tasks/{task_id}/retry")
         assert resp.status_code == 400
         assert "cancelled" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Flow field
+# ---------------------------------------------------------------------------
+
+
+class TestFlowField:
+    def test_create_task_with_flow_quick(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Quick task",
+                "flow": "quick",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["flow"] == "quick"
+
+    def test_create_task_default_flow(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Default flow task",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["flow"] == "standard"
+
+    def test_create_task_invalid_flow_returns_422(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Bad flow",
+                "flow": "invalid",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_activate_quick_flow_starts_at_implement(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Quick activate",
+                "flow": "quick",
+            },
+        )
+        task_id = resp.json()["id"]
+        resp = client.post(f"/api/tasks/{task_id}/activate")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "active"
+        assert data["current_stage"] == "implement"
+
+    def test_activate_standard_flow_starts_at_spec(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Standard activate",
+                "flow": "standard",
+            },
+        )
+        task_id = resp.json()["id"]
+        resp = client.post(f"/api/tasks/{task_id}/activate")
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "spec"
+
+
+class TestBatchCreateTasks:
+    def test_batch_create(self, client: TestClient, project_id: str) -> None:
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": project_id,
+                        "title": "Task A",
+                        "flow": "standard",
+                    },
+                    {
+                        "project_id": project_id,
+                        "title": "Task B",
+                        "flow": "quick",
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["title"] == "Task A"
+        assert data[0]["flow"] == "standard"
+        assert data[1]["title"] == "Task B"
+        assert data[1]["flow"] == "quick"
+
+    def test_batch_create_default_flow(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": project_id,
+                        "title": "No flow specified",
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()[0]["flow"] == "standard"
+
+    def test_batch_create_invalid_flow(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": project_id,
+                        "title": "Bad",
+                        "flow": "bogus",
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_batch_create_invalid_project(
+        self, client: TestClient
+    ) -> None:
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": "nonexistent",
+                        "title": "Bad project",
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 404

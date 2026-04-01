@@ -7,8 +7,8 @@ import json
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from forge import database
-from forge.config import DB_PATH, STAGES
-from forge.models import CancelRequest, ResetRequest, TaskCreate, TaskResponse, TaskUpdate
+from forge.config import DB_PATH, FLOW_STAGES, STAGES
+from forge.models import BatchTaskCreate, CancelRequest, ResetRequest, TaskCreate, TaskResponse, TaskUpdate
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -57,9 +57,39 @@ def create_task(body: TaskCreate) -> dict:
             priority=body.priority,
             skill_overrides=body.skill_overrides,
             max_retries=body.max_retries,
+            flow=body.flow,
         )
         row = database.get_task(conn, task_id)
         return _row_to_task(row)
+    finally:
+        conn.close()
+
+
+@router.post("/batch", response_model=list[TaskResponse], status_code=201)
+def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        results = []
+        for task_input in body.tasks:
+            project = database.get_project(conn, task_input.project_id)
+            if project is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Project not found: {task_input.project_id}",
+                )
+            task_id = database.insert_task(
+                conn,
+                project_id=task_input.project_id,
+                title=task_input.title,
+                description=task_input.description,
+                priority=task_input.priority,
+                skill_overrides=task_input.skill_overrides,
+                max_retries=task_input.max_retries,
+                flow=task_input.flow,
+            )
+            row = database.get_task(conn, task_id)
+            results.append(_row_to_task(row))
+        return results
     finally:
         conn.close()
 
@@ -130,7 +160,8 @@ def activate_task(task_id: str) -> dict:
                 status_code=400, detail="Only backlog tasks can be activated"
             )
 
-        first_stage = STAGES[0]
+        flow = row["flow"] if row["flow"] else "standard"
+        first_stage = FLOW_STAGES.get(flow, STAGES)[0]
         database.insert_stage_run(
             conn,
             task_id=task_id,
