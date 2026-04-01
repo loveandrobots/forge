@@ -684,12 +684,12 @@ class PipelineEngine:
                     conn,
                     task_id=task_id,
                     stage=stage,
-                    attempt=new_attempt + 1,
+                    attempt=new_attempt,
                     status="queued",
                 )
                 self._log(
                     "info",
-                    f"Task {task_id} stage {stage} queued for retry (attempt {new_attempt + 1})",
+                    f"Task {task_id} stage {stage} queued for retry (attempt {new_attempt})",
                     task_id=task_id,
                 )
 
@@ -827,12 +827,12 @@ class PipelineEngine:
                 conn,
                 task_id=task_id,
                 stage=stage,
-                attempt=new_attempt + 1,
+                attempt=new_attempt,
                 status="queued",
             )
             self._log(
                 "info",
-                f"Task {task_id} stage {stage} queued for retry after error (attempt {new_attempt + 1})",
+                f"Task {task_id} stage {stage} queued for retry after error (attempt {new_attempt})",
                 task_id=task_id,
                 stage_run_id=stage_run_id,
             )

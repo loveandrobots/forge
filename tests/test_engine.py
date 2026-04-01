@@ -305,6 +305,128 @@ class TestBounceTask:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
+    @pytest.mark.asyncio
+    async def test_bounce_attempt_number_sequential(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """After first bounce, next attempt should be 2 (not 3)."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=5
+        )
+        db.update_task(conn, task_id, status="active", current_stage="plan")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="plan", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="issues",
+            gate_name="post-plan.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "plan", gate_result)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="plan", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 2
+
+    @pytest.mark.asyncio
+    async def test_bounce_attempt_number_after_multiple_retries(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Sequential numbering across multiple bounces."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=5
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="bounced"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=2, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="issues",
+            gate_name="post-spec.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "spec", gate_result)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 3
+
+
+class TestErrorRetryAttemptNumber:
+    @pytest.mark.asyncio
+    async def test_error_retry_attempt_number_sequential(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """After first error, retry attempt should be 2 (not 3)."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=5
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "implement", sr_id)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 2
+
+    @pytest.mark.asyncio
+    async def test_error_retry_attempt_number_after_multiple_errors(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Sequential numbering across multiple error retries."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=5
+        )
+        db.update_task(conn, task_id, status="active", current_stage="plan")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="plan", attempt=1, status="error"
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="plan", attempt=2, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "plan", sr_id)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="plan", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 3
+
 
 # ---------------------------------------------------------------------------
 # Engine: timeout detection
