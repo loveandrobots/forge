@@ -2655,6 +2655,83 @@ class TestAutoEscalation:
         assert task["status"] == "needs_human"
 
     @pytest.mark.asyncio
+    async def test_bounce_task_implement_gate_escalates_quick_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick-flow task escalates when implement gate bounce exhausts retries."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Quick implement bounce",
+            priority=1,
+            max_retries=1,
+            flow="quick",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        # Exhaust the implement retry budget
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="fail",
+            gate_name="post-implement.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "implement", gate_result)
+
+        task = db.get_task(conn, task_id)
+        assert task["flow"] == "standard"
+        assert task["current_stage"] == "spec"
+        assert task["escalated_from_quick"] == 1
+        assert task["status"] == "active"
+
+        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        assert len(queued) == 1
+
+    @pytest.mark.asyncio
+    async def test_error_retry_review_escalates_quick_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick-flow task escalates via _handle_error_retry at review stage."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Quick review error",
+            priority=1,
+            max_retries=1,
+            flow="quick",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # Exhaust the shared implement→review budget
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="error"
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id)
+
+        task = db.get_task(conn, task_id)
+        assert task["flow"] == "standard"
+        assert task["current_stage"] == "spec"
+        assert task["escalated_from_quick"] == 1
+
+        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        assert len(queued) == 1
+
+    @pytest.mark.asyncio
     async def test_standard_flow_not_affected_by_escalation(
         self,
         conn: sqlite3.Connection,
