@@ -9,6 +9,11 @@
             {% if task.current_stage %}
             <span class="badge">{{ task.current_stage }}</span>
             {% endif %}
+            {% if task.flow == 'quick' %}
+            <span class="badge badge-flow-quick">Quick Flow</span>
+            {% else %}
+            <span class="badge">Standard Flow</span>
+            {% endif %}
             <span class="priority">Priority: {{ task.priority }}</span>
             {% if project %}
             <span class="project-name">{{ project.name }}</span>
@@ -28,10 +33,9 @@
         {% if task.status in ('needs_human', 'failed', 'paused') %}
         <div class="reset-group">
             <select id="reset-stage-{{ task.id }}">
-                <option value="spec">spec</option>
-                <option value="plan">plan</option>
-                <option value="implement">implement</option>
-                <option value="review">review</option>
+                {% for stage in flow_stages %}
+                <option value="{{ stage }}">{{ stage }}</option>
+                {% endfor %}
             </select>
             <button class="btn btn-warning"
                 hx-post="/api/tasks/{{ task.id }}/reset"

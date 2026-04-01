@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from forge import database
-from forge.config import DB_PATH, STAGES
+from forge.config import DB_PATH, FLOW_STAGES, STAGES
 from forge.routers.pipeline import _get_engine
 from forge.utils import relative_time
 
@@ -117,6 +117,8 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
             _row_to_dict(r) for r in database.list_stage_runs(conn, task_id=task_id)
         ]
 
+        flow_stages = FLOW_STAGES.get(task.get("flow", "standard"), FLOW_STAGES["standard"])
+
         return templates.TemplateResponse(
             request,
             "task_detail.html",
@@ -124,6 +126,7 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
                 "task": task,
                 "project": project,
                 "stage_runs": stage_runs,
+                "flow_stages": flow_stages,
             },
         )
     finally:

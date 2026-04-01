@@ -256,6 +256,11 @@ body {
     color: var(--primary);
 }
 
+.badge-flow-quick {
+    background: #faf5ff;
+    color: #7c3aed;
+}
+
 /* Buttons */
 .btn {
     display: inline-block;

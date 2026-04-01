@@ -30,6 +30,9 @@
             <a href="/tasks/{{ task.id }}" class="card {% if task.status == 'needs_human' %}card-needs-human{% endif %}{% if task.status == 'failed' %} card-failed{% endif %}">
                 <div class="card-title">{{ task.title }}</div>
                 <div class="card-meta">
+                    {% if task.flow == 'quick' %}
+                    <span class="badge badge-flow-quick">Quick</span>
+                    {% endif %}
                     {% if task.status == 'needs_human' %}
                     <span class="badge badge-warning">Needs Human</span>
                     {% elif task.status == 'failed' %}
