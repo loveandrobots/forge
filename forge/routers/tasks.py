@@ -69,7 +69,7 @@ def create_task(body: TaskCreate) -> dict:
 def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
     conn = database.get_connection(str(DB_PATH))
     try:
-        results = []
+        # Validate all project_ids upfront before inserting anything
         for task_input in body.tasks:
             project = database.get_project(conn, task_input.project_id)
             if project is None:
@@ -77,18 +77,28 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                     status_code=404,
                     detail=f"Project not found: {task_input.project_id}",
                 )
-            task_id = database.insert_task(
-                conn,
-                project_id=task_input.project_id,
-                title=task_input.title,
-                description=task_input.description,
-                priority=task_input.priority,
-                skill_overrides=task_input.skill_overrides,
-                max_retries=task_input.max_retries,
-                flow=task_input.flow,
-            )
-            row = database.get_task(conn, task_id)
-            results.append(_row_to_task(row))
+
+        # All validated — insert in a single transaction
+        results = []
+        conn.execute("BEGIN")
+        try:
+            for task_input in body.tasks:
+                task_id = database.insert_task_no_commit(
+                    conn,
+                    project_id=task_input.project_id,
+                    title=task_input.title,
+                    description=task_input.description,
+                    priority=task_input.priority,
+                    skill_overrides=task_input.skill_overrides,
+                    max_retries=task_input.max_retries,
+                    flow=task_input.flow,
+                )
+                row = database.get_task(conn, task_id)
+                results.append(_row_to_task(row))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
         return results
     finally:
         conn.close()
@@ -119,6 +129,11 @@ def update_task(task_id: str, body: TaskUpdate) -> dict:
             raise HTTPException(
                 status_code=400,
                 detail="Use /activate, /pause, /resume, /retry, or /cancel to change task status",
+            )
+        if "flow" in updates and row["status"] != "backlog":
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot change flow on a task that is not in backlog status",
             )
         if not updates:
             return _row_to_task(row)
@@ -274,9 +289,15 @@ def reset_task(task_id: str, body: ResetRequest | None = Body(default=None)) -> 
         if row is None:
             raise HTTPException(status_code=404, detail="Task not found")
 
-        from_stage = body.from_stage if body else "spec"
-        if from_stage not in STAGES:
-            raise HTTPException(status_code=400, detail=f"Invalid stage: {from_stage}")
+        flow = row["flow"] if row["flow"] else "standard"
+        flow_stages = FLOW_STAGES.get(flow, STAGES)
+        from_stage = body.from_stage if body else flow_stages[0]
+        if from_stage not in flow_stages:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid stage '{from_stage}' for flow '{flow}'. "
+                f"Valid stages: {flow_stages}",
+            )
 
         if row["status"] not in _RESETTABLE_STATUSES:
             raise HTTPException(

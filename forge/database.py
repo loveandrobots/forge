@@ -250,7 +250,7 @@ def update_project(
 # ---------------------------------------------------------------------------
 
 
-def insert_task(
+def insert_task_no_commit(
     conn: sqlite3.Connection,
     *,
     project_id: str,
@@ -261,7 +261,7 @@ def insert_task(
     max_retries: int = 3,
     flow: str = "standard",
 ) -> str:
-    """Insert a new task with status='backlog'. Returns the task id."""
+    """Insert a new task with status='backlog' without committing. Returns the task id."""
     from forge.config import VALID_FLOWS
 
     if flow not in VALID_FLOWS:
@@ -286,6 +286,31 @@ def insert_task(
             now,
             now,
         ),
+    )
+    return task_id
+
+
+def insert_task(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    title: str,
+    description: str = "",
+    priority: int = 0,
+    skill_overrides: list[str] | None = None,
+    max_retries: int = 3,
+    flow: str = "standard",
+) -> str:
+    """Insert a new task with status='backlog'. Returns the task id."""
+    task_id = insert_task_no_commit(
+        conn,
+        project_id=project_id,
+        title=title,
+        description=description,
+        priority=priority,
+        skill_overrides=skill_overrides,
+        max_retries=max_retries,
+        flow=flow,
     )
     conn.commit()
     return task_id
@@ -339,6 +364,7 @@ def update_task(
     review_path: str | None = None,
     skill_overrides: list[str] | None = None,
     completed_at: str | None = None,
+    flow: str | None = None,
 ) -> bool:
     """Update only the provided fields. Always sets updated_at. Returns True if modified."""
     fields: list[str] = ["updated_at = ?"]
@@ -355,6 +381,7 @@ def update_task(
         ("review_path", review_path, None),
         ("skill_overrides", skill_overrides, _json_encode),
         ("completed_at", completed_at, None),
+        ("flow", flow, None),
     ]:
         if val is not None:
             fields.append(f"{col} = ?")

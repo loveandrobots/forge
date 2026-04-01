@@ -621,3 +621,167 @@ class TestBatchCreateTasks:
             },
         )
         assert resp.status_code == 404
+
+    def test_batch_create_atomic_rollback(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        """If one task in a batch has an invalid project, no tasks are created."""
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": project_id,
+                        "title": "Good task",
+                    },
+                    {
+                        "project_id": "nonexistent",
+                        "title": "Bad project task",
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 404
+        # Verify the first task was NOT created (atomicity)
+        all_tasks = client.get("/api/tasks").json()
+        assert not any(t["title"] == "Good task" for t in all_tasks)
+
+
+class TestUpdateTaskFlow:
+    def test_update_flow_on_backlog_task(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Backlog flow change",
+                "flow": "standard",
+            },
+        )
+        task_id = resp.json()["id"]
+        resp = client.patch(
+            f"/api/tasks/{task_id}",
+            json={"flow": "quick"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["flow"] == "quick"
+
+    def test_update_flow_on_active_task_rejected(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Active flow change",
+                "flow": "standard",
+            },
+        )
+        task_id = resp.json()["id"]
+        client.post(f"/api/tasks/{task_id}/activate")
+        resp = client.patch(
+            f"/api/tasks/{task_id}",
+            json={"flow": "quick"},
+        )
+        assert resp.status_code == 400
+        assert "backlog" in resp.json()["detail"]
+
+    def test_update_flow_invalid_value_rejected(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Bad flow update"},
+        )
+        task_id = resp.json()["id"]
+        resp = client.patch(
+            f"/api/tasks/{task_id}",
+            json={"flow": "bogus"},
+        )
+        assert resp.status_code == 422
+
+
+class TestResetTaskFlowAware:
+    def _make_quick_task_needs_human(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> str:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Quick reset test",
+                "flow": "quick",
+            },
+        )
+        task_id = resp.json()["id"]
+        client.post(f"/api/tasks/{task_id}/activate")
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            database.update_task(conn, task_id, status="needs_human")
+        finally:
+            conn.close()
+        return task_id
+
+    def test_reset_quick_task_rejects_spec_stage(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        task_id = self._make_quick_task_needs_human(client, project_id, tmp_path)
+        resp = client.post(
+            f"/api/tasks/{task_id}/reset",
+            json={"from_stage": "spec"},
+        )
+        assert resp.status_code == 400
+        assert "Invalid stage" in resp.json()["detail"]
+
+    def test_reset_quick_task_rejects_plan_stage(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        task_id = self._make_quick_task_needs_human(client, project_id, tmp_path)
+        resp = client.post(
+            f"/api/tasks/{task_id}/reset",
+            json={"from_stage": "plan"},
+        )
+        assert resp.status_code == 400
+        assert "Invalid stage" in resp.json()["detail"]
+
+    def test_reset_quick_task_allows_implement_stage(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        task_id = self._make_quick_task_needs_human(client, project_id, tmp_path)
+        resp = client.post(
+            f"/api/tasks/{task_id}/reset",
+            json={"from_stage": "implement"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "implement"
+
+    def test_reset_quick_task_default_stage_is_implement(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        task_id = self._make_quick_task_needs_human(client, project_id, tmp_path)
+        resp = client.post(f"/api/tasks/{task_id}/reset")
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "implement"
+
+    def test_reset_standard_task_default_stage_is_spec(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Standard reset test",
+                "flow": "standard",
+            },
+        )
+        task_id = resp.json()["id"]
+        client.post(f"/api/tasks/{task_id}/activate")
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            database.update_task(conn, task_id, status="needs_human")
+        finally:
+            conn.close()
+        resp = client.post(f"/api/tasks/{task_id}/reset")
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "spec"

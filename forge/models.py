@@ -70,6 +70,7 @@ class TaskUpdate(BaseModel):
     plan_path: str | None = None
     review_path: str | None = None
     skill_overrides: list[str] | None = None
+    flow: Literal["standard", "quick"] | None = None
 
 
 class TaskResponse(BaseModel):
@@ -86,7 +87,7 @@ class TaskResponse(BaseModel):
     review_path: str | None = None
     skill_overrides: list[str] | None = None
     max_retries: int
-    flow: str = "standard"
+    flow: Literal["standard", "quick"] = "standard"
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
