@@ -33,6 +33,9 @@
                     {% if task.flow == 'quick' %}
                     <span class="badge badge-flow-quick">Quick</span>
                     {% endif %}
+                    {% if task.escalated_from_quick %}
+                    <span class="badge badge-info">Escalated</span>
+                    {% endif %}
                     {% if task.status == 'needs_human' %}
                     <span class="badge badge-warning">Needs Human</span>
                     {% elif task.status == 'failed' %}

@@ -88,6 +88,7 @@ class TaskResponse(BaseModel):
     skill_overrides: list[str] | None = None
     max_retries: int
     flow: Literal["standard", "quick"] = "standard"
+    escalated_from_quick: bool = False
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None

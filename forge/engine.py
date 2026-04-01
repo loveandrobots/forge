@@ -635,6 +635,37 @@ class PipelineEngine:
                 task_id=task_id,
             )
 
+    def _escalate_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        task: dict,
+    ) -> None:
+        """Escalate a quick-flow task to standard flow, resetting to spec stage."""
+        task_id = task["id"]
+        database.update_task(
+            conn,
+            task_id,
+            flow="standard",
+            current_stage="spec",
+            escalated_from_quick=1,
+        )
+        database.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="queued",
+        )
+        self._log(
+            "info",
+            f"Task {task_id} auto-escalated from quick flow to standard flow — resetting to spec stage",
+            task_id=task_id,
+        )
+
+    def _should_escalate(self, task: dict) -> bool:
+        """Check if a quick-flow task is eligible for escalation to standard."""
+        return task.get("flow") == "quick" and not task.get("escalated_from_quick")
+
     async def bounce_task(
         self,
         conn: sqlite3.Connection,
@@ -650,14 +681,17 @@ class PipelineEngine:
             # Review bounces go back to implement with shared retry budget
             retry_count = database.get_implement_review_retry_count(conn, task_id)
             if retry_count >= max_retries:
-                database.update_task(conn, task_id, status="needs_human")
-                self._log(
-                    "warn",
-                    f"Task {task_id} implement→review loop exceeded max retries ({max_retries}) — needs human",
-                    task_id=task_id,
-                )
-                if project is not None:
-                    await self._maybe_auto_pause(conn, task_id, project)
+                if self._should_escalate(task):
+                    self._escalate_to_standard(conn, task)
+                else:
+                    database.update_task(conn, task_id, status="needs_human")
+                    self._log(
+                        "warn",
+                        f"Task {task_id} implement→review loop exceeded max retries ({max_retries}) — needs human",
+                        task_id=task_id,
+                    )
+                    if project is not None:
+                        await self._maybe_auto_pause(conn, task_id, project)
             else:
                 # Bounce back to implement stage
                 implement_retry_count = database.get_retry_count(conn, task_id, "implement")
@@ -679,14 +713,17 @@ class PipelineEngine:
             # Existing behavior for spec, plan, implement
             retry_count = database.get_retry_count(conn, task_id, stage)
             if retry_count >= max_retries:
-                database.update_task(conn, task_id, status="needs_human")
-                self._log(
-                    "warn",
-                    f"Task {task_id} stage {stage} exceeded max retries ({max_retries}) — needs human",
-                    task_id=task_id,
-                )
-                if project is not None:
-                    await self._maybe_auto_pause(conn, task_id, project)
+                if self._should_escalate(task):
+                    self._escalate_to_standard(conn, task)
+                else:
+                    database.update_task(conn, task_id, status="needs_human")
+                    self._log(
+                        "warn",
+                        f"Task {task_id} stage {stage} exceeded max retries ({max_retries}) — needs human",
+                        task_id=task_id,
+                    )
+                    if project is not None:
+                        await self._maybe_auto_pause(conn, task_id, project)
             else:
                 new_attempt = retry_count + 1
                 database.insert_stage_run(
@@ -826,15 +863,18 @@ class PipelineEngine:
             # Review errors use the shared implement→review budget
             shared_count = database.get_implement_review_retry_count(conn, task_id)
             if shared_count >= max_retries:
-                database.update_task(conn, task_id, status="needs_human")
-                self._log(
-                    "warn",
-                    f"Task {task_id} implement→review loop exceeded max retries ({max_retries}) — needs human",
-                    task_id=task_id,
-                    stage_run_id=stage_run_id,
-                )
-                if project is not None:
-                    await self._maybe_auto_pause(conn, task_id, project)
+                if self._should_escalate(task):
+                    self._escalate_to_standard(conn, task)
+                else:
+                    database.update_task(conn, task_id, status="needs_human")
+                    self._log(
+                        "warn",
+                        f"Task {task_id} implement→review loop exceeded max retries ({max_retries}) — needs human",
+                        task_id=task_id,
+                        stage_run_id=stage_run_id,
+                    )
+                    if project is not None:
+                        await self._maybe_auto_pause(conn, task_id, project)
             else:
                 # Retry review (not implement) — error is infrastructure, not quality
                 review_retry_count = database.get_retry_count(conn, task_id, "review")
@@ -855,15 +895,18 @@ class PipelineEngine:
         else:
             retry_count = database.get_retry_count(conn, task_id, stage)
             if retry_count >= max_retries:
-                database.update_task(conn, task_id, status="needs_human")
-                self._log(
-                    "warn",
-                    f"Task {task_id} stage {stage} exceeded max retries after error — needs human",
-                    task_id=task_id,
-                    stage_run_id=stage_run_id,
-                )
-                if project is not None:
-                    await self._maybe_auto_pause(conn, task_id, project)
+                if self._should_escalate(task):
+                    self._escalate_to_standard(conn, task)
+                else:
+                    database.update_task(conn, task_id, status="needs_human")
+                    self._log(
+                        "warn",
+                        f"Task {task_id} stage {stage} exceeded max retries after error — needs human",
+                        task_id=task_id,
+                        stage_run_id=stage_run_id,
+                    )
+                    if project is not None:
+                        await self._maybe_auto_pause(conn, task_id, project)
             else:
                 new_attempt = retry_count + 1
                 database.insert_stage_run(

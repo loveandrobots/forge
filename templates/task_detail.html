@@ -14,6 +14,9 @@
             {% else %}
             <span class="badge">Standard Flow</span>
             {% endif %}
+            {% if task.escalated_from_quick %}
+            <span class="badge badge-info">Escalated from Quick Flow</span>
+            {% endif %}
             <span class="priority">Priority: {{ task.priority }}</span>
             {% if project %}
             <span class="project-name">{{ project.name }}</span>

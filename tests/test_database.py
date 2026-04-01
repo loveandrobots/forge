@@ -710,3 +710,36 @@ class TestFlowField:
             db.insert_task(
                 conn, project_id=project_id, title="Bad", flow="invalid"
             )
+
+
+# ---------------------------------------------------------------------------
+# Escalated from quick field
+# ---------------------------------------------------------------------------
+
+
+class TestEscalatedFromQuick:
+    def test_insert_task_escalated_from_quick_default(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        """Insert a task without specifying escalated_from_quick — defaults to 0."""
+        tid = db.insert_task(conn, project_id=project_id, title="Default escalated")
+        row = db.get_task(conn, tid)
+        assert row["escalated_from_quick"] == 0
+
+    def test_update_task_escalated_from_quick(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        """Update escalated_from_quick to 1 and verify."""
+        tid = db.insert_task(conn, project_id=project_id, title="Escalate me")
+        db.update_task(conn, tid, escalated_from_quick=1)
+        row = db.get_task(conn, tid)
+        assert row["escalated_from_quick"] == 1
+
+    def test_task_response_includes_escalated_from_quick(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        """The escalated_from_quick column is present in task rows."""
+        tid = db.insert_task(conn, project_id=project_id, title="Check column")
+        row = db.get_task(conn, tid)
+        assert "escalated_from_quick" in row.keys()
+        assert row["escalated_from_quick"] == 0

@@ -589,3 +589,58 @@ class TestStaticAssets:
         resp = client.get("/static/app.js")
         assert resp.status_code == 200
         assert "javascript" in resp.headers["content-type"]
+
+
+# ---------------------------------------------------------------------------
+# Escalation badges
+# ---------------------------------------------------------------------------
+
+
+class TestEscalationBadges:
+    def test_pipeline_shows_escalated_badge(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Pipeline view shows 'Escalated' badge for escalated tasks."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Escalated Task",
+                flow="standard",
+            )
+            database.update_task(
+                conn, tid, status="active", current_stage="spec", escalated_from_quick=1,
+            )
+        finally:
+            conn.close()
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "Escalated" in resp.text
+
+    def test_task_detail_shows_escalated_indicator(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Task detail page shows 'Escalated from Quick Flow' indicator."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Escalated Detail Task",
+                flow="standard",
+            )
+            database.update_task(
+                conn, tid, status="active", current_stage="spec", escalated_from_quick=1,
+            )
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert resp.status_code == 200
+        assert "Escalated from Quick Flow" in resp.text

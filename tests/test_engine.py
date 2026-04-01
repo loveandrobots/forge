@@ -2505,3 +2505,267 @@ class TestGuardRetryAfterResetFailure:
             conn, task_id=task_id, stage="spec", status="queued"
         )
         assert len(queued) == 1
+
+
+# ---------------------------------------------------------------------------
+# Auto-escalation from quick flow to standard flow
+# ---------------------------------------------------------------------------
+
+
+class TestAutoEscalation:
+    @pytest.mark.asyncio
+    async def test_bounce_task_escalates_quick_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick-flow task auto-escalates when retries exhausted via bounce."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Quick task",
+            priority=1,
+            max_retries=1,
+            flow="quick",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        # Exhaust the implement→review budget
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="fail",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        task = db.get_task(conn, task_id)
+        assert task["flow"] == "standard"
+        assert task["current_stage"] == "spec"
+        assert task["escalated_from_quick"] == 1
+        assert task["status"] == "active"
+
+        # A queued spec stage_run should exist
+        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        assert len(queued) == 1
+
+    @pytest.mark.asyncio
+    async def test_bounce_task_escalated_task_goes_to_needs_human(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Already-escalated task goes to needs_human (no second escalation)."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Already escalated",
+            priority=1,
+            max_retries=1,
+            flow="standard",
+        )
+        db.update_task(
+            conn, task_id,
+            status="active", current_stage="review", escalated_from_quick=1,
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="fail",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_error_retry_escalates_quick_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick-flow task escalates via _handle_error_retry when retries exhausted."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Quick error",
+            priority=1,
+            max_retries=1,
+            flow="quick",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "implement", sr_id)
+
+        task = db.get_task(conn, task_id)
+        assert task["flow"] == "standard"
+        assert task["current_stage"] == "spec"
+        assert task["escalated_from_quick"] == 1
+
+        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        assert len(queued) == 1
+
+    @pytest.mark.asyncio
+    async def test_error_retry_escalated_task_goes_to_needs_human(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Already-escalated task goes to needs_human via error retry."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Already escalated error",
+            priority=1,
+            max_retries=1,
+            flow="standard",
+        )
+        db.update_task(
+            conn, task_id,
+            status="active", current_stage="implement", escalated_from_quick=1,
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "implement", sr_id)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_standard_flow_not_affected_by_escalation(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Standard-flow tasks go to needs_human, never trigger escalation."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Standard task",
+            priority=1,
+            max_retries=1,
+            flow="standard",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="fail",
+            gate_name="post-implement.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "implement", gate_result)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        assert task["escalated_from_quick"] == 0
+
+    @pytest.mark.asyncio
+    async def test_escalation_preserves_existing_stage_runs(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Old stage_runs are preserved after escalation for audit trail."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Preserve runs",
+            priority=1,
+            max_retries=1,
+            flow="quick",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        old_sr = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="fail",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        # Old stage_run should still exist
+        old_run = db.get_stage_run(conn, old_sr)
+        assert old_run is not None
+        assert old_run["status"] == "bounced"
+
+        # New spec run added
+        all_runs = db.list_stage_runs(conn, task_id=task_id)
+        stages = [r["stage"] for r in all_runs]
+        assert "implement" in stages
+        assert "spec" in stages
+
+    @pytest.mark.asyncio
+    async def test_escalation_logs_event(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Escalation event is logged to run_log."""
+        engine = PipelineEngine(settings, ":memory:")
+        safe_conn = _UnclosableConnection(conn)
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            task_id = db.insert_task(
+                conn,
+                project_id=project_id,
+                title="Log test",
+                priority=1,
+                max_retries=1,
+                flow="quick",
+            )
+            db.update_task(conn, task_id, status="active", current_stage="implement")
+            db.insert_stage_run(
+                conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+            )
+
+            task = dict(db.get_task(conn, task_id))
+            gate_result = GateResult(
+                passed=False, exit_code=1, stdout="", stderr="fail",
+                gate_name="post-review.sh", duration_seconds=1.0,
+            )
+
+            await engine.bounce_task(conn, task, "review", gate_result)
+
+        # Check run_log for escalation message
+        logs = db.get_logs(conn, task_id=task_id)
+        escalation_logs = [
+            log for log in logs
+            if "escalat" in log["message"].lower() and log["level"] == "info"
+        ]
+        assert len(escalation_logs) >= 1
+        assert task_id in escalation_logs[0]["message"]

@@ -116,6 +116,13 @@ def migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    try:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN escalated_from_quick INTEGER NOT NULL DEFAULT 0"
+        )
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # Enable pause_after_completion for Forge's own project
     conn.execute("UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'")
     conn.commit()
@@ -365,6 +372,7 @@ def update_task(
     skill_overrides: list[str] | None = None,
     completed_at: str | None = None,
     flow: str | None = None,
+    escalated_from_quick: int | None = None,
 ) -> bool:
     """Update only the provided fields. Always sets updated_at. Returns True if modified."""
     fields: list[str] = ["updated_at = ?"]
@@ -382,6 +390,7 @@ def update_task(
         ("skill_overrides", skill_overrides, _json_encode),
         ("completed_at", completed_at, None),
         ("flow", flow, None),
+        ("escalated_from_quick", escalated_from_quick, None),
     ]:
         if val is not None:
             fields.append(f"{col} = ?")
