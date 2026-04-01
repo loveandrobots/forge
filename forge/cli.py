@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from forge import database
-from forge.config import DB_PATH
+from forge.config import DB_PATH, FLOW_STAGES, STAGES
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -78,9 +78,8 @@ def main(argv: list[str] | None = None) -> None:
     reset_p.add_argument("task_id", help="Task ID to reset")
     reset_p.add_argument(
         "--from-stage",
-        default="spec",
-        choices=["spec", "plan", "implement", "review"],
-        help="Stage to restart from (default: spec)",
+        default=None,
+        help="Stage to restart from (default: first stage of the task's flow)",
     )
 
     # serve
@@ -221,9 +220,19 @@ def _cmd_reset_task(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-        database.reset_task(conn, args.task_id, args.from_stage, task["title"])
+        flow = task["flow"] if task["flow"] else "standard"
+        flow_stages = FLOW_STAGES.get(flow, STAGES)
+        from_stage = args.from_stage if args.from_stage else flow_stages[0]
+        if from_stage not in flow_stages:
+            print(
+                f"Error: stage '{from_stage}' is not valid for the '{flow}' flow. "
+                f"Valid stages: {', '.join(flow_stages)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        database.reset_task(conn, args.task_id, from_stage, task["title"])
         print(
-            f"Task '{task['title']}' reset to {args.from_stage} stage (id={args.task_id})."
+            f"Task '{task['title']}' reset to {from_stage} stage (id={args.task_id})."
         )
     finally:
         conn.close()

@@ -276,6 +276,50 @@ class TestResetTaskCLI:
         with pytest.raises(SystemExit, match="1"):
             cli_main(["reset-task", task_id])
 
+    def test_cli_reset_quick_flow_default_stage(self, client, project_id, tmp_path):
+        """Quick-flow task defaults to 'implement' (first stage of quick flow)."""
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Quick task", "priority": 1, "flow": "quick"},
+        )
+        qid = resp.json()["id"]
+        client.post(f"/api/tasks/{qid}/activate")
+        client.post(f"/api/tasks/{qid}/pause")
+        cli_main(["reset-task", qid])
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            task = database.get_task(conn, qid)
+            assert task["current_stage"] == "implement"
+            runs = database.list_stage_runs(conn, task_id=qid)
+            assert len(runs) == 1
+            assert runs[0]["stage"] == "implement"
+        finally:
+            conn.close()
+
+    def test_cli_reset_quick_flow_rejects_spec_stage(self, client, project_id):
+        """Quick-flow task rejects --from-stage spec (not in quick flow)."""
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Quick task 2", "priority": 1, "flow": "quick"},
+        )
+        qid = resp.json()["id"]
+        client.post(f"/api/tasks/{qid}/activate")
+        client.post(f"/api/tasks/{qid}/pause")
+        with pytest.raises(SystemExit, match="1"):
+            cli_main(["reset-task", qid, "--from-stage", "spec"])
+
+    def test_cli_reset_quick_flow_rejects_plan_stage(self, client, project_id):
+        """Quick-flow task rejects --from-stage plan (not in quick flow)."""
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Quick task 3", "priority": 1, "flow": "quick"},
+        )
+        qid = resp.json()["id"]
+        client.post(f"/api/tasks/{qid}/activate")
+        client.post(f"/api/tasks/{qid}/pause")
+        with pytest.raises(SystemExit, match="1"):
+            cli_main(["reset-task", qid, "--from-stage", "plan"])
+
 
 # ---------------------------------------------------------------------------
 # Dashboard template tests
