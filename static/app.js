@@ -13,4 +13,25 @@
     if (logFeed) {
         logFeed.scrollTop = logFeed.scrollHeight;
     }
+
+    /* Preserve kanban scroll position across htmx refreshes */
+    var kanbanScrollLeft = 0;
+
+    document.body.addEventListener("htmx:beforeSwap", function (event) {
+        var kanban = document.querySelector(".kanban");
+        if (kanban) {
+            kanbanScrollLeft = kanban.scrollLeft;
+        }
+    });
+
+    document.body.addEventListener("htmx:afterSettle", function (event) {
+        if (kanbanScrollLeft > 0) {
+            var kanban = document.querySelector(".kanban");
+            if (kanban) {
+                requestAnimationFrame(function () {
+                    kanban.scrollLeft = kanbanScrollLeft;
+                });
+            }
+        }
+    });
 })();
