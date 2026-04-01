@@ -453,6 +453,93 @@ class TestTaskDetail:
         assert 'value="implement"' in html
         assert 'value="review"' in html
 
+    def test_description_preserves_newlines(
+        self, tmp_path, client: TestClient, sample_project
+    ) -> None:
+        """Newlines in task descriptions are present in rendered HTML."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Multiline Task",
+                description="Line one\nLine two\nLine three",
+                priority=5,
+            )
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        html = resp.text
+        assert "Line one\nLine two\nLine three" in html
+        assert "<p>" not in html.split("task-description")[1].split("</div>")[0]
+
+    def test_description_html_escaped(
+        self, tmp_path, client: TestClient, sample_project
+    ) -> None:
+        """HTML in descriptions is escaped — no XSS risk."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="XSS Task",
+                description="<script>alert('xss')</script>\nSafe line",
+                priority=5,
+            )
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        html = resp.text
+        assert "&lt;script&gt;" in html
+        assert "<script>alert" not in html
+
+    def test_empty_description_hidden(
+        self, tmp_path, client: TestClient, sample_project
+    ) -> None:
+        """Empty description does not render the .task-description div."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="No Desc Task",
+                description="",
+                priority=5,
+            )
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert "task-description" not in resp.text
+
+    def test_single_line_description_no_p_tag(
+        self, tmp_path, client: TestClient, sample_project
+    ) -> None:
+        """Single-line descriptions render without a <p> wrapper."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Single Line Task",
+                description="Just one line",
+                priority=5,
+            )
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        desc_section = resp.text.split("task-description")[1].split("</div>")[0]
+        assert "Just one line" in desc_section
+        assert "<p>" not in desc_section
+
+    def test_css_has_pre_wrap(self) -> None:
+        """The .task-description CSS rule includes white-space: pre-wrap."""
+        import pathlib
+
+        css = pathlib.Path("static/styles.css").read_text()
+        # Find the .task-description block and check for pre-wrap
+        idx = css.index(".task-description")
+        block = css[idx : css.index("}", idx) + 1]
+        assert "white-space: pre-wrap" in block
 
 
 # ---------------------------------------------------------------------------
