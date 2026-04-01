@@ -1705,6 +1705,177 @@ class TestProcessFollowUps:
 
         assert not os.path.exists(str(follow_ups_file))
 
+    @pytest.mark.asyncio
+    async def test_process_follow_ups_passes_flow_field(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Follow-up entries with flow: quick create quick-flow tasks."""
+        import json
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [
+            {"title": "Quick fix", "description": "Simple fix", "flow": "quick"},
+        ]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Quick fix"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["flow"] == "quick"
+
+    @pytest.mark.asyncio
+    async def test_process_follow_ups_defaults_flow_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Follow-up entries without a flow field default to standard."""
+        import json
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [
+            {"title": "No flow", "description": "Missing flow field"},
+        ]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "No flow"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["flow"] == "standard"
+
+    @pytest.mark.asyncio
+    async def test_process_follow_ups_invalid_flow_falls_back_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Follow-up entries with invalid flow values fall back to standard."""
+        import json
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [
+            {"title": "Bad flow", "description": "Invalid", "flow": "invalid_value"},
+        ]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Bad flow"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["flow"] == "standard"
+
+    @pytest.mark.asyncio
+    async def test_process_follow_ups_string_entry_uses_standard_flow(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Plain string follow-up entries default to standard flow."""
+        import json
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = ["String entry: description here"]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "String entry"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["flow"] == "standard"
+
+    @pytest.mark.asyncio
+    async def test_process_follow_ups_mixed_flows(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Multiple follow-up entries with different flows are handled correctly."""
+        import json
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [
+            {"title": "Quick one", "description": "Fast", "flow": "quick"},
+            {"title": "Standard one", "description": "Normal", "flow": "standard"},
+            {"title": "Default one", "description": "No flow field"},
+        ]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        by_title = {t["title"]: t for t in backlog}
+        assert by_title["Quick one"]["flow"] == "quick"
+        assert by_title["Standard one"]["flow"] == "standard"
+        assert by_title["Default one"]["flow"] == "standard"
+
 
 class TestTaskPriority:
     def test_highest_priority_picked(

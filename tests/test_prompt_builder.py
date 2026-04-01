@@ -489,3 +489,16 @@ class TestBuildPromptReviewCategorization:
         assert "_forge/follow-ups/" in prompt
         assert "title" in prompt
         assert "description" in prompt
+
+    def test_review_template_mentions_flow_field(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        """Review prompt instructs the agent about the optional flow field in follow-ups."""
+        from forge.prompt_builder import REVIEW_TEMPLATE
+
+        assert "flow" in REVIEW_TEMPLATE
+        assert '"quick"' in REVIEW_TEMPLATE
+        assert '"standard"' in REVIEW_TEMPLATE
