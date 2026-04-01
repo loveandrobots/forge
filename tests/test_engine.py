@@ -1774,3 +1774,190 @@ class TestGitResultErrorContext:
         # The error_message includes the description prefix + truncated stderr
         # The stderr portion should be at most 4096 chars
         assert len(sr["error_message"]) <= 4096 + 200  # prefix + truncated stderr
+
+
+# ---------------------------------------------------------------------------
+# Review error retry with shared budget
+# ---------------------------------------------------------------------------
+
+
+class TestReviewErrorSharedBudget:
+    """Tests for review-stage error retries using the shared implement→review budget."""
+
+    @pytest.mark.asyncio
+    async def test_review_error_uses_shared_budget(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 1, 2: Review error checks shared budget; exhaustion → needs_human."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=2
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # 1 bounced implement + 1 bounced review = shared count 2, meets max_retries=2
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_review_error_retries_review_not_implement(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 3: Review errors retry review stage, not implement."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=5
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id)
+
+        queued_review = db.list_stage_runs(
+            conn, task_id=task_id, stage="review", status="queued"
+        )
+        assert len(queued_review) == 1
+
+        queued_implement = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(queued_implement) == 0
+
+    @pytest.mark.asyncio
+    async def test_review_error_retry_attempt_sequential(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 4: Attempt numbering is sequential for review error retries."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=5
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="review", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 2
+
+    @pytest.mark.asyncio
+    async def test_implement_error_retry_unchanged(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 5: Non-review error retry path is unchanged (uses per-stage budget)."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=5
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "implement", sr_id)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 2
+
+    @pytest.mark.asyncio
+    async def test_bounce_task_shared_budget_counts_errors(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 6: bounce_task shared budget now counts errors too."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=2
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # 1 error implement + 1 error review = shared count 2, meets max_retries=2
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="error"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="ISSUES",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.fixture
+    def pause_project_id(self, conn: sqlite3.Connection) -> str:
+        return db.insert_project(
+            conn,
+            name="PauseProject",
+            repo_path="/tmp/repo",
+            gate_dir="/tmp/repo/gates",
+            pause_after_completion=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_review_error_auto_pause(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        pause_project_id: str,
+    ) -> None:
+        """AC 2: Auto-pause works for review error exhaustion."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+        task_id = db.insert_task(
+            conn, project_id=pause_project_id, title="T", priority=1, max_retries=1
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="error"
+        )
+        # 1 error review run meets max_retries=1
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, pause_project_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id, project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        assert engine.running is False

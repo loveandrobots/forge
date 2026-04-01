@@ -564,8 +564,8 @@ def reset_task(
 def get_implement_review_retry_count(conn: sqlite3.Connection, task_id: str) -> int:
     cur = conn.execute(
         """SELECT COUNT(*) FROM stage_runs
-           WHERE task_id = ? AND stage IN ('implement', 'review') 
-           AND status = 'bounced'""",
+           WHERE task_id = ? AND stage IN ('implement', 'review')
+           AND status IN ('bounced', 'error')""",
         (task_id,),
     )
     return cur.fetchone()[0]

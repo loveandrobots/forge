@@ -808,33 +808,64 @@ class PipelineEngine:
         """After an error, retry or mark failed."""
         task_id = task["id"]
         max_retries = task.get("max_retries", self.settings.engine.default_max_retries)
-        retry_count = database.get_retry_count(conn, task_id, stage)
 
-        if retry_count >= max_retries:
-            database.update_task(conn, task_id, status="needs_human")
-            self._log(
-                "warn",
-                f"Task {task_id} stage {stage} exceeded max retries after error — needs human",
-                task_id=task_id,
-                stage_run_id=stage_run_id,
-            )
-            if project is not None:
-                await self._maybe_auto_pause(conn, task_id, project)
+        if stage == "review":
+            # Review errors use the shared implement→review budget
+            shared_count = database.get_implement_review_retry_count(conn, task_id)
+            if shared_count >= max_retries:
+                database.update_task(conn, task_id, status="needs_human")
+                self._log(
+                    "warn",
+                    f"Task {task_id} implement→review loop exceeded max retries ({max_retries}) — needs human",
+                    task_id=task_id,
+                    stage_run_id=stage_run_id,
+                )
+                if project is not None:
+                    await self._maybe_auto_pause(conn, task_id, project)
+            else:
+                # Retry review (not implement) — error is infrastructure, not quality
+                review_retry_count = database.get_retry_count(conn, task_id, "review")
+                new_attempt = review_retry_count + 1
+                database.insert_stage_run(
+                    conn,
+                    task_id=task_id,
+                    stage="review",
+                    attempt=new_attempt,
+                    status="queued",
+                )
+                self._log(
+                    "info",
+                    f"Task {task_id} stage review queued for retry after error (attempt {new_attempt})",
+                    task_id=task_id,
+                    stage_run_id=stage_run_id,
+                )
         else:
-            new_attempt = retry_count + 1
-            database.insert_stage_run(
-                conn,
-                task_id=task_id,
-                stage=stage,
-                attempt=new_attempt,
-                status="queued",
-            )
-            self._log(
-                "info",
-                f"Task {task_id} stage {stage} queued for retry after error (attempt {new_attempt})",
-                task_id=task_id,
-                stage_run_id=stage_run_id,
-            )
+            retry_count = database.get_retry_count(conn, task_id, stage)
+            if retry_count >= max_retries:
+                database.update_task(conn, task_id, status="needs_human")
+                self._log(
+                    "warn",
+                    f"Task {task_id} stage {stage} exceeded max retries after error — needs human",
+                    task_id=task_id,
+                    stage_run_id=stage_run_id,
+                )
+                if project is not None:
+                    await self._maybe_auto_pause(conn, task_id, project)
+            else:
+                new_attempt = retry_count + 1
+                database.insert_stage_run(
+                    conn,
+                    task_id=task_id,
+                    stage=stage,
+                    attempt=new_attempt,
+                    status="queued",
+                )
+                self._log(
+                    "info",
+                    f"Task {task_id} stage {stage} queued for retry after error (attempt {new_attempt})",
+                    task_id=task_id,
+                    stage_run_id=stage_run_id,
+                )
 
     def _process_follow_ups(
         self,
