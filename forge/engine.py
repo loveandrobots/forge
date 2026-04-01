@@ -74,7 +74,9 @@ async def reset_repo_state(repo_path: str, default_branch: str) -> dict:
     """
     log_lines: list[str] = []
 
-    async def _run(*cmd: str, allow_failure: bool = False) -> bool:
+    async def _run(
+        *cmd: str, allow_failure: bool = False
+    ) -> bool:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=repo_path,
@@ -232,9 +234,7 @@ class PipelineEngine:
                     )
                     if not branch_result.success:
                         error_detail = _truncate_stderr(branch_result.stderr)
-                        error_msg = (
-                            f"Failed to create branch {branch_name}:\n{error_detail}"
-                        )
+                        error_msg = f"Failed to create branch {branch_name}:\n{error_detail}"
                         self._log(
                             "error",
                             error_msg,
@@ -660,12 +660,8 @@ class PipelineEngine:
                     await self._maybe_auto_pause(conn, task_id, project)
             else:
                 # Bounce back to implement stage
-                implement_retry_count = database.get_retry_count(
-                    conn, task_id, "implement"
-                )
-                new_attempt = (
-                    implement_retry_count + 2
-                )  # +1 for original, +1 for this retry
+                implement_retry_count = database.get_retry_count(conn, task_id, "implement")
+                new_attempt = implement_retry_count + 2  # +1 for original, +1 for this retry
                 database.update_task(conn, task_id, current_stage="implement")
                 database.insert_stage_run(
                     conn,
@@ -743,9 +739,7 @@ class PipelineEngine:
                     task_id,
                 )
             if reset_ok:
-                await self._handle_error_retry(
-                    conn, _row_to_dict(task_row), stage, sr_id
-                )
+                await self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id)
 
     async def _check_timeouts(
         self,
@@ -923,8 +917,7 @@ class PipelineEngine:
                 else:
                     logger.warning(
                         "Skipping invalid follow-up entry for task %s: %r",
-                        task_id,
-                        entry,
+                        task_id, entry,
                     )
                     continue
                 new_task_id = database.insert_task(
