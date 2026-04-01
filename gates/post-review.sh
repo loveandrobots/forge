@@ -20,28 +20,21 @@ if [ ! -f "$REVIEW_FILE" ]; then
     exit 1
 fi
 
-# Check for verdict
-HAS_PASS=$(grep -ci 'PASS' "$REVIEW_FILE" || true)
-HAS_ISSUES=$(grep -ci 'ISSUES' "$REVIEW_FILE" || true)
+# Extract just the verdict line
+VERDICT_LINE=$(grep -i 'verdict' "$REVIEW_FILE" | head -1)
 
-if [ "$HAS_PASS" -eq 0 ] && [ "$HAS_ISSUES" -eq 0 ]; then
-    echo "FAIL: Review file must contain a verdict ('PASS' or 'ISSUES')" >&2
-    exit 1
-fi
-
-# If verdict is ISSUES, check for actionable items
-if [ "$HAS_ISSUES" -gt 0 ] && [ "$HAS_PASS" -eq 0 ]; then
-    # Look for list items (lines starting with - or * or numbered) after ISSUES
-    ACTIONABLE_COUNT=$(grep -cE '^\s*[-*]\s+\S|^#*\s*[0-9]+\.\s+\S' "$REVIEW_FILE" || true)
+if echo "$VERDICT_LINE" | grep -qi 'ISSUES'; then
+    ACTIONABLE_COUNT=$(grep -cE '^\s*[-*]\s+\S|^\s*[0-9]+\.\s+\S' "$REVIEW_FILE" || true)
     if [ "$ACTIONABLE_COUNT" -eq 0 ]; then
         echo "FAIL: Review with ISSUES verdict must include specific actionable items" >&2
         exit 1
     fi
-    # ISSUES verdict with actionable items — fail the gate so the engine
-    # bounces the task back to implement for fixes.
     echo "FAIL: Review verdict is ISSUES with $ACTIONABLE_COUNT actionable item(s). Bouncing to implement." >&2
     exit 1
+elif echo "$VERDICT_LINE" | grep -qi 'PASS'; then
+    echo "post-review gate passed"
+    exit 0
+else
+    echo "FAIL: Could not determine verdict from line: $VERDICT_LINE" >&2
+    exit 1
 fi
-
-echo "post-review gate passed"
-exit 0
