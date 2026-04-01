@@ -947,16 +947,16 @@ class PipelineEngine:
                 if isinstance(entry, dict):
                     title = entry.get("title", "Follow-up")
                     description = entry.get("description", "")
-                    flow = entry.get("flow", "standard")
+                    flow = entry.get("flow", "quick")
                     if flow not in VALID_FLOWS:
-                        flow = "standard"
+                        flow = "quick"
                 elif isinstance(entry, str):
                     if ": " in entry:
                         title, description = entry.split(": ", 1)
                     else:
                         title = entry
                         description = ""
-                    flow = "standard"
+                    flow = "quick"
                 else:
                     logger.warning(
                         "Skipping invalid follow-up entry for task %s: %r",

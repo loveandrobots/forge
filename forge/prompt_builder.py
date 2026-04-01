@@ -118,7 +118,7 @@ A separate agent will fix the issues you identify. Your job is to find all of th
 Categorize every issue into one of two groups:
 
 1. **Task-related issues** — problems in code this task created or modified. These issues affect your verdict. List them in the "Issues found" section.
-2. **Pre-existing issues** — problems in code the task did NOT create or modify. These do NOT affect your verdict. Write them to `_forge/follow-ups/{task_id}.json` as a JSON array of objects, each with `title`, `description`, and an optional `flow` field. The `flow` field can be `"standard"` (default, full pipeline: spec → plan → implement → review) or `"quick"` (skip spec/plan, go straight to implement → review). Use `"quick"` for simple, self-contained fixes that don't need a spec or plan.
+2. **Pre-existing issues** — problems in code the task did NOT create or modify. These do NOT affect your verdict. Write them to `_forge/follow-ups/{task_id}.json` as a JSON array of objects, each with `title`, `description`, and an optional `flow` field. The `flow` field can be `"quick"` (default, skip spec/plan, go straight to implement → review) or `"standard"` (full pipeline: spec → plan → implement → review). Use `"standard"` for complex issues that need a spec and plan.
 
 Only task-related issues determine your verdict. Pre-existing issues must not cause an ISSUES verdict.
 
@@ -184,7 +184,7 @@ A separate agent will fix the issues you identify. Your job is to find all of th
 Categorize every issue into one of two groups:
 
 1. **Task-related issues** — problems in code this task created or modified. These issues affect your verdict. List them in the "Issues found" section.
-2. **Pre-existing issues** — problems in code the task did NOT create or modify. These do NOT affect your verdict. Write them to `_forge/follow-ups/{task_id}.json` as a JSON array of objects, each with `title`, `description`, and an optional `flow` field. The `flow` field can be `"standard"` (default, full pipeline: spec → plan → implement → review) or `"quick"` (skip spec/plan, go straight to implement → review). Use `"quick"` for simple, self-contained fixes that don't need a spec or plan.
+2. **Pre-existing issues** — problems in code the task did NOT create or modify. These do NOT affect your verdict. Write them to `_forge/follow-ups/{task_id}.json` as a JSON array of objects, each with `title`, `description`, and an optional `flow` field. The `flow` field can be `"quick"` (default, skip spec/plan, go straight to implement → review) or `"standard"` (full pipeline: spec → plan → implement → review). Use `"standard"` for complex issues that need a spec and plan.
 
 Only task-related issues determine your verdict. Pre-existing issues must not cause an ISSUES verdict.
 

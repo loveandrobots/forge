@@ -1740,14 +1740,14 @@ class TestProcessFollowUps:
         assert new_tasks[0]["flow"] == "quick"
 
     @pytest.mark.asyncio
-    async def test_process_follow_ups_defaults_flow_to_standard(
+    async def test_process_follow_ups_defaults_flow_to_quick(
         self,
         conn: sqlite3.Connection,
         settings: Settings,
         project_id: str,
         tmp_path,
     ) -> None:
-        """Follow-up entries without a flow field default to standard."""
+        """Follow-up entries without a flow field default to quick."""
         import json
 
         engine = PipelineEngine(settings, ":memory:")
@@ -1771,17 +1771,17 @@ class TestProcessFollowUps:
         backlog = db.list_tasks(conn, status="backlog")
         new_tasks = [t for t in backlog if t["title"] == "No flow"]
         assert len(new_tasks) == 1
-        assert new_tasks[0]["flow"] == "standard"
+        assert new_tasks[0]["flow"] == "quick"
 
     @pytest.mark.asyncio
-    async def test_process_follow_ups_invalid_flow_falls_back_to_standard(
+    async def test_process_follow_ups_invalid_flow_falls_back_to_quick(
         self,
         conn: sqlite3.Connection,
         settings: Settings,
         project_id: str,
         tmp_path,
     ) -> None:
-        """Follow-up entries with invalid flow values fall back to standard."""
+        """Follow-up entries with invalid flow values fall back to quick."""
         import json
 
         engine = PipelineEngine(settings, ":memory:")
@@ -1805,17 +1805,17 @@ class TestProcessFollowUps:
         backlog = db.list_tasks(conn, status="backlog")
         new_tasks = [t for t in backlog if t["title"] == "Bad flow"]
         assert len(new_tasks) == 1
-        assert new_tasks[0]["flow"] == "standard"
+        assert new_tasks[0]["flow"] == "quick"
 
     @pytest.mark.asyncio
-    async def test_process_follow_ups_string_entry_uses_standard_flow(
+    async def test_process_follow_ups_string_entry_uses_quick_flow(
         self,
         conn: sqlite3.Connection,
         settings: Settings,
         project_id: str,
         tmp_path,
     ) -> None:
-        """Plain string follow-up entries default to standard flow."""
+        """Plain string follow-up entries default to quick flow."""
         import json
 
         engine = PipelineEngine(settings, ":memory:")
@@ -1837,7 +1837,7 @@ class TestProcessFollowUps:
         backlog = db.list_tasks(conn, status="backlog")
         new_tasks = [t for t in backlog if t["title"] == "String entry"]
         assert len(new_tasks) == 1
-        assert new_tasks[0]["flow"] == "standard"
+        assert new_tasks[0]["flow"] == "quick"
 
     @pytest.mark.asyncio
     async def test_process_follow_ups_mixed_flows(
@@ -1874,7 +1874,7 @@ class TestProcessFollowUps:
         by_title = {t["title"]: t for t in backlog}
         assert by_title["Quick one"]["flow"] == "quick"
         assert by_title["Standard one"]["flow"] == "standard"
-        assert by_title["Default one"]["flow"] == "standard"
+        assert by_title["Default one"]["flow"] == "quick"
 
 
 class TestTaskPriority:
