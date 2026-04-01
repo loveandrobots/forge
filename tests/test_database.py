@@ -375,6 +375,26 @@ class TestStageRuns:
         )
         assert db.get_retry_count(conn, task_id, "spec") == 2
 
+    def test_get_implement_review_retry_count(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
+        # Bounced implement and review runs should be counted
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+        # Non-bounced runs should not be counted
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=2, status="passed"
+        )
+        # Different stage should not be counted
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="bounced"
+        )
+        assert db.get_implement_review_retry_count(conn, task_id) == 2
+
     def test_update_with_artifacts(
         self, conn: sqlite3.Connection, task_id: str
     ) -> None:

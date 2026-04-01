@@ -561,7 +561,7 @@ def reset_task(
         raise
 
 
-def get_implement_review_retry_count(conn, task_id):
+def get_implement_review_retry_count(conn: sqlite3.Connection, task_id: str) -> int:
     cur = conn.execute(
         """SELECT COUNT(*) FROM stage_runs
            WHERE task_id = ? AND stage IN ('implement', 'review') 
