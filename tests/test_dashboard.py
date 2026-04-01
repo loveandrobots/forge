@@ -472,6 +472,9 @@ class TestTaskDetail:
         html = resp.text
         assert "Line one\nLine two\nLine three" in html
         assert "<p>" not in html.split("task-description")[1].split("</div>")[0]
+        # Verify no leading/trailing whitespace inside the pre-wrap div
+        desc_block = html.split('class="task-description"')[1].split("</div>")[0]
+        assert desc_block.startswith(">Line one")
 
     def test_description_html_escaped(
         self, tmp_path, client: TestClient, sample_project
