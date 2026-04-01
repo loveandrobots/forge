@@ -207,6 +207,32 @@ class TestBuildPrompt:
         assert "The spec says do X." in prompt
         assert "_forge/plans/abc-123.md" in prompt
 
+    def test_plan_prompt_contains_acceptance_criteria_phrase(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """Plan prompt must contain 'acceptance criteria' so the post-plan gate passes."""
+        prompt = build_prompt(
+            "plan", sample_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "acceptance criteria" in prompt.lower()
+
+    def test_plan_prompt_has_acceptance_criteria_mapping_section(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """Plan prompt must instruct the agent to produce an 'Acceptance criteria mapping' section."""
+        prompt = build_prompt(
+            "plan", sample_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "Acceptance criteria mapping" in prompt
+
     def test_implement_prompt_includes_plan_and_spec(
         self,
         sample_task: dict,

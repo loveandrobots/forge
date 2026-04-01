@@ -46,6 +46,7 @@ Write an implementation plan for this spec. Save it to: _forge/plans/{task_id}.m
 
 The plan must include:
 - **Approach**: How you will implement this, in 2-3 paragraphs.
+- **Acceptance criteria mapping**: For each acceptance criterion in the spec, describe how the implementation will satisfy it. Use the exact criterion text from the spec.
 - **Files to create or modify**: An explicit list of every file path that will be touched.
 - **Test plan**: Descriptions of tests that verify each acceptance criterion from the spec. Be specific about what each test asserts.
 - **Risks**: Anything that might go wrong or need human input.
