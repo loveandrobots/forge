@@ -127,11 +127,82 @@ Load the following skills:
 
 {retry_context}"""
 
+QUICK_IMPLEMENT_TEMPLATE = """\
+You are working on the project "{project_name}".
+You are on branch: {branch_name}
+
+## Task
+{task_title}
+
+{task_description}
+
+## Your job
+Implement this task. Write tests alongside your implementation.
+
+Rules:
+- Write tests that verify the task requirements described above.
+- Follow the project's coding conventions (load the relevant skills).
+- Commit your work with clear, descriptive commit messages.
+- Do NOT mark this task as complete — the gate scripts will validate your work.
+
+Load the following skills:
+{skill_references}
+
+{retry_context}
+{review_feedback}"""
+
+QUICK_REVIEW_TEMPLATE = """\
+You are working on the project "{project_name}".
+You are reviewing branch: {branch_name}
+
+## Task description
+{task_title}
+
+{task_description}
+
+## Changes made
+{git_diff}
+
+## Your job
+Adversarially review this implementation against the task description above. Save your review to: _forge/reviews/{task_id}.md
+
+Your review must include:
+- **Verdict**: Either "PASS" or "ISSUES"
+- **Requirements check**: For each requirement in the task description, state whether the implementation satisfies it (yes/no with evidence).
+- **Issues found**: If verdict is ISSUES, list each issue with: what's wrong, where it is, and what should be done about it. Be specific — cite file paths and line numbers.
+
+Your job is to find problems, not confirm success. Look for: unverified requirements, missing edge case tests, violations of project conventions, dead code, and scope creep.
+
+Your verdict must be one of:
+- PASS: The implementation fully satisfies the task requirements and you found zero issues.
+- ISSUES: You found one or more problems. List every issue, no matter how small. Every issue is blocking.
+
+A separate agent will fix the issues you identify. Your job is to find all of them, not to judge which ones matter.
+
+## Issue categorization
+
+Categorize every issue into one of two groups:
+
+1. **Task-related issues** — problems in code this task created or modified. These issues affect your verdict. List them in the "Issues found" section.
+2. **Pre-existing issues** — problems in code the task did NOT create or modify. These do NOT affect your verdict. Write them to `_forge/follow-ups/{task_id}.json` as a JSON array of objects, each with `title`, `description`, and an optional `flow` field. The `flow` field can be `"standard"` (default, full pipeline: spec → plan → implement → review) or `"quick"` (skip spec/plan, go straight to implement → review). Use `"quick"` for simple, self-contained fixes that don't need a spec or plan.
+
+Only task-related issues determine your verdict. Pre-existing issues must not cause an ISSUES verdict.
+
+Load the following skills:
+{skill_references}
+
+{retry_context}"""
+
 STAGE_TEMPLATES: dict[str, str] = {
     "spec": SPEC_TEMPLATE,
     "plan": PLAN_TEMPLATE,
     "implement": IMPLEMENT_TEMPLATE,
     "review": REVIEW_TEMPLATE,
+}
+
+QUICK_STAGE_TEMPLATES: dict[str, str] = {
+    "implement": QUICK_IMPLEMENT_TEMPLATE,
+    "review": QUICK_REVIEW_TEMPLATE,
 }
 
 # ---------------------------------------------------------------------------
@@ -221,7 +292,11 @@ def build_prompt(
         Dict with optional keys: ``spec_content``, ``plan_content``,
         ``git_diff``, ``previous_gate_stderr``.
     """
-    template = STAGE_TEMPLATES.get(stage)
+    flow = task.get("flow", "standard")
+    if flow == "quick" and stage in QUICK_STAGE_TEMPLATES:
+        template = QUICK_STAGE_TEMPLATES[stage]
+    else:
+        template = STAGE_TEMPLATES.get(stage)
     if template is None:
         raise ValueError(f"Unknown stage: {stage!r}")
 

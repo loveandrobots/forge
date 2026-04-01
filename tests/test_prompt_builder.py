@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 from forge.prompt_builder import (
+    QUICK_STAGE_TEMPLATES,
     STAGE_TEMPLATES,
     build_prompt,
     build_retry_context,
@@ -502,3 +503,203 @@ class TestBuildPromptReviewCategorization:
         assert "flow" in REVIEW_TEMPLATE
         assert '"quick"' in REVIEW_TEMPLATE
         assert '"standard"' in REVIEW_TEMPLATE
+
+
+# ---------------------------------------------------------------------------
+# build_prompt — quick-flow templates
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPromptQuickFlow:
+    @pytest.fixture()
+    def quick_task(self) -> dict:
+        return {
+            "id": "qf-001",
+            "title": "Fix login button color",
+            "description": "Change the login button from blue to green.",
+            "branch_name": "forge/qf-001-fix-login-button",
+            "spec_path": "",
+            "plan_path": "",
+            "skill_overrides": None,
+            "flow": "quick",
+        }
+
+    def test_quick_implement_prompt_has_task_description(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        prompt = build_prompt(
+            "implement", quick_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "Fix login button color" in prompt
+        assert "Change the login button from blue to green." in prompt
+        assert "## Specification" not in prompt
+        assert "## Implementation plan" not in prompt
+
+    def test_quick_implement_prompt_has_no_empty_spec_plan_sections(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        prompt = build_prompt(
+            "implement", quick_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "{spec_content}" not in prompt
+        assert "{plan_content}" not in prompt
+        assert "## Specification" not in prompt
+        assert "## Implementation plan" not in prompt
+
+    def test_quick_review_prompt_has_task_description(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {"git_diff": "diff --git a/btn.py"}
+        prompt = build_prompt(
+            "review", quick_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "Fix login button color" in prompt
+        assert "Change the login button from blue to green." in prompt
+        assert "## Task description" in prompt
+        assert "## Specification" not in prompt
+
+    def test_quick_review_prompt_includes_diff(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {"git_diff": "diff --git a/btn.py b/btn.py\n+color = green"}
+        prompt = build_prompt(
+            "review", quick_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "diff --git a/btn.py" in prompt
+        assert "+color = green" in prompt
+
+    def test_quick_review_prompt_has_issue_categorization(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {"git_diff": "diff"}
+        prompt = build_prompt(
+            "review", quick_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "Task-related issues" in prompt
+        assert "Pre-existing issues" in prompt
+        assert "_forge/follow-ups/" in prompt
+
+    def test_standard_flow_implement_unchanged(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {"spec_content": "Spec.", "plan_content": "Plan."}
+        prompt = build_prompt(
+            "implement", sample_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "## Specification" in prompt
+        assert "## Implementation plan" in prompt
+
+    def test_quick_implement_no_unfilled_placeholders(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {
+            "spec_content": "spec body",
+            "plan_content": "plan body",
+            "git_diff": "diff output",
+        }
+        prompt = build_prompt(
+            "implement", quick_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "{" not in prompt, f"Unfilled placeholder in quick implement prompt"
+
+    def test_quick_review_no_unfilled_placeholders(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {
+            "spec_content": "spec body",
+            "plan_content": "plan body",
+            "git_diff": "diff output",
+        }
+        prompt = build_prompt(
+            "review", quick_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "{" not in prompt, f"Unfilled placeholder in quick review prompt"
+
+    def test_quick_implement_includes_retry_context(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+    ) -> None:
+        stage_run = {"attempt": 2}
+        artifacts = {"previous_gate_stderr": "tests failed: 3 errors"}
+        prompt = build_prompt(
+            "implement", quick_task, sample_project, stage_run, artifacts
+        )
+        assert "attempt 2" in prompt
+        assert "tests failed: 3 errors" in prompt
+
+    def test_quick_implement_includes_review_feedback(
+        self,
+        quick_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {"review_feedback": "- Button still blue in dark mode"}
+        prompt = build_prompt(
+            "implement", quick_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "## Review feedback" in prompt
+        assert "- Button still blue in dark mode" in prompt
+
+    def test_quick_implement_includes_skill_references(
+        self,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        task = {
+            "id": "qf-002",
+            "title": "T",
+            "description": "D",
+            "branch_name": "b",
+            "skill_overrides": ["CUSTOM.md"],
+            "flow": "quick",
+        }
+        prompt = build_prompt(
+            "implement", task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "CUSTOM.md" in prompt
+
+    def test_default_flow_falls_back_to_standard(
+        self,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        task = {
+            "id": "t1",
+            "title": "T",
+            "description": "D",
+            "branch_name": "b",
+            "skill_overrides": None,
+        }
+        artifacts = {"spec_content": "Spec.", "plan_content": "Plan."}
+        prompt = build_prompt(
+            "implement", task, sample_project, sample_stage_run, artifacts
+        )
+        assert "## Specification" in prompt
