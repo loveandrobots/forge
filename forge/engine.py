@@ -357,15 +357,16 @@ class PipelineEngine:
                         task_id=task_id,
                         stage_run_id=stage_run_id,
                     )
-                    await self._reset_and_log(
+                    reset_ok = await self._reset_and_log(
                         project["repo_path"],
                         project["default_branch"],
                         conn,
                         task_id,
                     )
-                    await self._handle_error_retry(
-                        conn, task, stage, stage_run_id, project=project
-                    )
+                    if reset_ok:
+                        await self._handle_error_retry(
+                            conn, task, stage, stage_run_id, project=project
+                        )
                     conn.close()
                     self.current_task_id = None
                     continue
@@ -719,15 +720,17 @@ class PipelineEngine:
         task_row = database.get_task(conn, task_id)
         if task_row:
             project_row = database.get_project(conn, task_row["project_id"])
+            reset_ok = True
             if project_row:
                 project = _row_to_dict(project_row)
-                await self._reset_and_log(
+                reset_ok = await self._reset_and_log(
                     project["repo_path"],
                     project["default_branch"],
                     conn,
                     task_id,
                 )
-            await self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id)
+            if reset_ok:
+                await self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id)
 
     async def _check_timeouts(
         self,

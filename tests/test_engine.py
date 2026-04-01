@@ -1961,3 +1961,238 @@ class TestReviewErrorSharedBudget:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
         assert engine.running is False
+
+
+# ---------------------------------------------------------------------------
+# Engine: guard _handle_error_retry after _reset_and_log failure
+# ---------------------------------------------------------------------------
+
+
+class TestGuardRetryAfterResetFailure:
+    """Verify _handle_error_retry is skipped when _reset_and_log returns False."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_error_skips_retry_when_reset_fails(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        active_task_with_queued_run: tuple[str, str],
+    ) -> None:
+        """When reset fails after dispatch error, no retry is queued."""
+        task_id, sr_id = active_task_with_queued_run
+        db.update_task(conn, task_id, branch_name="forge/test-branch")
+
+        dispatch_result = DispatchResult(
+            output="",
+            exit_code=1,
+            duration_seconds=1.0,
+            error="claude CLI not found in PATH",
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        call_count = 0
+
+        async def dispatch_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 1:
+                engine.running = False
+            return dispatch_result
+
+        reset_call_count = 0
+
+        async def _reset_side_effect(repo_path, default_branch):
+            nonlocal reset_call_count
+            reset_call_count += 1
+            # First call is the pre-dispatch safety check — must succeed
+            if reset_call_count == 1:
+                return {"success": True, "output": "ok"}
+            # Second call is the post-error reset — fail
+            return {"success": False, "output": "reset failed"}
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", side_effect=dispatch_side_effect),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+            patch("forge.engine.reset_repo_state", side_effect=_reset_side_effect),
+        ):
+            engine.running = True
+            loop_task = asyncio.create_task(engine.run_loop())
+            try:
+                await asyncio.wait_for(loop_task, timeout=3.0)
+            except asyncio.TimeoutError:
+                loop_task.cancel()
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+
+        # No retry should be queued since reset failed
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
+        assert len(queued) == 0
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_error_retries_when_reset_succeeds(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        active_task_with_queued_run: tuple[str, str],
+    ) -> None:
+        """When reset succeeds after dispatch error, retry is queued."""
+        task_id, sr_id = active_task_with_queued_run
+        db.update_task(conn, task_id, branch_name="forge/test-branch")
+
+        dispatch_result = DispatchResult(
+            output="",
+            exit_code=1,
+            duration_seconds=1.0,
+            error="claude CLI not found in PATH",
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        call_count = 0
+
+        async def dispatch_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 1:
+                engine.running = False
+            return dispatch_result
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", side_effect=dispatch_side_effect),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            engine.running = True
+            loop_task = asyncio.create_task(engine.run_loop())
+            try:
+                await asyncio.wait_for(loop_task, timeout=3.0)
+            except asyncio.TimeoutError:
+                loop_task.cancel()
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+
+        # Retry should be queued since reset succeeded
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
+        assert len(queued) == 1
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_handle_timeout_skips_retry_when_reset_fails(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When reset fails after timeout, no retry is queued."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=3
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        async def _failing_reset(repo_path, default_branch):
+            return {"success": False, "output": "reset failed"}
+
+        with patch("forge.engine.reset_repo_state", side_effect=_failing_reset):
+            await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert "timed out" in sr["error_message"]
+
+        # No retry queued
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
+        assert len(queued) == 0
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_handle_timeout_retries_when_reset_succeeds(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When reset succeeds after timeout, retry is queued."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=3
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert "timed out" in sr["error_message"]
+
+        # Retry should be queued
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
+        assert len(queued) == 1
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_handle_timeout_retries_when_no_project(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When project doesn't exist, retry still proceeds (no reset needed)."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=3
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+
+        stage_run = db.get_stage_run(conn, sr_id)
+
+        with patch("forge.engine.database.get_project", return_value=None):
+            await engine.handle_timeout(conn, stage_run)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+
+        # Retry should still be queued since no reset was attempted
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
+        assert len(queued) == 1
