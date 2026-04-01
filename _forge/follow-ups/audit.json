@@ -1,0 +1,27 @@
+[
+  {
+    "title": "Deduplicate stage_timeouts JSON parsing in engine.py",
+    "description": "project['stage_timeouts'] is parsed with json.loads() in two separate locations: once in run_loop() (line ~298) and again in _check_timeouts() (line ~722). Extract a helper or parse once and pass the result to avoid duplicated logic that must be updated in lockstep if the storage format changes.",
+    "source_task_id": "6822767a-1714-4ef9-8629-e8b8d39a5a8c"
+  },
+  {
+    "title": "Add missing auto-merge error context tests for AC #7",
+    "description": "The plan for task 1e996dca specified tests 16-18 (test_auto_merge_checkout_failure_includes_stderr, test_auto_merge_rebase_failure_includes_stderr, test_auto_merge_ff_merge_failure_includes_stderr) to verify that _auto_merge log messages include git stderr on failure. None of these tests were implemented. Add them to tests/test_engine.py.",
+    "source_task_id": "1e996dca-6e86-4391-aada-fcd30e66d3de"
+  },
+  {
+    "title": "Add missing rebase abort failure test for AC #3",
+    "description": "The plan for task 1e996dca specified test #6 (test_rebase_abort_failure_preserves_original_error) to verify that when rebase_branch abort itself fails, the original conflict stderr is preserved. Code at dispatcher.py:284-286 handles this but has no test coverage. Add this test to tests/test_dispatcher.py TestRebaseBranch class.",
+    "source_task_id": "1e996dca-6e86-4391-aada-fcd30e66d3de"
+  },
+  {
+    "title": "Add multi-bounce attempt numbering test",
+    "description": "tests/test_engine.py only tests a single review-bounce cycle (test_implement_attempt_increments_after_review_bounce). Add a test for the scenario where implement passes, review bounces, implement passes again, review bounces again, verifying that the attempt number increments correctly across multiple bounce cycles.",
+    "source_task_id": "b9ddefc7-97c9-4a84-9a7b-bedd039ec887"
+  },
+  {
+    "title": "Add gate test for PASS verdict with incidental 'issues' keyword in body",
+    "description": "The post-review gate uses grep -ci 'ISSUES' which matches the word anywhere in the review file. A review with '## Verdict: PASS' and body text like 'No issues found.' would match both HAS_ISSUES and HAS_PASS. The gate handles this correctly (PASS takes precedence) but there is no test covering this edge case. Add a test to tests/test_gates.py.",
+    "source_task_id": "7ba3a019-86e4-4cf7-8fb2-2e614a6d463f"
+  }
+]
