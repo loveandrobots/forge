@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -257,6 +257,45 @@ class TestBounceTask:
         )
         assert len(queued) == 1
         assert queued[0]["attempt"] > 1
+
+    @pytest.mark.asyncio
+    async def test_bounce_task_no_debug_log(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """bounce_task should not emit a debug log exposing stage type info."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="T",
+            priority=1,
+            max_retries=3,
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="bounced"
+        )
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="needs work",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
+        )
+
+        with patch.object(engine, "_log") as mock_log:
+            await engine.bounce_task(conn, task, "spec", gate_result)
+
+            for call in mock_log.call_args_list:
+                msg = call[0][1] if len(call[0]) > 1 else call.kwargs.get("message", "")
+                assert "type=" not in msg, (
+                    f"bounce_task should not log stage type info, got: {msg}"
+                )
 
     @pytest.mark.asyncio
     async def test_needs_human_after_max_retries(
