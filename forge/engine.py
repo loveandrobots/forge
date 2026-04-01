@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -805,9 +806,6 @@ class PipelineEngine:
         project: dict,
     ) -> None:
         """Create backlog tasks from follow-ups JSON written by the reviewer."""
-        import json
-        import os
-
         repo_path = project.get("repo_path", "")
         if not repo_path:
             return
@@ -820,9 +818,23 @@ class PipelineEngine:
             if not isinstance(entries, list) or not entries:
                 os.remove(path)
                 return
+            created = 0
             for entry in entries:
-                title = entry.get("title", "Follow-up")
-                description = entry.get("description", "")
+                if isinstance(entry, dict):
+                    title = entry.get("title", "Follow-up")
+                    description = entry.get("description", "")
+                elif isinstance(entry, str):
+                    if ": " in entry:
+                        title, description = entry.split(": ", 1)
+                    else:
+                        title = entry
+                        description = ""
+                else:
+                    logger.warning(
+                        "Skipping invalid follow-up entry for task %s: %r",
+                        task_id, entry,
+                    )
+                    continue
                 new_task_id = database.insert_task(
                     conn,
                     project_id=project["id"],
@@ -835,10 +847,11 @@ class PipelineEngine:
                     target_task_id=task_id,
                     link_type="created_by",
                 )
+                created += 1
             os.remove(path)
             self._log(
                 "info",
-                f"Created {len(entries)} follow-up task(s) from review of task {task_id}",
+                f"Created {created} follow-up task(s) from review of task {task_id}",
                 task_id=task_id,
             )
         except (json.JSONDecodeError, OSError):

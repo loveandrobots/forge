@@ -1308,6 +1308,144 @@ class TestProcessFollowUps:
         assert len(backlog) == 0
 
 
+    @pytest.mark.asyncio
+    async def test_follow_ups_string_entries_create_backlog_tasks(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Plain string entries in follow-up JSON are ingested as backlog tasks."""
+        import json
+        import os
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [
+            "Fix timeout bug: handle_timeout needs project arg",
+            "Update docs",
+        ]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] in ("Fix timeout bug", "Update docs")]
+        assert len(new_tasks) == 2
+
+        # Check title/description parsing
+        by_title = {t["title"]: t for t in new_tasks}
+        assert by_title["Fix timeout bug"]["description"] == "handle_timeout needs project arg"
+        assert by_title["Update docs"]["description"] == ""
+
+        # Each should be linked to the source task
+        for new_task in new_tasks:
+            links = db.get_task_links(conn, new_task["id"])
+            assert len(links) == 1
+            assert links[0]["link_type"] == "created_by"
+            assert links[0]["target_task_id"] == task_id
+
+        # File should be deleted
+        assert not os.path.exists(str(follow_ups_file))
+
+    @pytest.mark.asyncio
+    async def test_follow_ups_mixed_entries(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Arrays with both dict and string entries are fully processed."""
+        import json
+        import os
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [
+            {"title": "Dict entry", "description": "From dict"},
+            "String entry: from string",
+        ]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] in ("Dict entry", "String entry")]
+        assert len(new_tasks) == 2
+
+        by_title = {t["title"]: t for t in new_tasks}
+        assert by_title["Dict entry"]["description"] == "From dict"
+        assert by_title["String entry"]["description"] == "from string"
+
+        for new_task in new_tasks:
+            links = db.get_task_links(conn, new_task["id"])
+            assert len(links) == 1
+            assert links[0]["link_type"] == "created_by"
+            assert links[0]["target_task_id"] == task_id
+
+        assert not os.path.exists(str(follow_ups_file))
+
+    @pytest.mark.asyncio
+    async def test_follow_ups_skips_invalid_entries(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Invalid entries (null, numbers) are skipped; valid entries still processed."""
+        import json
+        import os
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [None, 42, "Valid entry: should be created"]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Valid entry"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["description"] == "should be created"
+
+        links = db.get_task_links(conn, new_tasks[0]["id"])
+        assert len(links) == 1
+        assert links[0]["link_type"] == "created_by"
+        assert links[0]["target_task_id"] == task_id
+
+        assert not os.path.exists(str(follow_ups_file))
+
+
 class TestTaskPriority:
     def test_highest_priority_picked(
         self,
