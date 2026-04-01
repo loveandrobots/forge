@@ -21,7 +21,7 @@ if [ ! -f "$REVIEW_FILE" ]; then
 fi
 
 # Extract just the verdict line
-VERDICT_LINE=$(grep -i 'verdict' "$REVIEW_FILE" | head -1)
+VERDICT_LINE=$(grep -i 'verdict' "$REVIEW_FILE" | head -1 || true)
 
 if echo "$VERDICT_LINE" | grep -qi 'ISSUES'; then
     ACTIONABLE_COUNT=$(grep -cE '^\s*[-*]\s+\S|^\s*[0-9]+\.\s+\S' "$REVIEW_FILE" || true)
