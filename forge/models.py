@@ -94,6 +94,10 @@ class CancelRequest(BaseModel):
     reason: str | None = None
 
 
+class ResetRequest(BaseModel):
+    from_stage: str = "spec"
+
+
 # ---------------------------------------------------------------------------
 # Stage runs
 # ---------------------------------------------------------------------------

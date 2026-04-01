@@ -67,6 +67,16 @@ def main(argv: list[str] | None = None) -> None:
         "--priority", type=int, default=0, help="Priority (higher = more urgent)"
     )
 
+    # reset-task
+    reset_p = sub.add_parser("reset-task", help="Reset a task to restart from a stage")
+    reset_p.add_argument("task_id", help="Task ID to reset")
+    reset_p.add_argument(
+        "--from-stage",
+        default="spec",
+        choices=["spec", "plan", "implement", "review"],
+        help="Stage to restart from (default: spec)",
+    )
+
     # serve
     serve_p = sub.add_parser("serve", help="Start the Forge server")
     serve_p.add_argument("--host", default="0.0.0.0", help="Bind host")
@@ -88,6 +98,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_list_projects()
     elif args.command == "add-task":
         _cmd_add_task(args)
+    elif args.command == "reset-task":
+        _cmd_reset_task(args)
     elif args.command == "serve":
         _cmd_serve(args)
 
@@ -180,6 +192,32 @@ def _cmd_add_task(args: argparse.Namespace) -> None:
             priority=args.priority,
         )
         print(f"Task '{args.title}' added to '{args.project}' (id={task_id}).")
+    finally:
+        conn.close()
+
+
+_RESETTABLE_STATUSES = {"needs_human", "failed", "paused"}
+
+
+def _cmd_reset_task(args: argparse.Namespace) -> None:
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        database.migrate(conn)
+        task = database.get_task(conn, args.task_id)
+        if not task:
+            print(f"Error: task '{args.task_id}' not found.", file=sys.stderr)
+            sys.exit(1)
+        if task["status"] not in _RESETTABLE_STATUSES:
+            print(
+                f"Error: cannot reset a task with status '{task['status']}'. "
+                "Only needs_human, failed, or paused tasks can be reset.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        database.reset_task(conn, args.task_id, args.from_stage, task["title"])
+        print(
+            f"Task '{task['title']}' reset to {args.from_stage} stage (id={args.task_id})."
+        )
     finally:
         conn.close()
 

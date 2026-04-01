@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 from forge import database
 from forge.config import DB_PATH, STAGES
-from forge.models import CancelRequest, TaskCreate, TaskResponse, TaskUpdate
+from forge.models import CancelRequest, ResetRequest, TaskCreate, TaskResponse, TaskUpdate
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -225,6 +225,44 @@ def retry_task(task_id: str) -> dict:
             status="queued",
         )
         database.update_task(conn, task_id, status="active")
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_task(updated_row)
+    finally:
+        conn.close()
+
+
+_RESETTABLE_STATUSES = {"needs_human", "failed", "paused"}
+
+
+@router.post("/{task_id}/reset", response_model=TaskResponse)
+def reset_task(task_id: str, body: ResetRequest | None = Body(default=None)) -> dict:
+    """Reset a task to a clean state, wiping stage_run history."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        from_stage = body.from_stage if body else "spec"
+        if from_stage not in STAGES:
+            raise HTTPException(status_code=400, detail=f"Invalid stage: {from_stage}")
+
+        if row["status"] not in _RESETTABLE_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot reset a task with status '{row['status']}'. "
+                "Only needs_human, failed, or paused tasks can be reset.",
+            )
+
+        # Block reset if task has a currently running stage_run
+        running = database.list_stage_runs(conn, task_id=task_id, status="running")
+        if running:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot reset task while a stage run is in progress.",
+            )
+
+        database.reset_task(conn, task_id, from_stage, row["title"])
         updated_row = database.get_task(conn, task_id)
         return _row_to_task(updated_row)
     finally:

@@ -523,6 +523,44 @@ def get_retry_count(conn: sqlite3.Connection, task_id: str, stage: str) -> int:
     return cur.fetchone()[0]
 
 
+def reset_task(
+    conn: sqlite3.Connection,
+    task_id: str,
+    from_stage: str,
+    task_title: str,
+) -> str:
+    """Reset a task to a clean state starting from the given stage.
+
+    Deletes all stage_runs, updates task status/stage, creates a fresh
+    queued stage_run, and logs the action. All within one transaction.
+    Returns the new stage_run id.
+    """
+    conn.execute("BEGIN")
+    try:
+        conn.execute("DELETE FROM stage_runs WHERE task_id = ?", (task_id,))
+        now = _now()
+        conn.execute(
+            "UPDATE tasks SET status = 'active', current_stage = ?, updated_at = ? WHERE id = ?",
+            (from_stage, now, task_id),
+        )
+        sr_id = _new_id()
+        conn.execute(
+            """INSERT INTO stage_runs (id, task_id, stage, attempt, status)
+               VALUES (?, ?, ?, 1, 'queued')""",
+            (sr_id, task_id, from_stage),
+        )
+        conn.execute(
+            """INSERT INTO run_log (timestamp, level, message, task_id)
+               VALUES (?, 'info', ?, ?)""",
+            (now, f"Task '{task_title}' reset to {from_stage} stage. Previous stage_run history cleared.", task_id),
+        )
+        conn.commit()
+        return sr_id
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def get_implement_review_retry_count(conn, task_id):
     cur = conn.execute(
         """SELECT COUNT(*) FROM stage_runs

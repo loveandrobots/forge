@@ -25,6 +25,23 @@
         {% if task.status in ('active', 'needs_human') %}
         <button class="btn" hx-post="/api/tasks/{{ task.id }}/retry" hx-swap="none" hx-on::after-request="window.location.reload()">Retry</button>
         {% endif %}
+        {% if task.status in ('needs_human', 'failed', 'paused') %}
+        <div class="reset-group">
+            <select id="reset-stage-{{ task.id }}">
+                <option value="spec">spec</option>
+                <option value="plan">plan</option>
+                <option value="implement">implement</option>
+                <option value="review">review</option>
+            </select>
+            <button class="btn btn-warning"
+                hx-post="/api/tasks/{{ task.id }}/reset"
+                hx-vals='js:{"from_stage": document.getElementById("reset-stage-{{ task.id }}").value}'
+                hx-swap="none"
+                hx-on::after-request="window.location.reload()">
+                Reset
+            </button>
+        </div>
+        {% endif %}
     </div>
 </div>
 
