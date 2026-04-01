@@ -22,8 +22,10 @@ fi
 
 # Extract the verdict using the Python parser
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERDICT=$(python3 "$SCRIPT_DIR/parse_verdict.py" "$REVIEW_FILE" 2>/tmp/forge_verdict_err) || {
-    cat /tmp/forge_verdict_err >&2
+VERDICT_ERR=$(mktemp /tmp/forge_verdict_err.XXXXXX)
+trap 'rm -f "$VERDICT_ERR"' EXIT
+VERDICT=$(python3 "$SCRIPT_DIR/parse_verdict.py" "$REVIEW_FILE" 2>"$VERDICT_ERR") || {
+    cat "$VERDICT_ERR" >&2
     echo "FAIL: Could not determine verdict from review file" >&2
     exit 1
 }
