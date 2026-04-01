@@ -20,13 +20,18 @@ if [ ! -f "$REVIEW_FILE" ]; then
     exit 1
 fi
 
-# Extract just the verdict line
-VERDICT_LINE=$(grep -i 'verdict' "$REVIEW_FILE" | head -1 || true)
+# Extract the verdict using the Python parser
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VERDICT=$(python3 "$SCRIPT_DIR/parse_verdict.py" "$REVIEW_FILE" 2>/tmp/forge_verdict_err) || {
+    cat /tmp/forge_verdict_err >&2
+    echo "FAIL: Could not determine verdict from review file" >&2
+    exit 1
+}
 
-if echo "$VERDICT_LINE" | grep -qi 'PASS'; then
+if [ "$VERDICT" = "PASS" ]; then
     echo "post-review gate passed"
     exit 0
-elif echo "$VERDICT_LINE" | grep -qi 'ISSUES'; then
+elif [ "$VERDICT" = "ISSUES" ]; then
     ACTIONABLE_COUNT=$(grep -cE '^\s*[-*]\s+\S|^#*\s*[0-9]+\.\s+\S' "$REVIEW_FILE" || true)
     if [ "$ACTIONABLE_COUNT" -eq 0 ]; then
         echo "FAIL: Review with ISSUES verdict must include specific actionable items" >&2
@@ -35,6 +40,6 @@ elif echo "$VERDICT_LINE" | grep -qi 'ISSUES'; then
     echo "FAIL: Review verdict is ISSUES with $ACTIONABLE_COUNT actionable item(s). Bouncing to implement." >&2
     exit 1
 else
-    echo "FAIL: Could not determine verdict from line: $VERDICT_LINE" >&2
+    echo "FAIL: Unexpected verdict value: $VERDICT" >&2
     exit 1
 fi

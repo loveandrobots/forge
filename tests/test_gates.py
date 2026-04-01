@@ -405,3 +405,161 @@ class TestPostReview:
         assert "ISSUES" in result.stderr
         assert "Bouncing" in result.stderr
         assert "actionable item(s)" in result.stderr
+
+    def test_passes_with_multiline_pass_verdict(self, tmp_path: object) -> None:
+        """Verdict heading on one line, PASS value on the next non-blank line."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            ## Verdict
+
+            **PASS**
+
+            All acceptance criteria met.
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+    def test_fails_with_multiline_issues_verdict(self, tmp_path: object) -> None:
+        """Verdict heading on one line, ISSUES value on next, with actionable items."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            ## Verdict
+
+            **ISSUES**
+
+            - Fix error handling in widget.py line 42
+            - Add test for empty input case
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "ISSUES" in result.stderr
+
+    def test_verdict_not_confused_by_body_text(self, tmp_path: object) -> None:
+        """Body text mentioning 'verdict' or 'ISSUES' doesn't override actual verdict."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            ## Verdict: PASS
+
+            All acceptance criteria met.
+
+            | Criterion | Verdict |
+            |-----------|---------|
+            | Handles edge cases | verdict is ISSUES |
+            | Performance | an ISSUES verdict was considered |
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+    def test_bold_verdict_format(self, tmp_path: object) -> None:
+        """Bold verdict with colon inside: **Verdict: PASS**."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            **Verdict: PASS**
+
+            All good.
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+    def test_bold_label_verdict_format(self, tmp_path: object) -> None:
+        """Bold label with value outside: **Verdict**: ISSUES."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            **Verdict**: ISSUES
+
+            - Fix the widget rendering
+            - Add missing tests
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "ISSUES" in result.stderr
+
+    def test_bold_label_colon_verdict_format(self, tmp_path: object) -> None:
+        """Bold label with trailing colon: **Verdict:** PASS."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            **Verdict:** PASS
+
+            All good.
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# parse_verdict.py (unit tests)
+# ---------------------------------------------------------------------------
+
+
+class TestParseVerdictScript:
+    SCRIPT = os.path.join(GATES_DIR, "parse_verdict.py")
+
+    def test_parse_verdict_script_pass(self, tmp_path: object) -> None:
+        """Script prints PASS and exits 0 for a simple verdict."""
+        review = os.path.join(str(tmp_path), "review.md")
+        _write_file(review, "## Verdict: PASS\n\nAll good.\n")
+        result = subprocess.run(
+            ["python3", self.SCRIPT, review],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == "PASS"
+
+    def test_parse_verdict_script_no_verdict(self, tmp_path: object) -> None:
+        """Script exits 1 when no verdict is found."""
+        review = os.path.join(str(tmp_path), "review.md")
+        _write_file(review, "# Review\n\nSome notes.\n")
+        result = subprocess.run(
+            ["python3", self.SCRIPT, review],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 1
+        assert "verdict" in result.stderr.lower()
+
+    def test_parse_verdict_script_missing_file(self) -> None:
+        """Script exits 1 for a nonexistent file."""
+        result = subprocess.run(
+            ["python3", self.SCRIPT, "/tmp/nonexistent_review_file.md"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 1
