@@ -600,6 +600,38 @@ class TestBacklog:
         detail = client.get(f"/api/tasks/{task_id}")
         assert detail.json()["flow"] == "quick"
 
+    def test_form_resets_on_success(self, client: TestClient) -> None:
+        """After successful submission, the form script calls form.reset()."""
+        resp = client.get("/backlog")
+        html = resp.text
+        # form.reset() must appear inside the resp.ok branch
+        assert "form.reset()" in html
+        # Verify it's gated behind resp.ok (success only)
+        ok_pos = html.index("resp.ok")
+        reset_pos = html.index("form.reset()")
+        assert reset_pos > ok_pos
+
+    def test_form_reset_preserves_project_id(self, client: TestClient) -> None:
+        """The project_id selection is saved before reset and restored after."""
+        resp = client.get("/backlog")
+        html = resp.text
+        # Script saves project_id before reset and restores after
+        save_pos = html.index("savedProjectId = form.project_id.value")
+        reset_pos = html.index("form.reset()")
+        restore_pos = html.index("form.project_id.value = savedProjectId")
+        assert save_pos < reset_pos < restore_pos
+
+    def test_form_reset_only_on_success(self, client: TestClient) -> None:
+        """form.reset() only appears inside the if (resp.ok) block, not unconditionally."""
+        resp = client.get("/backlog")
+        html = resp.text
+        # form.reset() should appear exactly once in the entire page
+        assert html.count("form.reset()") == 1
+        # And it must be inside the resp.ok conditional
+        ok_idx = html.index("resp.ok")
+        reset_idx = html.index("form.reset()")
+        assert reset_idx > ok_idx
+
 
 # ---------------------------------------------------------------------------
 # Settings

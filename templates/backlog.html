@@ -80,7 +80,12 @@ document.getElementById("create-task-form").addEventListener("submit", function(
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(data)
     }).then(function(resp) {
-        if (resp.ok) { window.location.reload(); }
+        if (resp.ok) {
+            var savedProjectId = form.project_id.value;
+            form.reset();
+            form.project_id.value = savedProjectId;
+            window.location.reload();
+        }
     });
 });
 </script>
