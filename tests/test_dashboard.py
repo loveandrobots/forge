@@ -300,11 +300,10 @@ class TestPipelineView:
             conn.close()
         resp = client.get("/")
         html = resp.text
-        assert "badge-flow-quick" in html
-        # Standard tasks should not have the quick badge
-        # Find the standard task card and verify it doesn't have badge-flow-quick
         assert "QuickFlowTask" in html
         assert "StandardFlowTask" in html
+        # Only the quick-flow task should have the badge
+        assert html.count("badge-flow-quick") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -454,36 +453,6 @@ class TestTaskDetail:
         assert 'value="implement"' in html
         assert 'value="review"' in html
 
-    def test_task_detail_context_includes_flow_stages(
-        self,
-        tmp_path,
-        client: TestClient,
-        sample_project: dict,
-    ) -> None:
-        """AC4: The router passes correct flow_stages for quick-flow tasks."""
-        conn = database.get_connection(str(tmp_path / "test.db"))
-        try:
-            tid = database.insert_task(
-                conn,
-                project_id=sample_project["id"],
-                title="Flow Stages Check",
-                priority=1,
-                flow="quick",
-            )
-            database.update_task(
-                conn, tid, status="needs_human", current_stage="implement"
-            )
-        finally:
-            conn.close()
-        # Verify by checking the rendered HTML has exactly the right options
-        resp = client.get(f"/tasks/{tid}")
-        html = resp.text
-        # Quick flow should only have implement and review
-        # Count option tags in the reset select
-        assert html.count('value="implement"') >= 1
-        assert html.count('value="review"') >= 1
-        assert 'value="spec"' not in html
-        assert 'value="plan"' not in html
 
 
 # ---------------------------------------------------------------------------
