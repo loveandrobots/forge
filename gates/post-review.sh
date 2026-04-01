@@ -23,17 +23,17 @@ fi
 # Extract just the verdict line
 VERDICT_LINE=$(grep -i 'verdict' "$REVIEW_FILE" | head -1 || true)
 
-if echo "$VERDICT_LINE" | grep -qi 'ISSUES'; then
-    ACTIONABLE_COUNT=$(grep -cE '^\s*[-*]\s+\S|^\s*[0-9]+\.\s+\S' "$REVIEW_FILE" || true)
+if echo "$VERDICT_LINE" | grep -qi 'PASS'; then
+    echo "post-review gate passed"
+    exit 0
+elif echo "$VERDICT_LINE" | grep -qi 'ISSUES'; then
+    ACTIONABLE_COUNT=$(grep -cE '^\s*[-*]\s+\S|^#*\s*[0-9]+\.\s+\S' "$REVIEW_FILE" || true)
     if [ "$ACTIONABLE_COUNT" -eq 0 ]; then
         echo "FAIL: Review with ISSUES verdict must include specific actionable items" >&2
         exit 1
     fi
     echo "FAIL: Review verdict is ISSUES with $ACTIONABLE_COUNT actionable item(s). Bouncing to implement." >&2
     exit 1
-elif echo "$VERDICT_LINE" | grep -qi 'PASS'; then
-    echo "post-review gate passed"
-    exit 0
 else
     echo "FAIL: Could not determine verdict from line: $VERDICT_LINE" >&2
     exit 1

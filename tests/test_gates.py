@@ -364,6 +364,25 @@ class TestPostReview:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
+    def test_passes_with_pass_verdict_containing_issues_word(
+        self, tmp_path: object
+    ) -> None:
+        """A PASS verdict line that also contains the word 'issues' exits 0."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            ## Verdict: PASS (no issues found)
+
+            Everything looks good. All acceptance criteria met.
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
     def test_fails_with_issues_verdict_stderr_message(
         self, tmp_path: object
     ) -> None:
