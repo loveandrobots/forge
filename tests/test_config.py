@@ -79,6 +79,7 @@ def test_task_statuses_constant() -> None:
     assert "active" in TASK_STATUSES
     assert "done" in TASK_STATUSES
     assert "needs_human" in TASK_STATUSES
+    assert "cancelled" in TASK_STATUSES
 
 
 def test_stage_run_statuses_constant() -> None:

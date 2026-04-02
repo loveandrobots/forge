@@ -32,6 +32,7 @@ TASK_STATUSES: list[str] = [
     "needs_human",
     "done",
     "failed",
+    "cancelled",
 ]
 
 # Valid stage run statuses

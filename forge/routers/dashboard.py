@@ -52,6 +52,7 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
             "implement": [],
             "review": [],
             "done": [],
+            "cancelled": [],
         }
         for t in task_list:
             status = t["status"]
@@ -60,6 +61,8 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
                 columns["backlog"].append(t)
             elif status == "done":
                 columns["done"].append(t)
+            elif status == "cancelled":
+                columns["cancelled"].append(t)
             elif stage and stage in columns:
                 columns[stage].append(t)
             else:
@@ -90,7 +93,7 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
             "pipeline.html",
             {
                 "columns": columns,
-                "column_names": ["backlog"] + STAGES + ["done"],
+                "column_names": ["backlog"] + STAGES + ["done", "cancelled"],
                 "projects": projects,
                 "selected_project_id": project_id,
                 "stage_run_info": stage_run_info,

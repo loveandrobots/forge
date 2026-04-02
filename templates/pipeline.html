@@ -27,7 +27,7 @@
         </div>
         <div class="kanban-cards">
             {% for task in columns[col_name] %}
-            <a href="/tasks/{{ task.id }}" class="card {% if task.status == 'needs_human' %}card-needs-human{% endif %}{% if task.status == 'failed' %} card-failed{% endif %}">
+            <a href="/tasks/{{ task.id }}" class="card {% if task.status == 'needs_human' %}card-needs-human{% elif task.status == 'failed' %}card-failed{% elif task.status == 'cancelled' %}card-cancelled{% endif %}">
                 <div class="card-title">{{ task.title }}</div>
                 <div class="card-meta">
                     {% if task.flow == 'quick' %}
@@ -42,6 +42,8 @@
                     <span class="badge badge-error">Failed</span>
                     {% elif task.status == 'paused' %}
                     <span class="badge badge-info">Paused</span>
+                    {% elif task.status == 'cancelled' %}
+                    <span class="badge badge-cancelled">Cancelled</span>
                     {% endif %}
                     <span class="priority">P{{ task.priority }}</span>
                     {% if task.id in stage_run_info and stage_run_info[task.id].attempt > 1 %}
