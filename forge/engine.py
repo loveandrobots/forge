@@ -694,8 +694,7 @@ class PipelineEngine:
                         await self._maybe_auto_pause(conn, task_id, project)
             else:
                 # Bounce back to implement stage
-                implement_retry_count = database.get_retry_count(conn, task_id, "implement")
-                new_attempt = implement_retry_count + 2  # +1 for original, +1 for this retry
+                new_attempt = database.get_stage_run_count(conn, task_id, "implement") + 1
                 database.update_task(conn, task_id, current_stage="implement")
                 database.insert_stage_run(
                     conn,
@@ -877,8 +876,7 @@ class PipelineEngine:
                         await self._maybe_auto_pause(conn, task_id, project)
             else:
                 # Retry review (not implement) — error is infrastructure, not quality
-                review_retry_count = database.get_retry_count(conn, task_id, "review")
-                new_attempt = review_retry_count + 1
+                new_attempt = database.get_stage_run_count(conn, task_id, "review") + 1
                 database.insert_stage_run(
                     conn,
                     task_id=task_id,

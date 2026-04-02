@@ -1392,7 +1392,7 @@ class TestReviewBounceToImplement:
             conn, task_id=task_id, stage="implement", status="queued"
         )
         assert len(queued) == 1
-        # No bounced/error implement runs yet, so retry_count=0, new_attempt = 0+2 = 2
+        # 1 prior implement run (passed), so new_attempt = 1+1 = 2
         assert queued[0]["attempt"] == 2
 
     @pytest.mark.asyncio
@@ -1485,6 +1485,127 @@ class TestReviewBounceToImplement:
 
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_implement_attempt_sequential_across_multiple_review_bounces(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Implement attempt numbers increase monotonically across repeated review bounces."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=10
+        )
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="ISSUES",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        # --- Cycle 1: implement attempt=1 passes → review bounces ---
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="passed"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 2
+
+        # --- Cycle 2: implement attempt=2 passes → review bounces again ---
+        # Mark implement attempt=2 as passed
+        conn.execute(
+            "UPDATE stage_runs SET status = 'passed' WHERE task_id = ? AND stage = 'implement' AND status = 'queued'",
+            (task_id,),
+        )
+        conn.commit()
+        db.update_task(conn, task_id, current_stage="review")
+        # advance_task creates review with attempt=1
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 3  # NOT 2 (the bug this fixes)
+
+        # --- Cycle 3: implement attempt=3 passes → review bounces again ---
+        conn.execute(
+            "UPDATE stage_runs SET status = 'passed' WHERE task_id = ? AND stage = 'implement' AND status = 'queued'",
+            (task_id,),
+        )
+        conn.commit()
+        db.update_task(conn, task_id, current_stage="review")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 4
+
+    @pytest.mark.asyncio
+    async def test_review_error_retry_sequential_across_cycles(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Review error retry attempt numbers increase monotonically even with passed runs between errors."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=10
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+
+        # Review attempt=1 errors
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="review", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 2
+
+        # Review attempt=2 errors again
+        conn.execute(
+            "UPDATE stage_runs SET status = 'error' WHERE task_id = ? AND stage = 'review' AND status = 'queued'",
+            (task_id,),
+        )
+        conn.commit()
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id)
+
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="review", status="queued"
+        )
+        assert len(queued) == 1
+        assert queued[0]["attempt"] == 3
 
 
 # ---------------------------------------------------------------------------
