@@ -1591,21 +1591,29 @@ class TestReviewBounceToImplement:
         assert len(queued) == 1
         assert queued[0]["attempt"] == 2
 
-        # Review attempt=2 errors again
+        # Mark attempt=2 as passed (a non-error run between error cycles)
         conn.execute(
-            "UPDATE stage_runs SET status = 'error' WHERE task_id = ? AND stage = 'review' AND status = 'queued'",
+            "UPDATE stage_runs SET status = 'passed' WHERE task_id = ? AND stage = 'review' AND status = 'queued'",
             (task_id,),
         )
         conn.commit()
 
-        task = dict(db.get_task(conn, task_id))
-        await engine._handle_error_retry(conn, task, "review", sr_id)
+        # Review attempt=3 errors
+        sr_id3 = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=3, status="error"
+        )
 
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id3)
+
+        # With the old formula (get_retry_count + 1), this would produce attempt=3
+        # (only 2 bounced/error runs counted) — a duplicate.
+        # The new formula (get_stage_run_count + 1) correctly produces attempt=4.
         queued = db.list_stage_runs(
             conn, task_id=task_id, stage="review", status="queued"
         )
         assert len(queued) == 1
-        assert queued[0]["attempt"] == 3
+        assert queued[0]["attempt"] == 4
 
 
 # ---------------------------------------------------------------------------

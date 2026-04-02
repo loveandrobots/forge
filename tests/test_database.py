@@ -400,7 +400,7 @@ class TestStageRuns:
         assert db.get_implement_review_retry_count(conn, task_id) == 3
 
     def test_get_stage_run_count(
-        self, conn: sqlite3.Connection, task_id: str
+        self, conn: sqlite3.Connection, project_id: str, task_id: str
     ) -> None:
         # Returns 0 when no stage_runs exist
         assert db.get_stage_run_count(conn, task_id, "implement") == 0
@@ -426,6 +426,19 @@ class TestStageRuns:
         )
         assert db.get_stage_run_count(conn, task_id, "implement") == 4
         assert db.get_stage_run_count(conn, task_id, "review") == 1
+
+        # Does not count runs for a different task
+        other_task_id = db.insert_task(
+            conn, project_id=project_id, title="Other task", priority=3
+        )
+        db.insert_stage_run(
+            conn, task_id=other_task_id, stage="implement", attempt=1, status="passed"
+        )
+        db.insert_stage_run(
+            conn, task_id=other_task_id, stage="implement", attempt=2, status="error"
+        )
+        assert db.get_stage_run_count(conn, task_id, "implement") == 4
+        assert db.get_stage_run_count(conn, other_task_id, "implement") == 2
 
     def test_update_with_artifacts(
         self, conn: sqlite3.Connection, task_id: str
