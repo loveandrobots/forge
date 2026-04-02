@@ -28,6 +28,13 @@ if ! LINT_OUTPUT=$(ruff check forge/ 2>&1); then
     ERRORS="${ERRORS}Lint errors:\n${LINT_OUTPUT}\n\n"
 fi
 
+# Run smoke tests (only if the module exists in this repo)
+if [ -f "tests/smoke.py" ]; then
+    if ! SMOKE_OUTPUT=$("$PYTHON" -m tests.smoke 2>&1); then
+        ERRORS="${ERRORS}Smoke tests failed:\n${SMOKE_OUTPUT}\n\n"
+    fi
+fi
+
 if [ -n "$ERRORS" ]; then
     echo -e "FAIL: post-implement gate failed\n${ERRORS}" >&2
     exit 1

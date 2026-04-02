@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 
 # Path constants
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "forge.db"
+DB_PATH = Path(os.environ.get("FORGE_DB_PATH", str(BASE_DIR / "forge.db")))
 CONFIG_PATH = BASE_DIR / "config.yaml"
 
 # Pipeline stages in order
