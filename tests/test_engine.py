@@ -2700,6 +2700,86 @@ class TestGuardRetryAfterResetFailure:
         )
         assert len(queued) == 1
 
+    @pytest.mark.asyncio
+    async def test_handle_timeout_passes_project_to_handle_error_retry(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+    ) -> None:
+        """When a timeout exhausts retries and pause_after_completion is enabled, auto-pause fires."""
+        pause_project_id = db.insert_project(
+            conn,
+            name="PauseProject",
+            repo_path="/tmp/repo",
+            gate_dir="/tmp/repo/gates",
+            pause_after_completion=True,
+        )
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+        task_id = db.insert_task(
+            conn, project_id=pause_project_id, title="T", priority=1, max_retries=1
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        # One existing error run so retry count meets max_retries=1
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="error"
+        )
+
+        # Create a running stage run that will time out
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
+        sr_id2 = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=2, status="running"
+        )
+        db.update_stage_run(conn, sr_id2, started_at=old_time)
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id2)
+        assert sr["status"] == "error"
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        # The key assertion: _maybe_auto_pause was reached because project was passed
+        assert engine.running is False
+
+    @pytest.mark.asyncio
+    async def test_handle_timeout_passes_none_project_when_project_missing(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When the project row is missing, project=None is safely passed without error."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=1
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        # One existing error run so retry count meets max_retries=1
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="error"
+        )
+
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=2, status="running"
+        )
+
+        stage_run = db.get_stage_run(conn, sr_id)
+
+        with patch("forge.engine.database.get_project", return_value=None):
+            await engine.handle_timeout(conn, stage_run)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        # Engine should NOT be paused since project was None (no auto-pause possible)
+        assert engine.running is True
+
 
 # ---------------------------------------------------------------------------
 # Auto-escalation from quick flow to standard flow

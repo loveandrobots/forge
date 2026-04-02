@@ -765,6 +765,7 @@ class PipelineEngine:
         task_row = database.get_task(conn, task_id)
         if task_row:
             project_row = database.get_project(conn, task_row["project_id"])
+            project = None
             reset_ok = True
             if project_row:
                 project = _row_to_dict(project_row)
@@ -775,7 +776,7 @@ class PipelineEngine:
                     task_id,
                 )
             if reset_ok:
-                await self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id)
+                await self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id, project=project)
 
     async def _check_timeouts(
         self,
