@@ -8,6 +8,7 @@ Can be run three ways:
 
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -36,14 +37,17 @@ _DASHBOARD_PAGES: list[str] = [
     "/backlog",
     "/logs",
     "/settings",
+    "/partials/engine-status",
 ]
 
 # API GET endpoints that should return 200
 _API_GET_ENDPOINTS: list[str] = [
     "/api/engine/status",
+    "/api/engine/stats",
     "/api/tasks",
     "/api/projects",
     "/api/logs",
+    "/api/stage-runs",
 ]
 
 # POST-only endpoints that should reject GET with 405
@@ -51,6 +55,60 @@ _POST_ONLY_ENDPOINTS: list[str] = [
     "/api/engine/start",
     "/api/engine/pause",
 ]
+
+# Routes excluded from the auto-discovery coverage check.
+# These are FastAPI-generated or cannot be meaningfully smoke-tested.
+_EXCLUDED_ROUTES: set[tuple[str, str]] = {
+    ("GET", "/openapi.json"),
+    ("HEAD", "/openapi.json"),
+    ("GET", "/docs"),
+    ("HEAD", "/docs"),
+    ("GET", "/docs/oauth2-redirect"),
+    ("HEAD", "/docs/oauth2-redirect"),
+    ("GET", "/redoc"),
+    ("HEAD", "/redoc"),
+}
+
+
+def _discover_routes(app) -> set[tuple[str, str]]:
+    """Introspect the FastAPI app and return all registered (method, path) tuples.
+
+    Filters to APIRoute instances only — excludes static file mounts.
+    """
+    from starlette.routing import Route
+
+    routes: set[tuple[str, str]] = set()
+    for route in app.routes:
+        if isinstance(route, Route) and hasattr(route, "methods"):
+            for method in route.methods:
+                routes.add((method, route.path))
+    return routes
+
+
+def _normalize_path(url: str, route_patterns: set[str]) -> str:
+    """Match a concrete URL to its registered route pattern.
+
+    For example, '/tasks/abc-123' matched against {'/tasks/{task_id}'}
+    returns '/tasks/{task_id}'.
+
+    Falls back to returning the url unchanged if no pattern matches.
+    Prefers exact matches over parameterized matches.
+    """
+    # Exact match first
+    if url in route_patterns:
+        return url
+    # Then try parameterized patterns (prefer most-specific: fewest params)
+    candidates = []
+    for pattern in route_patterns:
+        if "{" not in pattern:
+            continue
+        regex = re.sub(r"\{[^}]+\}", r"[^/]+", pattern)
+        if re.fullmatch(regex, url):
+            candidates.append(pattern)
+    if candidates:
+        # Pick the pattern with the fewest parameters (most literal segments)
+        return min(candidates, key=lambda p: p.count("{"))
+    return url
 
 
 @dataclass
@@ -97,9 +155,58 @@ def _seed_data(db_path: str) -> dict:
                 status="queued",
             )
 
+        # Create an extra backlog task for deletion test (so we don't remove the
+        # one used for activate)
+        delete_task_id = database.insert_task(
+            conn,
+            project_id=project_id,
+            title="Smoke test task (delete target)",
+            description="Task seeded for smoke test DELETE endpoint",
+        )
+        task_ids["_delete_target"] = delete_task_id
+
         return {"project_id": project_id, "task_ids": task_ids}
     finally:
         conn.close()
+
+
+def _check(
+    client,
+    method: str,
+    url: str,
+    expected: int,
+    results: list[SmokeResult],
+    exercised: set[tuple[str, str]],
+    route_patterns: set[str],
+    **kwargs,
+) -> None:
+    """Execute a single smoke check and record the result."""
+    name = f"{method.upper()} {url}"
+    if expected != 200:
+        name += f" (expect {expected})"
+    try:
+        resp = getattr(client, method.lower())(url, **kwargs)
+        results.append(
+            SmokeResult(
+                name=name,
+                passed=resp.status_code == expected,
+                status_code=resp.status_code,
+                detail=""
+                if resp.status_code == expected
+                else f"expected {expected}, got {resp.status_code}",
+            )
+        )
+    except Exception as exc:
+        results.append(
+            SmokeResult(
+                name=name,
+                passed=False,
+                detail=str(exc),
+            )
+        )
+    # Track coverage using the normalized route pattern
+    normalized = _normalize_path(url, route_patterns)
+    exercised.add((method.upper(), normalized))
 
 
 def run_smoke_tests() -> list[SmokeResult]:
@@ -137,162 +244,137 @@ def run_smoke_tests() -> list[SmokeResult]:
         try:
             # Seed data after patching so any imports inside seed use temp db
             seed_info = _seed_data(str(db_path))
+            task_ids = seed_info["task_ids"]
+            project_id = seed_info["project_id"]
 
             from starlette.testclient import TestClient
 
             from forge.main import app
 
+            # Discover all registered routes
+            discovered = _discover_routes(app)
+            route_patterns = {path for _, path in discovered}
+
+            # Track which (method, pattern) tuples we exercise
+            exercised: set[tuple[str, str]] = set()
+
             with TestClient(app) as client:
-                # Check dashboard pages
+                # --- Dashboard pages ---
                 for page_url in _DASHBOARD_PAGES:
-                    name = f"GET {page_url}"
-                    try:
-                        resp = client.get(page_url)
-                        results.append(
-                            SmokeResult(
-                                name=name,
-                                passed=resp.status_code == 200,
-                                status_code=resp.status_code,
-                                detail=""
-                                if resp.status_code == 200
-                                else f"expected 200, got {resp.status_code}",
-                            )
-                        )
-                    except Exception as exc:
-                        results.append(
-                            SmokeResult(
-                                name=name,
-                                passed=False,
-                                detail=str(exc),
-                            )
-                        )
+                    _check(client, "GET", page_url, 200, results, exercised, route_patterns)
 
-                # Check task detail page
-                first_task_id = next(iter(seed_info["task_ids"].values()))
-                task_url = f"/tasks/{first_task_id}"
-                name = f"GET {task_url}"
-                try:
-                    resp = client.get(task_url)
-                    results.append(
-                        SmokeResult(
-                            name=name,
-                            passed=resp.status_code == 200,
-                            status_code=resp.status_code,
-                            detail=""
-                            if resp.status_code == 200
-                            else f"expected 200, got {resp.status_code}",
-                        )
-                    )
-                except Exception as exc:
-                    results.append(
-                        SmokeResult(
-                            name=name,
-                            passed=False,
-                            detail=str(exc),
-                        )
-                    )
+                # Task detail page (parameterized)
+                first_task_id = next(iter(task_ids.values()))
+                _check(client, "GET", f"/tasks/{first_task_id}", 200, results, exercised, route_patterns)
 
-                # Check API GET endpoints
+                # --- API GET endpoints ---
                 for url in _API_GET_ENDPOINTS:
-                    name = f"GET {url}"
-                    try:
-                        resp = client.get(url)
-                        results.append(
-                            SmokeResult(
-                                name=name,
-                                passed=resp.status_code == 200,
-                                status_code=resp.status_code,
-                                detail=""
-                                if resp.status_code == 200
-                                else f"expected 200, got {resp.status_code}",
-                            )
-                        )
-                    except Exception as exc:
-                        results.append(
-                            SmokeResult(
-                                name=name,
-                                passed=False,
-                                detail=str(exc),
-                            )
-                        )
+                    _check(client, "GET", url, 200, results, exercised, route_patterns)
+
+                # Parameterized GET endpoints
+                _check(client, "GET", f"/api/tasks/{first_task_id}", 200, results, exercised, route_patterns)
+                _check(client, "GET", f"/api/projects/{project_id}", 200, results, exercised, route_patterns)
+
+                # Stage run GET - find a stage run ID from the active task
+                stage_runs_resp = client.get(f"/api/stage-runs?task_id={task_ids['active']}")
+                if stage_runs_resp.status_code == 200 and stage_runs_resp.json():
+                    sr_id = stage_runs_resp.json()[0]["id"]
+                    _check(client, "GET", f"/api/stage-runs/{sr_id}", 200, results, exercised, route_patterns)
+
+                # --- POST endpoints ---
 
                 # POST /api/tasks
-                name = "POST /api/tasks"
-                try:
-                    resp = client.post(
-                        "/api/tasks",
-                        json={
-                            "title": "Smoke POST task",
-                            "project_id": seed_info["project_id"],
-                            "description": "Created by smoke test",
-                        },
-                    )
-                    results.append(
-                        SmokeResult(
-                            name=name,
-                            passed=resp.status_code == 201,
-                            status_code=resp.status_code,
-                            detail=""
-                            if resp.status_code == 201
-                            else f"expected 201, got {resp.status_code}",
-                        )
-                    )
-                except Exception as exc:
-                    results.append(
-                        SmokeResult(
-                            name=name,
-                            passed=False,
-                            detail=str(exc),
-                        )
-                    )
+                _check(
+                    client, "POST", "/api/tasks", 201, results, exercised, route_patterns,
+                    json={"title": "Smoke POST task", "project_id": project_id, "description": "Created by smoke test"},
+                )
 
-                # POST /api/engine/start and /api/engine/pause
+                # POST /api/tasks/batch
+                _check(
+                    client, "POST", "/api/tasks/batch", 201, results, exercised, route_patterns,
+                    json={"tasks": [{"title": "Batch task", "project_id": project_id, "description": "Batch smoke"}]},
+                )
+
+                # POST /api/projects (repo_path must be a real directory)
+                _check(
+                    client, "POST", "/api/projects", 201, results, exercised, route_patterns,
+                    json={"name": "SmokeProject2", "repo_path": "/tmp", "default_branch": "main"},
+                )
+
+                # Engine control POST endpoints
                 for post_url in _POST_ONLY_ENDPOINTS:
-                    name = f"POST {post_url}"
-                    try:
-                        resp = client.post(post_url)
-                        results.append(
-                            SmokeResult(
-                                name=name,
-                                passed=resp.status_code == 200,
-                                status_code=resp.status_code,
-                                detail=""
-                                if resp.status_code == 200
-                                else f"expected 200, got {resp.status_code}",
-                            )
-                        )
-                    except Exception as exc:
-                        results.append(
-                            SmokeResult(
-                                name=name,
-                                passed=False,
-                                detail=str(exc),
-                            )
-                        )
+                    _check(client, "POST", post_url, 200, results, exercised, route_patterns)
 
                 # Verify POST-only endpoints reject GET with 405
                 for post_url in _POST_ONLY_ENDPOINTS:
-                    name = f"GET {post_url} (expect 405)"
-                    try:
-                        resp = client.get(post_url)
-                        results.append(
-                            SmokeResult(
-                                name=name,
-                                passed=resp.status_code == 405,
-                                status_code=resp.status_code,
-                                detail=""
-                                if resp.status_code == 405
-                                else f"expected 405, got {resp.status_code}",
-                            )
+                    _check(client, "GET", post_url, 405, results, exercised, route_patterns)
+
+                # --- Task action endpoints ---
+                # activate: requires backlog
+                _check(client, "POST", f"/api/tasks/{task_ids['backlog']}/activate", 200, results, exercised, route_patterns)
+
+                # pause: requires active
+                _check(client, "POST", f"/api/tasks/{task_ids['active']}/pause", 200, results, exercised, route_patterns)
+
+                # resume: requires needs_human
+                _check(client, "POST", f"/api/tasks/{task_ids['needs_human']}/resume", 200, results, exercised, route_patterns)
+
+                # retry: requires active or needs_human
+                # The needs_human task was resumed above (now active), so create a fresh one
+                retry_resp = client.post(
+                    "/api/tasks",
+                    json={"title": "Retry target", "project_id": project_id, "description": "For retry smoke"},
+                )
+                if retry_resp.status_code == 201:
+                    retry_task_id = retry_resp.json()["id"]
+                    # Move to active by activating
+                    client.post(f"/api/tasks/{retry_task_id}/activate")
+                    _check(client, "POST", f"/api/tasks/{retry_task_id}/retry", 200, results, exercised, route_patterns)
+
+                # reset: requires needs_human, failed, paused — use failed task
+                _check(client, "POST", f"/api/tasks/{task_ids['failed']}/reset", 200, results, exercised, route_patterns)
+
+                # cancel: requires backlog, active, paused, needs_human — use cancelled? No, use a remaining valid one
+                # The backlog task was activated above, the active was paused, needs_human was resumed, paused was retried
+                # Let's cancel the done task? No, done is not cancellable.
+                # We need a task in a cancellable status. Let's use the _delete_target which is still backlog.
+                # But we need that for delete. Let's cancel it first, then we can't delete.
+                # Better: cancel the retried task (paused -> retry makes it active again? No, retry on paused...)
+                # Actually, let's just cancel the cancelled task... no, that doesn't work.
+                # Use the freshly created POST task (it's backlog)
+                # Let's find it from the POST response... easier: just create another task inline
+                cancel_resp = client.post(
+                    "/api/tasks",
+                    json={"title": "Cancel target", "project_id": project_id, "description": "For cancel smoke"},
+                )
+                if cancel_resp.status_code == 201:
+                    cancel_task_id = cancel_resp.json()["id"]
+                    _check(client, "POST", f"/api/tasks/{cancel_task_id}/cancel", 200, results, exercised, route_patterns)
+
+                # --- PATCH endpoints ---
+                _check(
+                    client, "PATCH", f"/api/tasks/{task_ids['cancelled']}", 200, results, exercised, route_patterns,
+                    json={"title": "Updated smoke task"},
+                )
+                _check(
+                    client, "PATCH", f"/api/projects/{project_id}", 200, results, exercised, route_patterns,
+                    json={"name": "UpdatedSmokeProject"},
+                )
+
+                # --- DELETE endpoint (run last, uses dedicated backlog task) ---
+                _check(client, "DELETE", f"/api/tasks/{task_ids['_delete_target']}", 204, results, exercised, route_patterns)
+
+                # --- Route coverage check ---
+                uncovered = discovered - exercised - _EXCLUDED_ROUTES
+                for method, path in sorted(uncovered):
+                    results.append(
+                        SmokeResult(
+                            name=f"COVERAGE {method} {path}",
+                            passed=False,
+                            detail=f"route {method} {path} is registered but not exercised by smoke tests",
                         )
-                    except Exception as exc:
-                        results.append(
-                            SmokeResult(
-                                name=name,
-                                passed=False,
-                                detail=str(exc),
-                            )
-                        )
+                    )
+
         finally:
             for p in patches:
                 p.stop()

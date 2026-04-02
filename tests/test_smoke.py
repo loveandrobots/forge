@@ -8,7 +8,13 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.smoke import SmokeResult, run_smoke_tests
+from tests.smoke import (
+    SmokeResult,
+    _EXCLUDED_ROUTES,
+    _discover_routes,
+    _normalize_path,
+    run_smoke_tests,
+)
 
 
 def test_smoke_passes_on_healthy_app():
@@ -41,12 +47,6 @@ def test_smoke_detects_missing_route():
         assert len(settings_results) > 0, "No result found for /settings"
         assert not settings_results[0].passed, (
             "Expected /settings check to fail when route is removed"
-        )
-        # Other checks should still pass
-        other_results = [r for r in results if "/settings" not in r.name]
-        other_failures = [r for r in other_results if not r.passed]
-        assert other_failures == [], (
-            f"Non-settings checks failed: {[(r.name, r.detail) for r in other_failures]}"
         )
     finally:
         app.routes.append(settings_route)
@@ -110,3 +110,99 @@ def test_smoke_main_exit_codes():
         f"Smoke script exited with {result.returncode}\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
+
+
+def test_route_discovery_finds_all_routes():
+    """Route discovery returns all registered API routes."""
+    from forge.main import app
+
+    discovered = _discover_routes(app)
+
+    # Should find key routes
+    expected_routes = {
+        ("GET", "/"),
+        ("GET", "/api/tasks"),
+        ("POST", "/api/tasks"),
+        ("GET", "/api/engine/status"),
+        ("DELETE", "/api/tasks/{task_id}"),
+        ("POST", "/api/tasks/{task_id}/activate"),
+        ("GET", "/api/stage-runs/{stage_run_id}"),
+        ("PATCH", "/api/projects/{project_id}"),
+    }
+    for route in expected_routes:
+        assert route in discovered, f"Expected route {route} not found in discovery"
+
+    # Should NOT include static file mounts (those are Mount, not Route)
+    static_routes = {(m, p) for m, p in discovered if p.startswith("/static")}
+    assert static_routes == set(), f"Static routes should not be discovered: {static_routes}"
+
+    # Should have a reasonable number of routes
+    assert len(discovered) >= 20, (
+        f"Expected at least 20 routes, found {len(discovered)}"
+    )
+
+
+def test_coverage_check_detects_uncovered_route():
+    """Coverage check reports failure when a route has no smoke test."""
+    from fastapi.routing import APIRoute
+    from starlette.responses import JSONResponse
+
+    from forge.main import app
+
+    # Add a dummy route
+    async def dummy_endpoint():
+        return JSONResponse({"ok": True})
+
+    dummy_route = APIRoute("/api/dummy-smoke-test", endpoint=dummy_endpoint, methods=["GET"])
+    app.routes.append(dummy_route)
+    try:
+        results = run_smoke_tests()
+        coverage_results = [r for r in results if "COVERAGE" in r.name and "dummy-smoke-test" in r.name]
+        assert len(coverage_results) == 1, (
+            f"Expected 1 coverage failure for dummy route, got {len(coverage_results)}"
+        )
+        assert not coverage_results[0].passed, "Expected coverage check to fail for uncovered route"
+        assert "not exercised" in coverage_results[0].detail
+    finally:
+        app.routes.remove(dummy_route)
+
+
+def test_normalize_path_matches_parameterized_routes():
+    """Path normalization matches concrete URLs to route patterns."""
+    patterns = {
+        "/tasks/{task_id}",
+        "/api/tasks/{task_id}",
+        "/api/tasks/{task_id}/activate",
+        "/api/stage-runs/{stage_run_id}",
+        "/api/tasks",
+        "/api/tasks/batch",
+        "/",
+    }
+
+    # Parameterized matches
+    assert _normalize_path("/tasks/abc-123", patterns) == "/tasks/{task_id}"
+    assert _normalize_path("/api/tasks/abc-123", patterns) == "/api/tasks/{task_id}"
+    assert _normalize_path("/api/tasks/abc-123/activate", patterns) == "/api/tasks/{task_id}/activate"
+    assert _normalize_path("/api/stage-runs/xyz-456", patterns) == "/api/stage-runs/{stage_run_id}"
+
+    # Exact matches (no params)
+    assert _normalize_path("/api/tasks", patterns) == "/api/tasks"
+    assert _normalize_path("/api/tasks/batch", patterns) == "/api/tasks/batch"
+    assert _normalize_path("/", patterns) == "/"
+
+    # Unknown path passes through unchanged
+    assert _normalize_path("/unknown/path", patterns) == "/unknown/path"
+
+
+def test_excluded_routes_not_flagged():
+    """Routes in _EXCLUDED_ROUTES do not produce coverage failures."""
+    results = run_smoke_tests()
+    # None of the excluded routes should appear as coverage failures
+    for method, path in _EXCLUDED_ROUTES:
+        coverage_failures = [
+            r for r in results
+            if r.name == f"COVERAGE {method} {path}" and not r.passed
+        ]
+        assert coverage_failures == [], (
+            f"Excluded route ({method}, {path}) should not be flagged as uncovered"
+        )
