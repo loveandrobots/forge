@@ -55,8 +55,12 @@ class TaskCreate(BaseModel):
     flow: Literal["standard", "quick"] = "standard"
 
 
+class TaskCreateWithDeps(TaskCreate):
+    depends_on: list[int] = Field(default_factory=list)
+
+
 class BatchTaskCreate(BaseModel):
-    tasks: list[TaskCreate]
+    tasks: list[TaskCreateWithDeps]
 
 
 class TaskUpdate(BaseModel):
@@ -92,6 +96,27 @@ class TaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# AI Generate
+# ---------------------------------------------------------------------------
+
+
+class GenerateRequest(BaseModel):
+    project_id: str
+    problem_description: str
+
+
+class GeneratedTask(BaseModel):
+    title: str
+    priority: int = 0
+    description: str = ""
+    depends_on: list[int] = Field(default_factory=list)
+
+
+class GenerateResponse(BaseModel):
+    tasks: list[GeneratedTask]
 
 
 # ---------------------------------------------------------------------------

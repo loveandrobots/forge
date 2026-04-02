@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from forge import database
+from forge import database, dispatcher
 from forge.config import CONFIG_PATH, DB_PATH, FLOW_STAGES, STAGES, get_settings
-from forge.models import BatchTaskCreate, CancelRequest, ResetRequest, TaskCreate, TaskResponse, TaskUpdate
+from forge.models import (
+    BatchTaskCreate,
+    CancelRequest,
+    GenerateRequest,
+    GenerateResponse,
+    GeneratedTask,
+    ResetRequest,
+    TaskCreate,
+    TaskResponse,
+    TaskUpdate,
+)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -77,6 +91,8 @@ def create_task(body: TaskCreate) -> dict:
 def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
     conn = database.get_connection(str(DB_PATH))
     try:
+        n = len(body.tasks)
+
         # Validate all project_ids upfront before inserting anything
         for task_input in body.tasks:
             project = database.get_project(conn, task_input.project_id)
@@ -86,11 +102,31 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                     detail=f"Project not found: {task_input.project_id}",
                 )
 
+        # Validate depends_on indices
+        for i, task_input in enumerate(body.tasks):
+            for dep_idx in task_input.depends_on:
+                if dep_idx < 0 or dep_idx >= n:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Task {i} has invalid dependency index {dep_idx} "
+                        f"(must be 0..{n - 1})",
+                    )
+                if dep_idx == i:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Task {i} depends on itself",
+                    )
+
+        # Topological sort to detect cycles and determine insertion order
+        order = _topological_sort(n, [t.depends_on for t in body.tasks])
+
         # All validated — insert in a single transaction
-        results = []
+        index_to_task_id: dict[int, str] = {}
+        results_by_index: dict[int, dict] = {}
         conn.execute("BEGIN")
         try:
-            for task_input in body.tasks:
+            for idx in order:
+                task_input = body.tasks[idx]
                 task_id = database.insert_task_no_commit(
                     conn,
                     project_id=task_input.project_id,
@@ -101,15 +137,136 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                     max_retries=_resolve_max_retries(task_input.max_retries),
                     flow=task_input.flow,
                 )
+                index_to_task_id[idx] = task_id
+
+                # Create task_links for dependencies (inline to stay in transaction)
+                for dep_idx in task_input.depends_on:
+                    dep_task_id = index_to_task_id[dep_idx]
+                    link_id = str(uuid.uuid4())
+                    now = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        """INSERT INTO task_links
+                           (id, source_task_id, target_task_id, link_type, created_at)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (link_id, dep_task_id, task_id, "blocks", now),
+                    )
+
                 row = database.get_task(conn, task_id)
-                results.append(_row_to_task(row))
+                results_by_index[idx] = _row_to_task(row)
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
             raise
-        return results
+
+        # Return results in original array order
+        return [results_by_index[i] for i in range(n)]
     finally:
         conn.close()
+
+
+def _topological_sort(n: int, deps: list[list[int]]) -> list[int]:
+    """Return indices in dependency order. Raises HTTPException on cycles."""
+    # Build adjacency list and in-degree counts
+    in_degree = [0] * n
+    dependents: list[list[int]] = [[] for _ in range(n)]
+    for i, dep_list in enumerate(deps):
+        in_degree[i] = len(dep_list)
+        for d in dep_list:
+            dependents[d].append(i)
+
+    # Kahn's algorithm
+    queue = [i for i in range(n) if in_degree[i] == 0]
+    order: list[int] = []
+    while queue:
+        node = queue.pop(0)
+        order.append(node)
+        for dep in dependents[node]:
+            in_degree[dep] -= 1
+            if in_degree[dep] == 0:
+                queue.append(dep)
+
+    if len(order) != n:
+        raise HTTPException(
+            status_code=400,
+            detail="Circular dependency detected among tasks",
+        )
+    return order
+
+
+def _extract_json_array(text: str) -> str:
+    """Extract a JSON array from text, stripping markdown code fences if present."""
+    # Try stripping markdown code fences
+    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+    if fence_match:
+        return fence_match.group(1).strip()
+    # Look for raw JSON array
+    arr_match = re.search(r"\[.*\]", text, re.DOTALL)
+    if arr_match:
+        return arr_match.group(0)
+    return text
+
+
+@router.post("/generate", response_model=GenerateResponse)
+async def generate_tasks(body: GenerateRequest) -> dict:
+    """Use Claude Code with the forge-task-writer skill to generate tasks."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        project = database.get_project(conn, body.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        repo_path = project["repo_path"]
+    finally:
+        conn.close()
+
+    # Check skill file exists
+    skill_path = os.path.join(
+        repo_path, ".claude", "skills", "forge-task-writer", "SKILL.md"
+    )
+    if not os.path.exists(skill_path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Skill file not found at {skill_path}. "
+            "Install the forge-task-writer skill first.",
+        )
+
+    # Dispatch to Claude Code
+    result = await dispatcher.dispatch_generate(
+        prompt=body.problem_description,
+        repo_path=repo_path,
+        skill_path=skill_path,
+    )
+
+    if result.exit_code != 0:
+        raise HTTPException(
+            status_code=502,
+            detail=result.error or "Claude Code failed",
+        )
+
+    # Parse JSON from output
+    raw_text = result.output.strip()
+    if not raw_text:
+        raise HTTPException(
+            status_code=422,
+            detail="Claude Code returned empty output",
+        )
+
+    json_text = _extract_json_array(raw_text)
+    try:
+        parsed = json.loads(json_text)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to parse JSON from Claude output: {raw_text[:500]}",
+        )
+
+    if not isinstance(parsed, list):
+        raise HTTPException(
+            status_code=422,
+            detail="Expected a JSON array of tasks",
+        )
+
+    tasks = [GeneratedTask(**item) for item in parsed]
+    return {"tasks": tasks}
 
 
 @router.get("/{task_id}", response_model=TaskResponse)

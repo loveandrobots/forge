@@ -189,6 +189,81 @@ async def dispatch_claude(
         )
 
 
+async def dispatch_generate(
+    prompt: str,
+    repo_path: str,
+    skill_path: str,
+    timeout: int = 120,
+) -> DispatchResult:
+    """Run Claude Code headless with a skill loaded, without branch checkout.
+
+    Used for AI-assisted task generation. Runs ``claude -p <prompt>
+    -s <skill_path> --output-format stream-json --allowedTools ""``
+    in the given repo directory.
+    """
+    start = time.monotonic()
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "claude",
+            "-p",
+            prompt,
+            "-s",
+            skill_path,
+            "--output-format",
+            "stream-json",
+            "--allowedTools",
+            "",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return DispatchResult(
+                output="",
+                exit_code=-1,
+                duration_seconds=time.monotonic() - start,
+                error=f"Claude Code session timed out after {timeout}s",
+            )
+
+        raw_output = stdout_bytes.decode(errors="replace")
+        exit_code = proc.returncode or 0
+
+        if exit_code != 0:
+            stderr_text = stderr_bytes.decode(errors="replace").strip()
+            return DispatchResult(
+                output=raw_output,
+                exit_code=exit_code,
+                duration_seconds=time.monotonic() - start,
+                error=stderr_text or f"Claude exited with code {exit_code}",
+            )
+
+        final_text, tokens_used = parse_stream_json(raw_output)
+
+        return DispatchResult(
+            output=final_text,
+            exit_code=exit_code,
+            duration_seconds=time.monotonic() - start,
+            tokens_used=tokens_used,
+        )
+
+    except FileNotFoundError:
+        return DispatchResult(
+            output="",
+            exit_code=1,
+            duration_seconds=time.monotonic() - start,
+            error="claude CLI not found in PATH",
+        )
+
+
 async def create_branch(
     repo_path: str,
     branch: str,
