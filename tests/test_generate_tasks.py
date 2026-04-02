@@ -197,6 +197,56 @@ class TestGenerateEndpoint:
         assert resp.status_code == 422
         assert "empty output" in resp.json()["detail"]
 
+    def test_generate_non_array_json(
+        self, client: TestClient, project_with_skill: str
+    ) -> None:
+        """Returns 422 when Claude returns a JSON object instead of an array."""
+        mock_result = DispatchResult(
+            output='{"error": "no tasks generated", "count": 0}',
+            exit_code=0,
+            duration_seconds=1.0,
+        )
+
+        with patch(
+            "forge.routers.tasks.dispatcher.dispatch_generate",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            resp = client.post(
+                "/api/tasks/generate",
+                json={
+                    "project_id": project_with_skill,
+                    "problem_description": "Do something",
+                },
+            )
+
+        assert resp.status_code == 422
+        assert "Expected a JSON array" in resp.json()["detail"]
+
+    def test_generate_malformed_task_objects(
+        self, client: TestClient, project_with_skill: str
+    ) -> None:
+        """Returns 422 when Claude returns tasks with missing required fields."""
+        mock_result = DispatchResult(
+            output='[{"name": "Task A"}]', exit_code=0, duration_seconds=1.0
+        )
+
+        with patch(
+            "forge.routers.tasks.dispatcher.dispatch_generate",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            resp = client.post(
+                "/api/tasks/generate",
+                json={
+                    "project_id": project_with_skill,
+                    "problem_description": "Do something",
+                },
+            )
+
+        assert resp.status_code == 422
+        assert "Invalid task structure" in resp.json()["detail"]
+
     def test_generate_strips_code_fences(
         self, client: TestClient, project_with_skill: str
     ) -> None:

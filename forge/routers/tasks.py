@@ -261,7 +261,13 @@ async def generate_tasks(body: GenerateRequest) -> dict:
             detail="Expected a JSON array of tasks",
         )
 
-    tasks = [GeneratedTask(**item) for item in parsed]
+    try:
+        tasks = [GeneratedTask(**item) for item in parsed]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid task structure in Claude output: {exc}",
+        )
     return {"tasks": tasks}
 
 
