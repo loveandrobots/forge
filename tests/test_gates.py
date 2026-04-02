@@ -6,6 +6,7 @@ import importlib.util
 import os
 import subprocess
 import textwrap
+from pathlib import Path
 
 
 # Absolute path to the gates directory in the repo root.
@@ -61,7 +62,7 @@ def _write_file(path: str, content: str) -> None:
 class TestPostSpec:
     SCRIPT = "post-spec.sh"
 
-    def test_passes_with_valid_spec(self, tmp_path: object) -> None:
+    def test_passes_with_valid_spec(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/specs/test-task-42.md"),
@@ -86,13 +87,13 @@ class TestPostSpec:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_fails_when_spec_missing(self, tmp_path: object) -> None:
+    def test_fails_when_spec_missing(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "not found" in result.stderr
 
-    def test_fails_when_spec_too_short(self, tmp_path: object) -> None:
+    def test_fails_when_spec_too_short(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/specs/test-task-42.md"),
@@ -102,7 +103,7 @@ class TestPostSpec:
         assert result.returncode == 1
         assert "too short" in result.stderr
 
-    def test_fails_when_acceptance_criteria_missing(self, tmp_path: object) -> None:
+    def test_fails_when_acceptance_criteria_missing(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         content = "x" * 250 + "\n## Out of scope\n- Nothing\n"
         _write_file(
@@ -113,7 +114,7 @@ class TestPostSpec:
         assert result.returncode == 1
         assert "Acceptance criteria" in result.stderr
 
-    def test_fails_when_out_of_scope_missing(self, tmp_path: object) -> None:
+    def test_fails_when_out_of_scope_missing(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         content = "x" * 250 + "\n## Acceptance criteria\n- Something\n"
         _write_file(
@@ -133,7 +134,7 @@ class TestPostSpec:
 class TestPostPlan:
     SCRIPT = "post-plan.sh"
 
-    def test_passes_with_valid_plan(self, tmp_path: object) -> None:
+    def test_passes_with_valid_plan(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/plans/test-task-42.md"),
@@ -157,13 +158,13 @@ class TestPostPlan:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_fails_when_plan_missing(self, tmp_path: object) -> None:
+    def test_fails_when_plan_missing(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "plan"}, repo)
         assert result.returncode == 1
         assert "not found" in result.stderr
 
-    def test_fails_when_plan_too_short(self, tmp_path: object) -> None:
+    def test_fails_when_plan_too_short(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/plans/test-task-42.md"),
@@ -174,7 +175,7 @@ class TestPostPlan:
         assert "too short" in result.stderr
 
     def test_fails_without_acceptance_criteria_reference(
-        self, tmp_path: object
+        self, tmp_path: Path
     ) -> None:
         repo = str(tmp_path)
         _write_file(
@@ -185,7 +186,7 @@ class TestPostPlan:
         assert result.returncode == 1
         assert "acceptance criteria" in result.stderr.lower()
 
-    def test_fails_without_test_descriptions(self, tmp_path: object) -> None:
+    def test_fails_without_test_descriptions(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/plans/test-task-42.md"),
@@ -196,7 +197,7 @@ class TestPostPlan:
         assert result.returncode == 1
         assert "test" in result.stderr.lower()
 
-    def test_fails_without_files_to_create(self, tmp_path: object) -> None:
+    def test_fails_without_files_to_create(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/plans/test-task-42.md"),
@@ -215,7 +216,7 @@ class TestPostPlan:
 class TestPostImplement:
     SCRIPT = "post-implement.sh"
 
-    def test_passes_when_tests_and_lint_pass(self, tmp_path: object) -> None:
+    def test_passes_when_tests_and_lint_pass(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         # Create minimal Python package and test that passes
         _write_file(os.path.join(repo, "forge/__init__.py"), "")
@@ -233,7 +234,7 @@ class TestPostImplement:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_fails_when_tests_fail(self, tmp_path: object) -> None:
+    def test_fails_when_tests_fail(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(os.path.join(repo, "forge/__init__.py"), "")
         _write_file(
@@ -249,7 +250,7 @@ class TestPostImplement:
         assert result.returncode == 1
         assert "Tests failed" in result.stderr
 
-    def test_fails_when_lint_fails(self, tmp_path: object) -> None:
+    def test_fails_when_lint_fails(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "forge/__init__.py"),
@@ -277,7 +278,7 @@ class TestPostImplement:
 class TestPostReview:
     SCRIPT = "post-review.sh"
 
-    def test_passes_with_pass_verdict(self, tmp_path: object) -> None:
+    def test_passes_with_pass_verdict(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/reviews/test-task-42.md"),
@@ -294,7 +295,7 @@ class TestPostReview:
         assert "passed" in result.stdout
 
     def test_fails_with_issues_verdict_and_actionable_items(
-        self, tmp_path: object
+        self, tmp_path: Path
     ) -> None:
         repo = str(tmp_path)
         _write_file(
@@ -313,13 +314,13 @@ class TestPostReview:
         assert "ISSUES" in result.stderr
         assert "actionable" in result.stderr.lower()
 
-    def test_fails_when_review_missing(self, tmp_path: object) -> None:
+    def test_fails_when_review_missing(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 1
         assert "not found" in result.stderr
 
-    def test_fails_when_no_verdict(self, tmp_path: object) -> None:
+    def test_fails_when_no_verdict(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/reviews/test-task-42.md"),
@@ -329,7 +330,7 @@ class TestPostReview:
         assert result.returncode == 1
         assert "verdict" in result.stderr.lower()
 
-    def test_fails_with_issues_but_no_actionable_items(self, tmp_path: object) -> None:
+    def test_fails_with_issues_but_no_actionable_items(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
             os.path.join(repo, "_forge/reviews/test-task-42.md"),
@@ -346,7 +347,7 @@ class TestPostReview:
         assert "actionable" in result.stderr.lower()
 
     def test_passes_with_pass_verdict_no_issues_mentioned(
-        self, tmp_path: object
+        self, tmp_path: Path
     ) -> None:
         """A PASS-only review with no mention of ISSUES exits 0."""
         repo = str(tmp_path)
@@ -366,7 +367,7 @@ class TestPostReview:
         assert "passed" in result.stdout
 
     def test_passes_with_pass_verdict_containing_issues_word(
-        self, tmp_path: object
+        self, tmp_path: Path
     ) -> None:
         """A PASS verdict line that also contains the word 'issues' exits 0."""
         repo = str(tmp_path)
@@ -385,7 +386,7 @@ class TestPostReview:
         assert "passed" in result.stdout
 
     def test_fails_with_issues_verdict_stderr_message(
-        self, tmp_path: object
+        self, tmp_path: Path
     ) -> None:
         """Stderr includes human-readable message with ISSUES and Bouncing."""
         repo = str(tmp_path)
@@ -407,7 +408,7 @@ class TestPostReview:
         assert "Bouncing" in result.stderr
         assert "actionable item(s)" in result.stderr
 
-    def test_passes_with_multiline_pass_verdict(self, tmp_path: object) -> None:
+    def test_passes_with_multiline_pass_verdict(self, tmp_path: Path) -> None:
         """Verdict heading on one line, PASS value on the next non-blank line."""
         repo = str(tmp_path)
         _write_file(
@@ -426,7 +427,7 @@ class TestPostReview:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_fails_with_multiline_issues_verdict(self, tmp_path: object) -> None:
+    def test_fails_with_multiline_issues_verdict(self, tmp_path: Path) -> None:
         """Verdict heading on one line, ISSUES value on next, with actionable items."""
         repo = str(tmp_path)
         _write_file(
@@ -446,7 +447,7 @@ class TestPostReview:
         assert result.returncode == 1
         assert "ISSUES" in result.stderr
 
-    def test_verdict_not_confused_by_body_text(self, tmp_path: object) -> None:
+    def test_verdict_not_confused_by_body_text(self, tmp_path: Path) -> None:
         """Body text mentioning 'verdict' or 'ISSUES' doesn't override actual verdict."""
         repo = str(tmp_path)
         _write_file(
@@ -468,7 +469,7 @@ class TestPostReview:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_bold_verdict_format(self, tmp_path: object) -> None:
+    def test_bold_verdict_format(self, tmp_path: Path) -> None:
         """Bold verdict with colon inside: **Verdict: PASS**."""
         repo = str(tmp_path)
         _write_file(
@@ -485,7 +486,7 @@ class TestPostReview:
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_bold_label_verdict_format(self, tmp_path: object) -> None:
+    def test_bold_label_verdict_format(self, tmp_path: Path) -> None:
         """Bold label with value outside: **Verdict**: ISSUES."""
         repo = str(tmp_path)
         _write_file(
@@ -503,7 +504,7 @@ class TestPostReview:
         assert result.returncode == 1
         assert "ISSUES" in result.stderr
 
-    def test_fails_with_unrecognized_verdict_keyword(self, tmp_path: object) -> None:
+    def test_fails_with_unrecognized_verdict_keyword(self, tmp_path: Path) -> None:
         """Gate fails when review contains a verdict header with an unrecognized keyword."""
         repo = str(tmp_path)
         _write_file(
@@ -520,7 +521,7 @@ class TestPostReview:
         assert result.returncode == 1
         assert "verdict" in result.stderr.lower()
 
-    def test_bold_label_colon_verdict_format(self, tmp_path: object) -> None:
+    def test_bold_label_colon_verdict_format(self, tmp_path: Path) -> None:
         """Bold label with trailing colon: **Verdict:** PASS."""
         repo = str(tmp_path)
         _write_file(
@@ -546,7 +547,7 @@ class TestPostReview:
 class TestParseVerdictScript:
     SCRIPT = os.path.join(GATES_DIR, "parse_verdict.py")
 
-    def test_parse_verdict_script_pass(self, tmp_path: object) -> None:
+    def test_parse_verdict_script_pass(self, tmp_path: Path) -> None:
         """Script prints PASS and exits 0 for a simple verdict."""
         review = os.path.join(str(tmp_path), "review.md")
         _write_file(review, "## Verdict: PASS\n\nAll good.\n")
@@ -559,7 +560,7 @@ class TestParseVerdictScript:
         assert result.returncode == 0
         assert result.stdout.strip() == "PASS"
 
-    def test_parse_verdict_script_no_verdict(self, tmp_path: object) -> None:
+    def test_parse_verdict_script_no_verdict(self, tmp_path: Path) -> None:
         """Script exits 1 when no verdict is found."""
         review = os.path.join(str(tmp_path), "review.md")
         _write_file(review, "# Review\n\nSome notes.\n")
@@ -572,7 +573,7 @@ class TestParseVerdictScript:
         assert result.returncode == 1
         assert "verdict" in result.stderr.lower()
 
-    def test_parse_verdict_script_unrecognized_keyword(self, tmp_path: object) -> None:
+    def test_parse_verdict_script_unrecognized_keyword(self, tmp_path: Path) -> None:
         """Script exits 1 when verdict header has an unrecognized keyword."""
         review = os.path.join(str(tmp_path), "review.md")
         _write_file(review, "## Verdict: APPROVED\n\nAll good.\n")

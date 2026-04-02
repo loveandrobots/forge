@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+from pathlib import Path
+
 import pytest
 
 from forge.prompt_builder import (
@@ -62,8 +64,8 @@ def empty_artifacts() -> dict:
 
 
 class TestLoadArtifact:
-    def test_reads_existing_file(self, tmp_path: object) -> None:
-        p = tmp_path / "spec.md"  # type: ignore[operator]
+    def test_reads_existing_file(self, tmp_path: Path) -> None:
+        p = tmp_path / "spec.md"
         p.write_text("# Spec\nHello")
         assert load_artifact(str(p)) == "# Spec\nHello"
 
@@ -73,7 +75,7 @@ class TestLoadArtifact:
     def test_returns_empty_for_empty_path(self) -> None:
         assert load_artifact("") == ""
 
-    def test_returns_empty_for_directory(self, tmp_path: object) -> None:
+    def test_returns_empty_for_directory(self, tmp_path: Path) -> None:
         assert load_artifact(str(tmp_path)) == ""
 
 
@@ -104,7 +106,7 @@ class TestBuildRetryContext:
 
 
 class TestGetGitDiff:
-    def test_returns_diff_output(self, tmp_path: object) -> None:
+    def test_returns_diff_output(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         subprocess.run(
             ["git", "init", "-b", "main"], cwd=repo, capture_output=True, check=True
@@ -123,7 +125,7 @@ class TestGetGitDiff:
         )
 
         # Initial commit on main
-        f = tmp_path / "hello.txt"  # type: ignore[operator]
+        f = tmp_path / "hello.txt"
         f.write_text("hello")
         subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
         subprocess.run(
@@ -146,7 +148,7 @@ class TestGetGitDiff:
         diff = get_git_diff(repo, "feature", "main")
         assert "hello world" in diff
 
-    def test_returns_empty_for_invalid_repo(self, tmp_path: object) -> None:
+    def test_returns_empty_for_invalid_repo(self, tmp_path: Path) -> None:
         result = get_git_diff(str(tmp_path), "feature", "main")
         assert result == ""
 
