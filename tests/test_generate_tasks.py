@@ -161,6 +161,42 @@ class TestGenerateEndpoint:
         assert resp.status_code == 502
         assert resp.json()["detail"] == "Process crashed"
 
+    def test_generate_nonexistent_project(self, client: TestClient) -> None:
+        """Returns 404 when project does not exist."""
+        resp = client.post(
+            "/api/tasks/generate",
+            json={
+                "project_id": "nonexistent-id",
+                "problem_description": "Something",
+            },
+        )
+        assert resp.status_code == 404
+        assert "Project not found" in resp.json()["detail"]
+
+    def test_generate_empty_output(
+        self, client: TestClient, project_with_skill: str
+    ) -> None:
+        """Returns 422 when Claude Code returns empty output."""
+        mock_result = DispatchResult(
+            output="", exit_code=0, duration_seconds=2.0
+        )
+
+        with patch(
+            "forge.routers.tasks.dispatcher.dispatch_generate",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            resp = client.post(
+                "/api/tasks/generate",
+                json={
+                    "project_id": project_with_skill,
+                    "problem_description": "Do something",
+                },
+            )
+
+        assert resp.status_code == 422
+        assert "empty output" in resp.json()["detail"]
+
     def test_generate_strips_code_fences(
         self, client: TestClient, project_with_skill: str
     ) -> None:

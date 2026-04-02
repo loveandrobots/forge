@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
@@ -139,16 +137,14 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                 )
                 index_to_task_id[idx] = task_id
 
-                # Create task_links for dependencies (inline to stay in transaction)
+                # Create task_links for dependencies
                 for dep_idx in task_input.depends_on:
                     dep_task_id = index_to_task_id[dep_idx]
-                    link_id = str(uuid.uuid4())
-                    now = datetime.now(timezone.utc).isoformat()
-                    conn.execute(
-                        """INSERT INTO task_links
-                           (id, source_task_id, target_task_id, link_type, created_at)
-                           VALUES (?, ?, ?, ?, ?)""",
-                        (link_id, dep_task_id, task_id, "blocks", now),
+                    database.insert_task_link_no_commit(
+                        conn,
+                        source_task_id=dep_task_id,
+                        target_task_id=task_id,
+                        link_type="blocks",
                     )
 
                 row = database.get_task(conn, task_id)

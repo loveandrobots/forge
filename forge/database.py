@@ -638,14 +638,14 @@ def get_implement_review_retry_count(conn: sqlite3.Connection, task_id: str) -> 
 VALID_LINK_TYPES = {"blocks", "created_by", "follows", "related"}
 
 
-def insert_task_link(
+def insert_task_link_no_commit(
     conn: sqlite3.Connection,
     *,
     source_task_id: str,
     target_task_id: str,
     link_type: str,
 ) -> str:
-    """Insert a task link. link_type must be valid. Returns the link id."""
+    """Insert a task link without committing. Returns the link id."""
     if link_type not in VALID_LINK_TYPES:
         raise ValueError(
             f"Invalid link_type: {link_type!r}. Must be one of {VALID_LINK_TYPES}"
@@ -655,6 +655,23 @@ def insert_task_link(
         """INSERT INTO task_links (id, source_task_id, target_task_id, link_type, created_at)
            VALUES (?, ?, ?, ?, ?)""",
         (link_id, source_task_id, target_task_id, link_type, _now()),
+    )
+    return link_id
+
+
+def insert_task_link(
+    conn: sqlite3.Connection,
+    *,
+    source_task_id: str,
+    target_task_id: str,
+    link_type: str,
+) -> str:
+    """Insert a task link. link_type must be valid. Returns the link id."""
+    link_id = insert_task_link_no_commit(
+        conn,
+        source_task_id=source_task_id,
+        target_task_id=target_task_id,
+        link_type=link_type,
     )
     conn.commit()
     return link_id

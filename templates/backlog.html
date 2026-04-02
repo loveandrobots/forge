@@ -214,7 +214,18 @@ function renderPreviewCards(tasks, projectId) {
         container.appendChild(card);
 
         card.querySelector(".remove-btn").addEventListener("click", function() {
+            var removedIdx = parseInt(card.dataset.index, 10);
             card.remove();
+            // Re-index remaining cards: remove refs to deleted index, shift higher indices down
+            Array.from(container.children).forEach(function(c, newPos) {
+                var oldIdx = parseInt(c.dataset.index, 10);
+                var deps = JSON.parse(c.dataset.dependsOn || "[]");
+                deps = deps.filter(function(d) { return d !== removedIdx; });
+                deps = deps.map(function(d) { return d > removedIdx ? d - 1 : d; });
+                c.dataset.dependsOn = JSON.stringify(deps);
+                c.dataset.index = newPos;
+                c.querySelector(".task-preview-card-index").textContent = "#" + newPos;
+            });
             if (container.children.length === 0) {
                 document.getElementById("task-preview-area").style.display = "none";
             }
