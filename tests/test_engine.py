@@ -370,6 +370,63 @@ class TestBounceTask:
         assert len(queued) == 1
         assert queued[0]["attempt"] == 3
 
+    @pytest.mark.asyncio
+    async def test_bounce_task_no_type_metadata_in_logs(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Regression: bounce_task must not log Python type info (e.g. type=)."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="T",
+            priority=1,
+            max_retries=3,
+        )
+        gate_result = GateResult(
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="issues",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
+        )
+        logged_messages: list[str] = []
+        original_log = engine._log
+
+        def capture_log(level: str, msg: str, **kwargs: object) -> None:
+            logged_messages.append(msg)
+            original_log(level, msg, **kwargs)
+
+        engine._log = capture_log  # type: ignore[assignment]
+
+        # Exercise "spec" bounce path (non-review branch)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="bounced",
+        )
+        task = dict(db.get_task(conn, task_id))
+        await engine.bounce_task(conn, task, "spec", gate_result)
+
+        # Exercise "review" bounce path
+        db.update_task(conn, task_id, current_stage="review")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="done",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced",
+        )
+        task = dict(db.get_task(conn, task_id))
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        assert logged_messages, "Expected at least one log message from bounce_task"
+        for msg in logged_messages:
+            assert "type=" not in msg, f"Log message leaks type metadata: {msg}"
+            assert "type(" not in msg, f"Log message leaks type metadata: {msg}"
+
 
 class TestErrorRetryAttemptNumber:
     @pytest.mark.asyncio
