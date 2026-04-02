@@ -185,6 +185,52 @@ class TestResumeTask:
         resp = client.post(f"/api/tasks/{task_id}/resume")
         assert resp.status_code == 400
 
+    def test_resume_quick_flow_falsy_stage_uses_implement(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        conn = database.get_connection(str(db_path))
+        try:
+            database.update_task(
+                conn, task_id, status="needs_human", current_stage="", flow="quick"
+            )
+        finally:
+            conn.close()
+
+        resp = client.post(f"/api/tasks/{task_id}/resume")
+        assert resp.status_code == 200
+
+        conn = database.get_connection(str(db_path))
+        try:
+            runs = database.list_stage_runs(conn, task_id=task_id)
+            assert len(runs) >= 1
+            assert runs[-1]["stage"] == "implement"
+        finally:
+            conn.close()
+
+    def test_resume_standard_flow_falsy_stage_uses_spec(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        conn = database.get_connection(str(db_path))
+        try:
+            database.update_task(
+                conn, task_id, status="needs_human", current_stage="", flow="standard"
+            )
+        finally:
+            conn.close()
+
+        resp = client.post(f"/api/tasks/{task_id}/resume")
+        assert resp.status_code == 200
+
+        conn = database.get_connection(str(db_path))
+        try:
+            runs = database.list_stage_runs(conn, task_id=task_id)
+            assert len(runs) >= 1
+            assert runs[-1]["stage"] == "spec"
+        finally:
+            conn.close()
+
 
 class TestPauseTask:
     def test_pause_active(self, client: TestClient, task_id: str, tmp_path) -> None:
@@ -222,6 +268,52 @@ class TestRetryTask:
     def test_retry_backlog_fails(self, client: TestClient, task_id: str) -> None:
         resp = client.post(f"/api/tasks/{task_id}/retry")
         assert resp.status_code == 400
+
+    def test_retry_quick_flow_falsy_stage_uses_implement(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        conn = database.get_connection(str(db_path))
+        try:
+            database.update_task(
+                conn, task_id, status="active", current_stage="", flow="quick"
+            )
+        finally:
+            conn.close()
+
+        resp = client.post(f"/api/tasks/{task_id}/retry")
+        assert resp.status_code == 200
+
+        conn = database.get_connection(str(db_path))
+        try:
+            runs = database.list_stage_runs(conn, task_id=task_id)
+            assert len(runs) >= 1
+            assert runs[-1]["stage"] == "implement"
+        finally:
+            conn.close()
+
+    def test_retry_standard_flow_falsy_stage_uses_spec(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        conn = database.get_connection(str(db_path))
+        try:
+            database.update_task(
+                conn, task_id, status="active", current_stage="", flow="standard"
+            )
+        finally:
+            conn.close()
+
+        resp = client.post(f"/api/tasks/{task_id}/retry")
+        assert resp.status_code == 200
+
+        conn = database.get_connection(str(db_path))
+        try:
+            runs = database.list_stage_runs(conn, task_id=task_id)
+            assert len(runs) >= 1
+            assert runs[-1]["stage"] == "spec"
+        finally:
+            conn.close()
 
 
 class TestCancelTask:

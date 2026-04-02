@@ -378,7 +378,8 @@ def resume_task(task_id: str) -> dict:
 
         stage = row["current_stage"]
         if not stage:
-            stage = STAGES[0]
+            flow = row["flow"] if row["flow"] else "standard"
+            stage = FLOW_STAGES.get(flow, STAGES)[0]
 
         retry_count = database.get_retry_count(conn, task_id, stage)
         database.insert_stage_run(
@@ -431,7 +432,8 @@ def retry_task(task_id: str) -> dict:
 
         stage = row["current_stage"]
         if not stage:
-            stage = STAGES[0]
+            flow = row["flow"] if row["flow"] else "standard"
+            stage = FLOW_STAGES.get(flow, STAGES)[0]
 
         retry_count = database.get_retry_count(conn, task_id, stage)
         database.insert_stage_run(
