@@ -302,6 +302,12 @@ def run_smoke_tests() -> list[SmokeResult]:
                     json={"tasks": [{"title": "Batch task", "project_id": project_id, "description": "Batch smoke"}]},
                 )
 
+                # POST /api/tasks/generate (use nonexistent project to get 404 without needing Claude)
+                _check(
+                    client, "POST", "/api/tasks/generate", 404, results, exercised, route_patterns,
+                    json={"project_id": "nonexistent", "problem_description": "test"},
+                )
+
                 # POST /api/projects (repo_path must be a real directory)
                 _check(
                     client, "POST", "/api/projects", 201, results, exercised, route_patterns,
