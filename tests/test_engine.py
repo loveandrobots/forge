@@ -411,6 +411,10 @@ class TestBounceTask:
         task = dict(db.get_task(conn, task_id))
         await engine.bounce_task(conn, task, "spec", gate_result)
 
+        # Verify bounce_task created a queued stage_run for spec
+        spec_queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        assert len(spec_queued) >= 1, "bounce_task should insert a queued spec stage_run"
+
         # Exercise "review" bounce path
         db.update_task(conn, task_id, current_stage="review")
         db.insert_stage_run(
@@ -421,6 +425,10 @@ class TestBounceTask:
         )
         task = dict(db.get_task(conn, task_id))
         await engine.bounce_task(conn, task, "review", gate_result)
+
+        # Verify bounce_task created a queued stage_run for implement (review bounces back)
+        impl_queued = db.list_stage_runs(conn, task_id=task_id, stage="implement", status="queued")
+        assert len(impl_queued) >= 1, "bounce_task should insert a queued implement stage_run on review bounce"
 
         assert logged_messages, "Expected at least one log message from bounce_task"
         for msg in logged_messages:
