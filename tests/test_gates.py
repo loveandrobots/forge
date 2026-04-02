@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import textwrap
@@ -502,6 +503,23 @@ class TestPostReview:
         assert result.returncode == 1
         assert "ISSUES" in result.stderr
 
+    def test_fails_with_unrecognized_verdict_keyword(self, tmp_path: object) -> None:
+        """Gate fails when review contains a verdict header with an unrecognized keyword."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            ## Verdict: REJECTED
+
+            The implementation does not meet requirements.
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "verdict" in result.stderr.lower()
+
     def test_bold_label_colon_verdict_format(self, tmp_path: object) -> None:
         """Bold label with trailing colon: **Verdict:** PASS."""
         repo = str(tmp_path)
@@ -554,6 +572,20 @@ class TestParseVerdictScript:
         assert result.returncode == 1
         assert "verdict" in result.stderr.lower()
 
+    def test_parse_verdict_script_unrecognized_keyword(self, tmp_path: object) -> None:
+        """Script exits 1 when verdict header has an unrecognized keyword."""
+        review = os.path.join(str(tmp_path), "review.md")
+        _write_file(review, "## Verdict: APPROVED\n\nAll good.\n")
+        result = subprocess.run(
+            ["python3", self.SCRIPT, review],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 1
+        assert "verdict" in result.stderr.lower()
+        assert result.stdout.strip() == ""
+
     def test_parse_verdict_script_missing_file(self) -> None:
         """Script exits 1 for a nonexistent file."""
         result = subprocess.run(
@@ -563,3 +595,33 @@ class TestParseVerdictScript:
             timeout=10,
         )
         assert result.returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# parse_verdict() direct unit tests
+# ---------------------------------------------------------------------------
+
+
+def _load_parse_verdict() -> object:
+    """Import parse_verdict function from the gates script."""
+    spec = importlib.util.spec_from_file_location(
+        "parse_verdict", os.path.join(GATES_DIR, "parse_verdict.py")
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod.parse_verdict  # type: ignore[attr-defined]
+
+
+class TestParseVerdictUnit:
+    """Direct unit tests for the parse_verdict() function."""
+
+    parse_verdict = staticmethod(_load_parse_verdict())
+
+    def test_returns_none_for_unrecognized_keyword_approved(self) -> None:
+        assert self.parse_verdict("## Verdict: APPROVED\n\nAll good.\n") is None
+
+    def test_returns_none_for_unrecognized_keyword_fail(self) -> None:
+        assert self.parse_verdict("## Verdict: FAIL\n\nBad code.\n") is None
+
+    def test_returns_none_for_unrecognized_keyword_rejected(self) -> None:
+        assert self.parse_verdict("## Verdict: REJECTED\n\nNot acceptable.\n") is None
