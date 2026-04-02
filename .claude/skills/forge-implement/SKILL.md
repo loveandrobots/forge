@@ -14,6 +14,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 - If existing tests fail, fix them. Never dismiss a failure as "not related to my change" — either it is related (fix it) or the test was already broken (fix it anyway and note it in the commit message).
 - Every new function or endpoint needs at least one test.
 - See the `forge-testing` skill for database isolation and test quality conventions.
+- Run \`python -m tests.smoke\` to verify all dashboard pages and API endpoints respond correctly.
 
 ## Code quality
 
