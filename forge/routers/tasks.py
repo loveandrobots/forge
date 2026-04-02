@@ -100,6 +100,10 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                     detail=f"Project not found: {task_input.project_id}",
                 )
 
+        # Deduplicate depends_on indices
+        for task_input in body.tasks:
+            task_input.depends_on = list(dict.fromkeys(task_input.depends_on))
+
         # Validate depends_on indices
         for i, task_input in enumerate(body.tasks):
             for dep_idx in task_input.depends_on:

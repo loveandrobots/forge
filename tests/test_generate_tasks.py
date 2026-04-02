@@ -436,6 +436,43 @@ class TestBatchWithDependencies:
         assert resp.status_code == 400
         assert "Circular dependency" in resp.json()["detail"]
 
+    def test_batch_duplicate_depends_on_deduplicates(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        """Duplicate depends_on indices are deduplicated — only one link created."""
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": project_id,
+                        "title": "Base task",
+                        "depends_on": [],
+                    },
+                    {
+                        "project_id": project_id,
+                        "title": "Dependent task",
+                        "depends_on": [0, 0],
+                    },
+                ]
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert len(data) == 2
+
+        from forge.config import DB_PATH
+
+        conn = database.get_connection(str(DB_PATH))
+        try:
+            links = database.get_task_links(conn, data[1]["id"])
+            incoming = [r for r in links if r["target_task_id"] == data[1]["id"]]
+            assert len(incoming) == 1
+            assert incoming[0]["source_task_id"] == data[0]["id"]
+            assert incoming[0]["link_type"] == "blocks"
+        finally:
+            conn.close()
+
     def test_batch_backward_compatible(
         self, client: TestClient, project_id: str
     ) -> None:

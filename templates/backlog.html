@@ -285,6 +285,7 @@ document.getElementById("create-all-btn").addEventListener("click", function() {
         }).join("<br>");
         conf.innerHTML = '<strong>Created ' + result.data.length + ' task(s):</strong><br>' + links;
         conf.style.display = "block";
+        setTimeout(function() { window.location.reload(); }, 2000);
     }).catch(function(err) {
         document.getElementById("create-all-btn").disabled = false;
         var errEl = document.getElementById("generate-error");
