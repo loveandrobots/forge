@@ -38,12 +38,12 @@ _DASHBOARD_PAGES: list[str] = [
     "/settings",
 ]
 
-# API endpoints: (method, url, kwargs)
-_API_CHECKS: list[tuple[str, str, dict]] = [
-    ("GET", "/api/engine/status", {}),
-    ("GET", "/api/tasks", {}),
-    ("GET", "/api/projects", {}),
-    ("GET", "/api/logs", {}),
+# API GET endpoints that should return 200
+_API_GET_ENDPOINTS: list[str] = [
+    "/api/engine/status",
+    "/api/tasks",
+    "/api/projects",
+    "/api/logs",
 ]
 
 # POST-only endpoints that should reject GET with 405
@@ -193,10 +193,10 @@ def run_smoke_tests() -> list[SmokeResult]:
                     )
 
                 # Check API GET endpoints
-                for method, url, kwargs in _API_CHECKS:
-                    name = f"{method} {url}"
+                for url in _API_GET_ENDPOINTS:
+                    name = f"GET {url}"
                     try:
-                        resp = client.get(url, **kwargs)
+                        resp = client.get(url)
                         results.append(
                             SmokeResult(
                                 name=name,

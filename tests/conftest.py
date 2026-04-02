@@ -5,20 +5,7 @@ from __future__ import annotations
 import pytest
 
 from forge import database
-
-
-# Every module that does `from forge.config import DB_PATH` gets its own
-# local reference.  We must patch each one so no code path touches the
-# production database.
-_DB_PATH_LOCATIONS = [
-    "forge.config.DB_PATH",
-    "forge.cli.DB_PATH",
-    "forge.main.DB_PATH",
-    "forge.routers.projects.DB_PATH",
-    "forge.routers.tasks.DB_PATH",
-    "forge.routers.pipeline.DB_PATH",
-    "forge.routers.dashboard.DB_PATH",
-]
+from tests.smoke import _DB_PATH_LOCATIONS
 
 
 async def _noop_start(self):
