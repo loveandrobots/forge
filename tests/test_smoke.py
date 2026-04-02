@@ -48,6 +48,12 @@ def test_smoke_detects_missing_route():
         assert not settings_results[0].passed, (
             "Expected /settings check to fail when route is removed"
         )
+        # Other checks should still pass
+        other_results = [r for r in results if "/settings" not in r.name]
+        other_failures = [r for r in other_results if not r.passed]
+        assert other_failures == [], (
+            f"Non-settings checks failed: {[(r.name, r.detail) for r in other_failures]}"
+        )
     finally:
         app.routes.append(settings_route)
 
@@ -195,14 +201,30 @@ def test_normalize_path_matches_parameterized_routes():
 
 
 def test_excluded_routes_not_flagged():
-    """Routes in _EXCLUDED_ROUTES do not produce coverage failures."""
-    results = run_smoke_tests()
-    # None of the excluded routes should appear as coverage failures
-    for method, path in _EXCLUDED_ROUTES:
+    """Adding a route to _EXCLUDED_ROUTES suppresses its coverage failure."""
+    from fastapi.routing import APIRoute
+    from starlette.responses import JSONResponse
+
+    from forge.main import app
+
+    # Add a dummy route that will NOT be exercised
+    async def excluded_endpoint():
+        return JSONResponse({"ok": True})
+
+    dummy_route = APIRoute("/api/excluded-smoke-test", endpoint=excluded_endpoint, methods=["GET"])
+    app.routes.append(dummy_route)
+    exclusion_entry = ("GET", "/api/excluded-smoke-test")
+    _EXCLUDED_ROUTES.add(exclusion_entry)
+    try:
+        results = run_smoke_tests()
+        # The excluded dummy route should NOT appear as a coverage failure
         coverage_failures = [
             r for r in results
-            if r.name == f"COVERAGE {method} {path}" and not r.passed
+            if "excluded-smoke-test" in r.name and not r.passed
         ]
         assert coverage_failures == [], (
-            f"Excluded route ({method}, {path}) should not be flagged as uncovered"
+            f"Excluded route should not be flagged as uncovered: {coverage_failures}"
         )
+    finally:
+        app.routes.remove(dummy_route)
+        _EXCLUDED_ROUTES.discard(exclusion_entry)

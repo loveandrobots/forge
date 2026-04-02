@@ -281,6 +281,12 @@ def run_smoke_tests() -> list[SmokeResult]:
                 if stage_runs_resp.status_code == 200 and stage_runs_resp.json():
                     sr_id = stage_runs_resp.json()[0]["id"]
                     _check(client, "GET", f"/api/stage-runs/{sr_id}", 200, results, exercised, route_patterns)
+                else:
+                    results.append(SmokeResult(
+                        name="GET /api/stage-runs/{stage_run_id}",
+                        passed=False,
+                        detail=f"setup failed: could not fetch stage runs (got {stage_runs_resp.status_code})",
+                    ))
 
                 # --- POST endpoints ---
 
@@ -331,6 +337,12 @@ def run_smoke_tests() -> list[SmokeResult]:
                     # Move to active by activating
                     client.post(f"/api/tasks/{retry_task_id}/activate")
                     _check(client, "POST", f"/api/tasks/{retry_task_id}/retry", 200, results, exercised, route_patterns)
+                else:
+                    results.append(SmokeResult(
+                        name="POST /api/tasks/{task_id}/retry",
+                        passed=False,
+                        detail=f"setup failed: could not create task (got {retry_resp.status_code})",
+                    ))
 
                 # reset: requires needs_human, failed, paused — use failed task
                 _check(client, "POST", f"/api/tasks/{task_ids['failed']}/reset", 200, results, exercised, route_patterns)
@@ -343,6 +355,12 @@ def run_smoke_tests() -> list[SmokeResult]:
                 if cancel_resp.status_code == 201:
                     cancel_task_id = cancel_resp.json()["id"]
                     _check(client, "POST", f"/api/tasks/{cancel_task_id}/cancel", 200, results, exercised, route_patterns)
+                else:
+                    results.append(SmokeResult(
+                        name="POST /api/tasks/{task_id}/cancel",
+                        passed=False,
+                        detail=f"setup failed: could not create task (got {cancel_resp.status_code})",
+                    ))
 
                 # --- PATCH endpoints ---
                 _check(
