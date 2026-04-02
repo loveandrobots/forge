@@ -67,6 +67,9 @@ _EXCLUDED_ROUTES: set[tuple[str, str]] = {
     ("HEAD", "/docs/oauth2-redirect"),
     ("GET", "/redoc"),
     ("HEAD", "/redoc"),
+    # SSE streaming endpoint — cannot be smoke-tested with a regular GET
+    ("GET", "/api/logs/stream"),
+    ("HEAD", "/api/logs/stream"),
 }
 
 

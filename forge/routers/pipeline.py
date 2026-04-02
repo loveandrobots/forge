@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
 
 from forge import database
 from forge.config import DB_PATH
@@ -145,3 +148,38 @@ def get_logs(
         return [_row_to_log(r) for r in rows]
     finally:
         conn.close()
+
+
+async def _log_event_stream(level: str | None) -> AsyncGenerator[str, None]:
+    """Async generator that yields SSE events for log entries."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        # Initial burst: 20 most recent entries, oldest-first
+        rows = database.get_logs(conn, level=level, limit=20)
+        rows = list(reversed(rows))
+        last_id = 0
+        for row in rows:
+            entry = _row_to_log(row)
+            last_id = entry["id"]
+            yield f"data: {json.dumps(entry)}\n\n"
+        # Poll for new entries every 2 seconds
+        while True:
+            await asyncio.sleep(2)
+            new_rows = database.get_logs_since(
+                conn, since_id=last_id, level=level,
+            )
+            for row in new_rows:
+                entry = _row_to_log(row)
+                last_id = entry["id"]
+                yield f"data: {json.dumps(entry)}\n\n"
+    finally:
+        conn.close()
+
+
+@router.get("/api/logs/stream")
+async def stream_logs(level: str | None = Query(None)) -> StreamingResponse:
+    return StreamingResponse(
+        _log_event_stream(level),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

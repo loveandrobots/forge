@@ -748,3 +748,24 @@ def get_logs(
         params,
     )
     return cur.fetchall()
+
+
+def get_logs_since(
+    conn: sqlite3.Connection,
+    *,
+    since_id: int = 0,
+    level: str | None = None,
+    limit: int = 100,
+) -> list[sqlite3.Row]:
+    """Get log entries with id > since_id, ordered ASC by id."""
+    clauses = ["id > ?"]
+    params: list = [since_id]
+    if level is not None:
+        clauses.append("level = ?")
+        params.append(level)
+    params.append(limit)
+    where = " AND ".join(clauses)
+    return conn.execute(
+        f"SELECT * FROM run_log WHERE {where} ORDER BY id ASC LIMIT ?",
+        params,
+    ).fetchall()

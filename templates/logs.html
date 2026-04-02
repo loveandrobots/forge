@@ -50,4 +50,35 @@
     <p class="empty-state">No log entries.</p>
     {% endif %}
 </div>
+
+<script>
+(function() {
+    var level = "{{ selected_level or '' }}";
+    var url = "/api/logs/stream" + (level ? "?level=" + encodeURIComponent(level) : "");
+    var es = new EventSource(url);
+
+    es.onmessage = function(e) {
+        var log = JSON.parse(e.data);
+        var tbody = document.querySelector('.log-table tbody');
+        if (!tbody) {
+            var feed = document.getElementById('log-feed');
+            feed.innerHTML = '<table class="log-table"><thead><tr><th>Time</th><th>Level</th><th>Message</th><th>Task</th></tr></thead><tbody></tbody></table>';
+            tbody = feed.querySelector('tbody');
+        }
+        var tr = document.createElement('tr');
+        tr.className = 'log-row log-' + log.level;
+        var taskCell = '';
+        if (log.task_id) {
+            taskCell = '<a href="/tasks/' + log.task_id + '">' + log.task_id.substring(0, 8) + '</a>';
+        }
+        tr.innerHTML =
+            '<td class="log-time">' + log.timestamp + '</td>' +
+            '<td><span class="badge badge-' + log.level + '">' + log.level + '</span></td>' +
+            '<td></td>' +
+            '<td>' + taskCell + '</td>';
+        tr.children[2].textContent = log.message;
+        tbody.insertBefore(tr, tbody.firstChild);
+    };
+})();
+</script>
 {% endblock %}
