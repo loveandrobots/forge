@@ -73,7 +73,7 @@ _EXCLUDED_ROUTES: set[tuple[str, str]] = {
 def _discover_routes(app) -> set[tuple[str, str]]:
     """Introspect the FastAPI app and return all registered (method, path) tuples.
 
-    Filters to APIRoute instances only — excludes static file mounts.
+    Filters to Route instances with methods — excludes static file mounts.
     """
     from starlette.routing import Route
 
@@ -102,7 +102,8 @@ def _normalize_path(url: str, route_patterns: set[str]) -> str:
     for pattern in route_patterns:
         if "{" not in pattern:
             continue
-        regex = re.sub(r"\{[^}]+\}", r"[^/]+", pattern)
+        parts = re.split(r"\{[^}]+\}", pattern)
+        regex = r"[^/]+".join(re.escape(p) for p in parts)
         if re.fullmatch(regex, url):
             candidates.append(pattern)
     if candidates:
@@ -334,15 +335,7 @@ def run_smoke_tests() -> list[SmokeResult]:
                 # reset: requires needs_human, failed, paused — use failed task
                 _check(client, "POST", f"/api/tasks/{task_ids['failed']}/reset", 200, results, exercised, route_patterns)
 
-                # cancel: requires backlog, active, paused, needs_human — use cancelled? No, use a remaining valid one
-                # The backlog task was activated above, the active was paused, needs_human was resumed, paused was retried
-                # Let's cancel the done task? No, done is not cancellable.
-                # We need a task in a cancellable status. Let's use the _delete_target which is still backlog.
-                # But we need that for delete. Let's cancel it first, then we can't delete.
-                # Better: cancel the retried task (paused -> retry makes it active again? No, retry on paused...)
-                # Actually, let's just cancel the cancelled task... no, that doesn't work.
-                # Use the freshly created POST task (it's backlog)
-                # Let's find it from the POST response... easier: just create another task inline
+                # cancel: create a fresh backlog task since prior seeded tasks have changed status
                 cancel_resp = client.post(
                     "/api/tasks",
                     json={"title": "Cancel target", "project_id": project_id, "description": "For cancel smoke"},
