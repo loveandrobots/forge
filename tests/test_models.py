@@ -88,7 +88,7 @@ class TestTaskCreate:
         t = TaskCreate(project_id="p1", title="Do thing")
         assert t.description == ""
         assert t.priority == 0
-        assert t.max_retries == 3
+        assert t.max_retries is None
 
     def test_missing_required(self) -> None:
         with pytest.raises(ValidationError):

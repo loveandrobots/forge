@@ -51,7 +51,7 @@ class TaskCreate(BaseModel):
     description: str = ""
     priority: int = 0
     skill_overrides: list[str] | None = None
-    max_retries: int = 3
+    max_retries: int | None = None
     flow: Literal["standard", "quick"] = "standard"
 
 

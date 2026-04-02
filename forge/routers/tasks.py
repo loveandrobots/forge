@@ -7,10 +7,18 @@ import json
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from forge import database
-from forge.config import DB_PATH, FLOW_STAGES, STAGES
+from forge.config import CONFIG_PATH, DB_PATH, FLOW_STAGES, STAGES, get_settings
 from forge.models import BatchTaskCreate, CancelRequest, ResetRequest, TaskCreate, TaskResponse, TaskUpdate
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+def _resolve_max_retries(value: int | None) -> int:
+    """Return the explicit value or fall back to the configured default."""
+    if value is not None:
+        return value
+    settings = get_settings(CONFIG_PATH)
+    return settings.engine.default_max_retries
 
 
 def _row_to_task(row) -> dict:
@@ -56,7 +64,7 @@ def create_task(body: TaskCreate) -> dict:
             description=body.description,
             priority=body.priority,
             skill_overrides=body.skill_overrides,
-            max_retries=body.max_retries,
+            max_retries=_resolve_max_retries(body.max_retries),
             flow=body.flow,
         )
         row = database.get_task(conn, task_id)
@@ -90,7 +98,7 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                     description=task_input.description,
                     priority=task_input.priority,
                     skill_overrides=task_input.skill_overrides,
-                    max_retries=task_input.max_retries,
+                    max_retries=_resolve_max_retries(task_input.max_retries),
                     flow=task_input.flow,
                 )
                 row = database.get_task(conn, task_id)

@@ -785,3 +785,87 @@ class TestResetTaskFlowAware:
         resp = client.post(f"/api/tasks/{task_id}/reset")
         assert resp.status_code == 200
         assert resp.json()["current_stage"] == "spec"
+
+
+# ---------------------------------------------------------------------------
+# max_retries inherits from configured default
+# ---------------------------------------------------------------------------
+
+
+class TestMaxRetriesDefault:
+    """New tasks should inherit max_retries from the configured default_max_retries."""
+
+    @pytest.fixture()
+    def _config_max_retries(self, tmp_path, monkeypatch):
+        """Write a config.yaml with default_max_retries=6 and point CONFIG_PATH at it."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("engine:\n  default_max_retries: 6\n")
+        monkeypatch.setattr("forge.routers.tasks.CONFIG_PATH", config_file)
+
+    def test_create_task_uses_configured_default(
+        self, client: TestClient, project_id: str, _config_max_retries
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Should get 6 retries",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["max_retries"] == 6
+
+    def test_create_task_explicit_max_retries_overrides_config(
+        self, client: TestClient, project_id: str, _config_max_retries
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Explicit retries",
+                "max_retries": 10,
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["max_retries"] == 10
+
+    def test_batch_create_uses_configured_default(
+        self, client: TestClient, project_id: str, _config_max_retries
+    ) -> None:
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {"project_id": project_id, "title": "Batch A"},
+                    {"project_id": project_id, "title": "Batch B", "max_retries": 2},
+                ]
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data[0]["max_retries"] == 6  # inherited from config
+        assert data[1]["max_retries"] == 2  # explicit override
+
+    def test_changing_config_affects_next_task(
+        self, client: TestClient, project_id: str, tmp_path, monkeypatch
+    ) -> None:
+        """Changing the default and creating another task reflects the new value."""
+        config_file = tmp_path / "config.yaml"
+        # Start with default_max_retries=6
+        config_file.write_text("engine:\n  default_max_retries: 6\n")
+        monkeypatch.setattr("forge.routers.tasks.CONFIG_PATH", config_file)
+
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "First task"},
+        )
+        assert resp.json()["max_retries"] == 6
+
+        # Change the config to 9
+        config_file.write_text("engine:\n  default_max_retries: 9\n")
+
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Second task"},
+        )
+        assert resp.json()["max_retries"] == 9
