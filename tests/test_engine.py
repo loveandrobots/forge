@@ -3419,6 +3419,111 @@ class TestEpicDecomposition:
         assert task["status"] == "needs_human"
 
 
+    @pytest.mark.asyncio
+    async def test_process_epic_decomposition_invalid_flow_falls_back_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Invalid flow value in decomposition entry falls back to standard."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        import json
+        import os
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump([{"title": "Child with bogus flow", "flow": "bogus"}], f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        children = db.get_child_tasks(conn, task_id)
+        assert len(children) == 1
+        assert children[0]["flow"] == "standard"
+
+    @pytest.mark.asyncio
+    async def test_process_epic_decomposition_epic_flow_falls_back_to_standard(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Child entry with flow='epic' is rejected and falls back to standard."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        import json
+        import os
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump([{"title": "Recursive epic attempt", "flow": "epic"}], f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        children = db.get_child_tasks(conn, task_id)
+        assert len(children) == 1
+        assert children[0]["flow"] == "standard"
+
+    @pytest.mark.asyncio
+    async def test_process_epic_decomposition_json_object_not_array(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """JSON object (not array) in decomposition file marks task needs_human."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        import json
+        import os
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump({"title": "Not an array"}, f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+
 class TestEpicGateNameOverride:
     @pytest.mark.asyncio
     async def test_epic_gate_name_override(

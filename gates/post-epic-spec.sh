@@ -20,7 +20,7 @@ fi
 python3 -c "
 import json, sys
 
-with open('$DECOMP_FILE') as f:
+with open(sys.argv[1]) as f:
     data = json.load(f)
 
 if not isinstance(data, list):
@@ -39,11 +39,7 @@ for i, entry in enumerate(data):
     if not isinstance(title, str) or not title.strip():
         print(f'FAIL: Entry {i} missing or empty title', file=sys.stderr)
         sys.exit(1)
-"
-
-if [ $? -ne 0 ]; then
-    exit 1
-fi
+" "$DECOMP_FILE"
 
 echo "post-epic-spec gate passed"
 exit 0

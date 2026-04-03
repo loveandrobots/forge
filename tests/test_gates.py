@@ -607,6 +607,16 @@ class TestPostEpicSpec:
         assert result.returncode == 1
         assert "title" in result.stderr.lower()
 
+    def test_fails_with_json_object_instead_of_array(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/epic-decompositions/test-task-42.json"),
+            '{"title": "Not an array"}',
+        )
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "array" in result.stderr.lower()
+
 
 class TestParseVerdictScript:
     SCRIPT = os.path.join(GATES_DIR, "parse_verdict.py")

@@ -986,7 +986,7 @@ class PipelineEngine:
             title = entry["title"]
             description = entry.get("description", "")
             flow = entry.get("flow", "standard")
-            if flow not in VALID_FLOWS:
+            if flow not in VALID_FLOWS or flow == "epic":
                 flow = "standard"
             priority = entry.get("priority", 0)
 
