@@ -154,7 +154,6 @@ class TestMakeBranchName:
 
 
 class TestAdvanceTask:
-    @pytest.mark.asyncio
     async def test_spec_to_plan(
         self,
         conn: sqlite3.Connection,
@@ -173,7 +172,6 @@ class TestAdvanceTask:
         assert len(runs) == 1
         assert runs[0]["attempt"] == 1
 
-    @pytest.mark.asyncio
     async def test_plan_to_implement(
         self,
         conn: sqlite3.Connection,
@@ -189,7 +187,6 @@ class TestAdvanceTask:
         task = db.get_task(conn, task_id)
         assert task["current_stage"] == "implement"
 
-    @pytest.mark.asyncio
     async def test_review_to_done(
         self,
         conn: sqlite3.Connection,
@@ -216,7 +213,6 @@ class TestAdvanceTask:
 
 
 class TestBounceTask:
-    @pytest.mark.asyncio
     async def test_retry_on_bounce(
         self,
         conn: sqlite3.Connection,
@@ -260,7 +256,6 @@ class TestBounceTask:
         assert len(queued) == 1
         assert queued[0]["attempt"] > 1
 
-    @pytest.mark.asyncio
     async def test_needs_human_after_max_retries(
         self,
         conn: sqlite3.Connection,
@@ -307,7 +302,6 @@ class TestBounceTask:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_bounce_attempt_number_sequential(
         self,
         conn: sqlite3.Connection,
@@ -338,7 +332,6 @@ class TestBounceTask:
         assert len(queued) == 1
         assert queued[0]["attempt"] == 2
 
-    @pytest.mark.asyncio
     async def test_bounce_attempt_number_after_multiple_retries(
         self,
         conn: sqlite3.Connection,
@@ -372,7 +365,6 @@ class TestBounceTask:
         assert len(queued) == 1
         assert queued[0]["attempt"] == 3
 
-    @pytest.mark.asyncio
     async def test_bounce_task_no_type_metadata_in_logs(
         self,
         conn: sqlite3.Connection,
@@ -439,7 +431,6 @@ class TestBounceTask:
 
 
 class TestErrorRetryAttemptNumber:
-    @pytest.mark.asyncio
     async def test_error_retry_attempt_number_sequential(
         self,
         conn: sqlite3.Connection,
@@ -465,7 +456,6 @@ class TestErrorRetryAttemptNumber:
         assert len(queued) == 1
         assert queued[0]["attempt"] == 2
 
-    @pytest.mark.asyncio
     async def test_error_retry_attempt_number_after_multiple_errors(
         self,
         conn: sqlite3.Connection,
@@ -501,7 +491,6 @@ class TestErrorRetryAttemptNumber:
 
 
 class TestTimeoutDetection:
-    @pytest.mark.asyncio
     async def test_timeout_marks_error(
         self,
         conn: sqlite3.Connection,
@@ -535,7 +524,6 @@ class TestTimeoutDetection:
         assert sr["status"] == "error"
         assert "timed out" in sr["error_message"]
 
-    @pytest.mark.asyncio
     async def test_no_timeout_for_recent_run(
         self,
         conn: sqlite3.Connection,
@@ -573,7 +561,6 @@ class TestTimeoutDetection:
 
 
 class TestEnginePause:
-    @pytest.mark.asyncio
     async def test_pause_stops_loop(self, settings: Settings) -> None:
         engine = PipelineEngine(settings, ":memory:")
         engine.running = False
@@ -584,7 +571,6 @@ class TestEnginePause:
         except asyncio.TimeoutError:
             pytest.fail("run_loop did not exit when running=False")
 
-    @pytest.mark.asyncio
     async def test_start_sets_running(self, settings: Settings) -> None:
         engine = PipelineEngine(settings, ":memory:")
         # Set up a minimal DB for logging
@@ -725,7 +711,6 @@ class TestRunLoopIntegration:
         except asyncio.TimeoutError:
             loop_task.cancel()
 
-    @pytest.mark.asyncio
     async def test_full_stage_pass(
         self,
         conn: sqlite3.Connection,
@@ -782,7 +767,6 @@ class TestRunLoopIntegration:
         )
         assert len(plan_runs) == 1
 
-    @pytest.mark.asyncio
     async def test_gate_failure_triggers_bounce(
         self,
         conn: sqlite3.Connection,
@@ -837,7 +821,6 @@ class TestRunLoopIntegration:
         )
         assert len(queued) == 1
 
-    @pytest.mark.asyncio
     async def test_dispatch_error_retries(
         self,
         conn: sqlite3.Connection,
@@ -985,7 +968,6 @@ class TestActivateBacklogTasks:
         task = db.get_task(conn, backlog_id)
         assert task["status"] == "backlog"
 
-    @pytest.mark.asyncio
     async def test_engine_loop_picks_up_backlog_task(
         self,
         conn: sqlite3.Connection,
@@ -1128,7 +1110,6 @@ class TestNextStageFlow:
 
 
 class TestAdvanceTaskFlow:
-    @pytest.mark.asyncio
     async def test_quick_flow_implement_to_review(
         self,
         conn: sqlite3.Connection,
@@ -1148,7 +1129,6 @@ class TestAdvanceTaskFlow:
         runs = db.list_stage_runs(conn, task_id=task_id, stage="review", status="queued")
         assert len(runs) == 1
 
-    @pytest.mark.asyncio
     async def test_quick_flow_review_to_done(
         self,
         conn: sqlite3.Connection,
@@ -1167,7 +1147,6 @@ class TestAdvanceTaskFlow:
         assert task["status"] == "done"
         assert task["completed_at"] is not None
 
-    @pytest.mark.asyncio
     async def test_quick_flow_no_spec_plan_runs(
         self,
         conn: sqlite3.Connection,
@@ -1218,7 +1197,6 @@ class TestAutoPause:
             pause_after_completion=False,
         )
 
-    @pytest.mark.asyncio
     async def test_auto_pause_on_task_done(
         self,
         conn: sqlite3.Connection,
@@ -1243,7 +1221,6 @@ class TestAutoPause:
         assert task["status"] == "done"
         assert engine.running is False
 
-    @pytest.mark.asyncio
     async def test_no_auto_pause_when_flag_is_false(
         self,
         conn: sqlite3.Connection,
@@ -1268,7 +1245,6 @@ class TestAutoPause:
         assert task["status"] == "done"
         assert engine.running is True
 
-    @pytest.mark.asyncio
     async def test_auto_pause_on_needs_human_from_bounce(
         self,
         conn: sqlite3.Connection,
@@ -1307,7 +1283,6 @@ class TestAutoPause:
         assert task["status"] == "needs_human"
         assert engine.running is False
 
-    @pytest.mark.asyncio
     async def test_auto_pause_on_needs_human_from_error_retry(
         self,
         conn: sqlite3.Connection,
@@ -1338,7 +1313,6 @@ class TestAutoPause:
         assert task["status"] == "needs_human"
         assert engine.running is False
 
-    @pytest.mark.asyncio
     async def test_auto_pause_message_format(
         self,
         conn: sqlite3.Connection,
@@ -1379,7 +1353,6 @@ class TestAutoPause:
 class TestReviewBounceToImplement:
     """Tests for the review→implement bounce behavior (AC 1, 2, 3, 4, 13, 14, 15, 16, 18, 20, 21)."""
 
-    @pytest.mark.asyncio
     async def test_review_bounce_creates_implement_stage_run(
         self,
         conn: sqlite3.Connection,
@@ -1425,7 +1398,6 @@ class TestReviewBounceToImplement:
         )
         assert len(queued_review) == 0
 
-    @pytest.mark.asyncio
     async def test_implement_attempt_increments_after_review_bounce(
         self,
         conn: sqlite3.Connection,
@@ -1462,7 +1434,6 @@ class TestReviewBounceToImplement:
         # 1 prior implement run (passed), so new_attempt = 1+1 = 2
         assert queued[0]["attempt"] == 2
 
-    @pytest.mark.asyncio
     async def test_spec_plan_implement_bounces_stay_same_stage(
         self,
         conn: sqlite3.Connection,
@@ -1493,7 +1464,6 @@ class TestReviewBounceToImplement:
             )
             assert len(queued) == 1, f"{stage} should bounce to same stage"
 
-    @pytest.mark.asyncio
     async def test_successful_implement_after_review_bounce_advances_to_review(
         self,
         conn: sqlite3.Connection,
@@ -1521,7 +1491,6 @@ class TestReviewBounceToImplement:
         assert len(review_runs) == 1
         assert review_runs[0]["attempt"] == 1
 
-    @pytest.mark.asyncio
     async def test_max_retries_respected_across_implement_review_loop(
         self,
         conn: sqlite3.Connection,
@@ -1553,7 +1522,6 @@ class TestReviewBounceToImplement:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_implement_attempt_sequential_across_multiple_review_bounces(
         self,
         conn: sqlite3.Connection,
@@ -1630,7 +1598,6 @@ class TestReviewBounceToImplement:
         assert len(queued) == 1
         assert queued[0]["attempt"] == 4
 
-    @pytest.mark.asyncio
     async def test_review_error_retry_sequential_across_cycles(
         self,
         conn: sqlite3.Connection,
@@ -1691,7 +1658,6 @@ class TestReviewBounceToImplement:
 class TestProcessFollowUps:
     """Tests for follow-up task creation after review passes (AC 10, 11, 12, 19)."""
 
-    @pytest.mark.asyncio
     async def test_follow_ups_create_backlog_tasks_with_links(
         self,
         conn: sqlite3.Connection,
@@ -1738,7 +1704,6 @@ class TestProcessFollowUps:
         # File should be deleted
         assert not os.path.exists(str(follow_ups_file))
 
-    @pytest.mark.asyncio
     async def test_no_follow_ups_file_completes_normally(
         self,
         conn: sqlite3.Connection,
@@ -1764,7 +1729,6 @@ class TestProcessFollowUps:
         assert len(backlog) == 0
 
 
-    @pytest.mark.asyncio
     async def test_follow_ups_string_entries_create_backlog_tasks(
         self,
         conn: sqlite3.Connection,
@@ -1814,7 +1778,6 @@ class TestProcessFollowUps:
         # File should be deleted
         assert not os.path.exists(str(follow_ups_file))
 
-    @pytest.mark.asyncio
     async def test_follow_ups_mixed_entries(
         self,
         conn: sqlite3.Connection,
@@ -1861,7 +1824,6 @@ class TestProcessFollowUps:
 
         assert not os.path.exists(str(follow_ups_file))
 
-    @pytest.mark.asyncio
     async def test_follow_ups_skips_invalid_entries(
         self,
         conn: sqlite3.Connection,
@@ -1901,7 +1863,6 @@ class TestProcessFollowUps:
 
         assert not os.path.exists(str(follow_ups_file))
 
-    @pytest.mark.asyncio
     async def test_process_follow_ups_passes_flow_field(
         self,
         conn: sqlite3.Connection,
@@ -1935,7 +1896,6 @@ class TestProcessFollowUps:
         assert len(new_tasks) == 1
         assert new_tasks[0]["flow"] == "quick"
 
-    @pytest.mark.asyncio
     async def test_process_follow_ups_defaults_flow_to_quick(
         self,
         conn: sqlite3.Connection,
@@ -1969,7 +1929,6 @@ class TestProcessFollowUps:
         assert len(new_tasks) == 1
         assert new_tasks[0]["flow"] == "quick"
 
-    @pytest.mark.asyncio
     async def test_process_follow_ups_invalid_flow_falls_back_to_quick(
         self,
         conn: sqlite3.Connection,
@@ -2003,7 +1962,6 @@ class TestProcessFollowUps:
         assert len(new_tasks) == 1
         assert new_tasks[0]["flow"] == "quick"
 
-    @pytest.mark.asyncio
     async def test_process_follow_ups_string_entry_uses_quick_flow(
         self,
         conn: sqlite3.Connection,
@@ -2035,7 +1993,6 @@ class TestProcessFollowUps:
         assert len(new_tasks) == 1
         assert new_tasks[0]["flow"] == "quick"
 
-    @pytest.mark.asyncio
     async def test_process_follow_ups_mixed_flows(
         self,
         conn: sqlite3.Connection,
@@ -2109,7 +2066,6 @@ class TestTaskPriority:
 
 
 class TestGitResultErrorContext:
-    @pytest.mark.asyncio
     async def test_create_branch_failure_includes_stderr_in_error_message(
         self,
         conn: sqlite3.Connection,
@@ -2151,7 +2107,6 @@ class TestGitResultErrorContext:
         assert "fatal: bad ref" in sr["error_message"]
         assert sr["error_message"].startswith("Failed to create branch")
 
-    @pytest.mark.asyncio
     async def test_rebase_failure_includes_stderr_and_metadata(
         self,
         conn: sqlite3.Connection,
@@ -2211,7 +2166,6 @@ class TestGitResultErrorContext:
         assert meta["git_stderr"] == "CONFLICT in README.md"
         assert meta["git_returncode"] == 1
 
-    @pytest.mark.asyncio
     async def test_log_helper_passes_metadata(
         self,
         conn: sqlite3.Connection,
@@ -2231,7 +2185,6 @@ class TestGitResultErrorContext:
         meta = json.loads(meta_log["metadata"])
         assert meta["key"] == "val"
 
-    @pytest.mark.asyncio
     async def test_error_message_truncated_to_4kb(
         self,
         conn: sqlite3.Connection,
@@ -2289,7 +2242,6 @@ class TestGitResultErrorContext:
 class TestReviewErrorSharedBudget:
     """Tests for review-stage error retries using the shared implement→review budget."""
 
-    @pytest.mark.asyncio
     async def test_review_error_uses_shared_budget(
         self,
         conn: sqlite3.Connection,
@@ -2316,7 +2268,6 @@ class TestReviewErrorSharedBudget:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_review_error_retries_review_not_implement(
         self,
         conn: sqlite3.Connection,
@@ -2346,7 +2297,6 @@ class TestReviewErrorSharedBudget:
         )
         assert len(queued_implement) == 0
 
-    @pytest.mark.asyncio
     async def test_review_error_retry_attempt_sequential(
         self,
         conn: sqlite3.Connection,
@@ -2372,7 +2322,6 @@ class TestReviewErrorSharedBudget:
         assert len(queued) == 1
         assert queued[0]["attempt"] == 2
 
-    @pytest.mark.asyncio
     async def test_implement_error_retry_unchanged(
         self,
         conn: sqlite3.Connection,
@@ -2398,7 +2347,6 @@ class TestReviewErrorSharedBudget:
         assert len(queued) == 1
         assert queued[0]["attempt"] == 2
 
-    @pytest.mark.asyncio
     async def test_bounce_task_shared_budget_counts_errors(
         self,
         conn: sqlite3.Connection,
@@ -2440,7 +2388,6 @@ class TestReviewErrorSharedBudget:
             pause_after_completion=True,
         )
 
-    @pytest.mark.asyncio
     async def test_review_error_auto_pause(
         self,
         conn: sqlite3.Connection,
@@ -2476,7 +2423,6 @@ class TestReviewErrorSharedBudget:
 class TestGuardRetryAfterResetFailure:
     """Verify _handle_error_retry is skipped when _reset_and_log returns False."""
 
-    @pytest.mark.asyncio
     async def test_dispatch_error_skips_retry_when_reset_fails(
         self,
         conn: sqlite3.Connection,
@@ -2542,7 +2488,6 @@ class TestGuardRetryAfterResetFailure:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_dispatch_error_retries_when_reset_succeeds(
         self,
         conn: sqlite3.Connection,
@@ -2596,7 +2541,6 @@ class TestGuardRetryAfterResetFailure:
         task = db.get_task(conn, task_id)
         assert task["status"] == "active"
 
-    @pytest.mark.asyncio
     async def test_handle_timeout_skips_retry_when_reset_fails(
         self,
         conn: sqlite3.Connection,
@@ -2635,7 +2579,6 @@ class TestGuardRetryAfterResetFailure:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_handle_timeout_retries_when_reset_succeeds(
         self,
         conn: sqlite3.Connection,
@@ -2670,7 +2613,6 @@ class TestGuardRetryAfterResetFailure:
         task = db.get_task(conn, task_id)
         assert task["status"] == "active"
 
-    @pytest.mark.asyncio
     async def test_handle_timeout_retries_when_no_project(
         self,
         conn: sqlite3.Connection,
@@ -2702,7 +2644,6 @@ class TestGuardRetryAfterResetFailure:
         )
         assert len(queued) == 1
 
-    @pytest.mark.asyncio
     async def test_handle_timeout_passes_project_to_handle_error_retry(
         self,
         conn: sqlite3.Connection,
@@ -2745,7 +2686,6 @@ class TestGuardRetryAfterResetFailure:
         # The key assertion: _maybe_auto_pause was reached because project was passed
         assert engine.running is False
 
-    @pytest.mark.asyncio
     async def test_handle_timeout_passes_none_project_when_project_missing(
         self,
         conn: sqlite3.Connection,
@@ -2789,7 +2729,6 @@ class TestGuardRetryAfterResetFailure:
 
 
 class TestAutoEscalation:
-    @pytest.mark.asyncio
     async def test_bounce_task_escalates_quick_to_standard(
         self,
         conn: sqlite3.Connection,
@@ -2830,7 +2769,6 @@ class TestAutoEscalation:
         queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
         assert len(queued) == 1
 
-    @pytest.mark.asyncio
     async def test_bounce_task_escalated_task_goes_to_needs_human(
         self,
         conn: sqlite3.Connection,
@@ -2866,7 +2804,6 @@ class TestAutoEscalation:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_error_retry_escalates_quick_to_standard(
         self,
         conn: sqlite3.Connection,
@@ -2899,7 +2836,6 @@ class TestAutoEscalation:
         queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
         assert len(queued) == 1
 
-    @pytest.mark.asyncio
     async def test_error_retry_escalated_task_goes_to_needs_human(
         self,
         conn: sqlite3.Connection,
@@ -2930,7 +2866,6 @@ class TestAutoEscalation:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_bounce_task_implement_gate_escalates_quick_to_standard(
         self,
         conn: sqlite3.Connection,
@@ -2970,7 +2905,6 @@ class TestAutoEscalation:
         queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
         assert len(queued) == 1
 
-    @pytest.mark.asyncio
     async def test_error_retry_review_escalates_quick_to_standard(
         self,
         conn: sqlite3.Connection,
@@ -3007,7 +2941,6 @@ class TestAutoEscalation:
         queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
         assert len(queued) == 1
 
-    @pytest.mark.asyncio
     async def test_standard_flow_not_affected_by_escalation(
         self,
         conn: sqlite3.Connection,
@@ -3041,7 +2974,6 @@ class TestAutoEscalation:
         assert task["status"] == "needs_human"
         assert task["escalated_from_quick"] == 0
 
-    @pytest.mark.asyncio
     async def test_escalation_preserves_existing_stage_runs(
         self,
         conn: sqlite3.Connection,
@@ -3082,7 +3014,6 @@ class TestAutoEscalation:
         assert "implement" in stages
         assert "spec" in stages
 
-    @pytest.mark.asyncio
     async def test_escalation_logs_event(
         self,
         conn: sqlite3.Connection,
@@ -3130,7 +3061,6 @@ class TestAutoEscalation:
 
 
 class TestEpicDecomposition:
-    @pytest.mark.asyncio
     async def test_advance_task_epic_spec_creates_children(
         self,
         conn: sqlite3.Connection,
@@ -3195,7 +3125,6 @@ class TestEpicDecomposition:
             assert len(created_by) == 1
             assert created_by[0]["target_task_id"] == task_id
 
-    @pytest.mark.asyncio
     async def test_advance_task_epic_status_transitions(
         self,
         conn: sqlite3.Connection,
@@ -3230,7 +3159,6 @@ class TestEpicDecomposition:
         assert task["epic_status"] == "decomposed"
         assert task["status"] == "paused"
 
-    @pytest.mark.asyncio
     async def test_advance_task_epic_transitions_to_reviewing_when_children_done(
         self,
         conn: sqlite3.Connection,
@@ -3291,7 +3219,6 @@ class TestEpicDecomposition:
         assert stage_runs[0]["stage"] == "review"
         assert stage_runs[0]["attempt"] == 1
 
-    @pytest.mark.asyncio
     async def test_advance_task_epic_not_complete_when_children_pending(
         self,
         conn: sqlite3.Connection,
@@ -3333,7 +3260,6 @@ class TestEpicDecomposition:
         assert epic["status"] == "paused"
         assert epic["epic_status"] == "decomposed"
 
-    @pytest.mark.asyncio
     async def test_process_epic_decomposition_missing_file(
         self,
         conn: sqlite3.Connection,
@@ -3360,7 +3286,6 @@ class TestEpicDecomposition:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_process_epic_decomposition_invalid_json(
         self,
         conn: sqlite3.Connection,
@@ -3393,7 +3318,6 @@ class TestEpicDecomposition:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_process_epic_decomposition_empty_array(
         self,
         conn: sqlite3.Connection,
@@ -3428,7 +3352,6 @@ class TestEpicDecomposition:
         assert task["status"] == "needs_human"
 
 
-    @pytest.mark.asyncio
     async def test_process_epic_decomposition_invalid_flow_falls_back_to_standard(
         self,
         conn: sqlite3.Connection,
@@ -3463,7 +3386,6 @@ class TestEpicDecomposition:
         assert len(children) == 1
         assert children[0]["flow"] == "standard"
 
-    @pytest.mark.asyncio
     async def test_process_epic_decomposition_epic_flow_falls_back_to_standard(
         self,
         conn: sqlite3.Connection,
@@ -3498,7 +3420,6 @@ class TestEpicDecomposition:
         assert len(children) == 1
         assert children[0]["flow"] == "standard"
 
-    @pytest.mark.asyncio
     async def test_process_epic_decomposition_json_object_not_array(
         self,
         conn: sqlite3.Connection,
@@ -3534,7 +3455,6 @@ class TestEpicDecomposition:
 
 
 class TestEpicDecompositionEdgeCases:
-    @pytest.mark.asyncio
     async def test_epic_spec_without_project_marks_needs_human(
         self,
         conn: sqlite3.Connection,
@@ -3557,7 +3477,6 @@ class TestEpicDecompositionEdgeCases:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    @pytest.mark.asyncio
     async def test_whitespace_only_title_skipped_in_decomposition(
         self,
         conn: sqlite3.Connection,
@@ -3598,7 +3517,6 @@ class TestEpicDecompositionEdgeCases:
 
 
 class TestEpicGateNameOverride:
-    @pytest.mark.asyncio
     async def test_epic_gate_name_override(
         self,
         conn: sqlite3.Connection,
@@ -3656,7 +3574,6 @@ class TestEpicGateNameOverride:
 
         assert "epic-spec" in captured_gate_stage
 
-    @pytest.mark.asyncio
     async def test_epic_review_gate_name_override(
         self,
         conn: sqlite3.Connection,
@@ -3722,7 +3639,6 @@ class TestEpicGateNameOverride:
 class TestEpicReview:
     """Tests for epic review triggering, advance, and bounce."""
 
-    @pytest.mark.asyncio
     async def test_check_epic_completion_partial_children(
         self,
         conn: sqlite3.Connection,
@@ -3760,7 +3676,6 @@ class TestEpicReview:
         runs = db.list_stage_runs(conn, task_id=epic_id)
         assert len(runs) == 0
 
-    @pytest.mark.asyncio
     async def test_check_epic_completion_all_children_done(
         self,
         conn: sqlite3.Connection,
@@ -3799,7 +3714,6 @@ class TestEpicReview:
         assert runs[0]["stage"] == "review"
         assert runs[0]["attempt"] == 1
 
-    @pytest.mark.asyncio
     async def test_check_epic_completion_guards_double_transition(
         self,
         conn: sqlite3.Connection,
@@ -3832,7 +3746,6 @@ class TestEpicReview:
         runs = db.list_stage_runs(conn, task_id=epic_id)
         assert len(runs) == 0
 
-    @pytest.mark.asyncio
     async def test_check_epic_completion_increments_attempt(
         self,
         conn: sqlite3.Connection,
@@ -3867,7 +3780,6 @@ class TestEpicReview:
         assert runs[0]["stage"] == "review"
         assert runs[0]["attempt"] == 2
 
-    @pytest.mark.asyncio
     async def test_advance_task_epic_review_pass(
         self,
         conn: sqlite3.Connection,
@@ -3896,7 +3808,6 @@ class TestEpicReview:
         assert epic["status"] == "done"
         assert epic["completed_at"] is not None
 
-    @pytest.mark.asyncio
     async def test_bounce_task_epic_review_issues(
         self,
         conn: sqlite3.Connection,
@@ -3953,7 +3864,6 @@ class TestEpicReview:
             assert child["flow"] == "quick"
             assert child["parent_task_id"] == epic_id
 
-    @pytest.mark.asyncio
     async def test_bounce_task_epic_review_followups_default_quick(
         self,
         conn: sqlite3.Connection,
@@ -3997,7 +3907,6 @@ class TestEpicReview:
         assert len(tasks) == 1
         assert tasks[0]["flow"] == "quick"
 
-    @pytest.mark.asyncio
     async def test_epic_review_integration_two_children(
         self,
         conn: sqlite3.Connection,
@@ -4076,7 +3985,6 @@ class TestParseStageTimeouts:
 
 
 class TestAutoMergeErrorContext:
-    @pytest.mark.asyncio
     async def test_auto_merge_checkout_failure_includes_stderr(
         self,
         conn: sqlite3.Connection,
@@ -4110,7 +4018,6 @@ class TestAutoMergeErrorContext:
         error_logs = [r for r in logs if r["level"] == "error"]
         assert any("fatal: not a git repo" in r["message"] for r in error_logs)
 
-    @pytest.mark.asyncio
     async def test_auto_merge_rebase_failure_includes_stderr(
         self,
         conn: sqlite3.Connection,
@@ -4146,7 +4053,6 @@ class TestAutoMergeErrorContext:
         error_logs = [r for r in logs if r["level"] == "error"]
         assert any("CONFLICT" in r["message"] for r in error_logs)
 
-    @pytest.mark.asyncio
     async def test_auto_merge_ff_merge_failure_includes_stderr(
         self,
         conn: sqlite3.Connection,
@@ -4200,7 +4106,6 @@ class TestAutoMergeErrorContext:
 
 
 class TestMultiBounceAttemptNumbering:
-    @pytest.mark.asyncio
     async def test_multi_bounce_attempt_numbering(
         self,
         conn: sqlite3.Connection,
@@ -4291,7 +4196,6 @@ class TestMigrateDoesNotOverridePause:
 
 
 class TestAutoPauseOnTimeout:
-    @pytest.mark.asyncio
     async def test_auto_pause_triggers_on_timeout_path(
         self,
         conn: sqlite3.Connection,
@@ -4342,7 +4246,6 @@ class TestAutoPauseOnTimeout:
 
 
 class TestAutoMergeRestoresDefaultBranch:
-    @pytest.mark.asyncio
     async def test_auto_merge_restores_default_branch_on_gate_failure(
         self,
         conn: sqlite3.Connection,
@@ -4386,7 +4289,6 @@ class TestAutoMergeRestoresDefaultBranch:
         # Second call should be the cleanup with default branch
         assert checkout_mock.call_args_list[1][0] == ("/tmp/repo", "main")
 
-    @pytest.mark.asyncio
     async def test_auto_merge_restores_default_branch_on_merge_failure(
         self,
         conn: sqlite3.Connection,

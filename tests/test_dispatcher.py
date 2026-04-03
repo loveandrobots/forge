@@ -143,7 +143,6 @@ def git_repo(tmp_path):
 
 
 class TestCreateBranch:
-    @pytest.mark.asyncio
     async def test_create_branch_success(self, git_repo):
         result = await create_branch(git_repo, "forge/test-branch", "main")
         assert isinstance(result, GitResult)
@@ -158,14 +157,12 @@ class TestCreateBranch:
         )
         assert proc.stdout.strip() == "forge/test-branch"
 
-    @pytest.mark.asyncio
     async def test_create_branch_bad_base(self, git_repo):
         result = await create_branch(git_repo, "forge/x", "nonexistent-base")
         assert result.success is False
         assert result.returncode != 0
         assert result.stderr  # should contain git error text
 
-    @pytest.mark.asyncio
     async def test_create_branch_already_exists(self, git_repo):
         await create_branch(git_repo, "forge/dup", "main")
         # Go back to main
@@ -176,7 +173,6 @@ class TestCreateBranch:
 
 
 class TestRebaseBranch:
-    @pytest.mark.asyncio
     async def test_rebase_success(self, git_repo):
         # Create feature branch
         await create_branch(git_repo, "forge/feature", "main")
@@ -195,7 +191,6 @@ class TestRebaseBranch:
         assert isinstance(result, GitResult)
         assert result.success is True
 
-    @pytest.mark.asyncio
     async def test_rebase_conflict_returns_failure_with_stderr(self, git_repo):
         # Create feature branch and modify a file
         await create_branch(git_repo, "forge/conflict", "main")
@@ -223,7 +218,6 @@ class TestRebaseBranch:
         assert result.stderr  # should contain conflict-related text
         assert result.returncode != 0
 
-    @pytest.mark.asyncio
     async def test_rebase_nonexistent_branch(self, git_repo):
         result = await rebase_branch(git_repo, "no-such-branch", "main")
         assert result.success is False
@@ -231,13 +225,11 @@ class TestRebaseBranch:
 
 
 class TestCheckoutAndPull:
-    @pytest.mark.asyncio
     async def test_checkout_and_pull_success(self, git_repo):
         result = await checkout_and_pull(git_repo, "main")
         assert isinstance(result, GitResult)
         assert result.success is True
 
-    @pytest.mark.asyncio
     async def test_checkout_and_pull_bad_branch(self, git_repo):
         result = await checkout_and_pull(git_repo, "nonexistent-branch")
         assert result.success is False
@@ -245,7 +237,6 @@ class TestCheckoutAndPull:
 
 
 class TestFfMerge:
-    @pytest.mark.asyncio
     async def test_ff_merge_success(self, git_repo):
         # Create a branch with a commit, then ff-merge back
         await create_branch(git_repo, "forge/ff-test", "main")
@@ -262,7 +253,6 @@ class TestFfMerge:
         assert isinstance(result, GitResult)
         assert result.success is True
 
-    @pytest.mark.asyncio
     async def test_ff_merge_not_ff(self, git_repo):
         # Create diverged branches
         await create_branch(git_repo, "forge/diverge", "main")
@@ -289,7 +279,6 @@ class TestFfMerge:
 
 
 class TestDeleteBranch:
-    @pytest.mark.asyncio
     async def test_delete_branch_success(self, git_repo):
         await create_branch(git_repo, "forge/to-delete", "main")
         subprocess.run(["git", "checkout", "main"], cwd=git_repo, capture_output=True)
@@ -297,7 +286,6 @@ class TestDeleteBranch:
         assert isinstance(result, GitResult)
         assert result.success is True
 
-    @pytest.mark.asyncio
     async def test_delete_branch_nonexistent(self, git_repo):
         result = await delete_branch(git_repo, "no-such-branch")
         assert result.success is False
@@ -309,7 +297,6 @@ class TestDeleteBranch:
 
 
 class TestDispatchClaude:
-    @pytest.mark.asyncio
     async def test_successful_dispatch(self, git_repo):
         """Test successful dispatch with mocked claude CLI."""
         result_json = json.dumps(
@@ -355,7 +342,6 @@ class TestDispatchClaude:
         assert result.error is None
         assert result.duration_seconds > 0
 
-    @pytest.mark.asyncio
     async def test_timeout_handling(self, git_repo):
         """Test that timeout kills the process and returns error."""
 
@@ -396,7 +382,6 @@ class TestDispatchClaude:
         assert "timed out" in result.error
         assert result.duration_seconds > 0
 
-    @pytest.mark.asyncio
     async def test_claude_cli_not_found(self, git_repo):
         """Test error handling when claude CLI is not in PATH."""
         call_count = 0
@@ -431,7 +416,6 @@ class TestDispatchClaude:
         assert result.exit_code == 1
         assert "not found" in result.error
 
-    @pytest.mark.asyncio
     async def test_claude_nonzero_exit(self, git_repo):
         """Test handling of non-zero exit code from claude."""
 
@@ -466,7 +450,6 @@ class TestDispatchClaude:
         assert result.exit_code == 1
         assert "Some error occurred" in result.error
 
-    @pytest.mark.asyncio
     async def test_branch_checkout_and_create(self, git_repo):
         """Test that dispatch creates a branch if checkout fails."""
         git_calls = []
@@ -560,7 +543,6 @@ class TestDispatchResult:
 
 
 class TestRebaseAbortFailure:
-    @pytest.mark.asyncio
     async def test_rebase_abort_failure_preserves_original_error(self, git_repo):
         """AC 3: When rebase conflicts and abort also fails, stderr has both messages."""
         # Create a conflict scenario

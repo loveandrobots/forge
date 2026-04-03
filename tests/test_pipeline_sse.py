@@ -56,7 +56,6 @@ def client():
 
 
 class TestSSEContentType:
-    @pytest.mark.asyncio
     async def test_returns_event_stream_content_type(self, tmp_path) -> None:
         """Verify the endpoint returns text/event-stream by calling stream_logs directly."""
         from forge.routers.pipeline import stream_logs
@@ -74,7 +73,6 @@ class TestSSEContentType:
 
 
 class TestSSEEventFormat:
-    @pytest.mark.asyncio
     async def test_event_data_has_required_keys(self, tmp_path) -> None:
         _insert_logs(tmp_path, 1)
         gen = _log_event_stream(None)
@@ -93,7 +91,6 @@ class TestSSEEventFormat:
 
 
 class TestSSEInitialBurst:
-    @pytest.mark.asyncio
     async def test_sends_20_most_recent_oldest_first(self, tmp_path) -> None:
         ids = _insert_logs(tmp_path, 25)
         gen = _log_event_stream(None)
@@ -108,7 +105,6 @@ class TestSSEInitialBurst:
         assert event_ids[0] == ids[5]
         assert event_ids[-1] == ids[24]
 
-    @pytest.mark.asyncio
     async def test_last_id_tracks_max_to_avoid_duplicates(self, tmp_path) -> None:
         """Verify that last_id uses max(id) so polling never re-sends entries."""
         _insert_logs(tmp_path, 3)
@@ -136,7 +132,6 @@ class TestSSEInitialBurst:
 
 
 class TestSSEPolling:
-    @pytest.mark.asyncio
     async def test_receives_new_entries_after_initial(self, tmp_path) -> None:
         _insert_logs(tmp_path, 3)
 
@@ -161,7 +156,6 @@ class TestSSEPolling:
 
 
 class TestSSELevelFilter:
-    @pytest.mark.asyncio
     async def test_filters_by_level(self, tmp_path) -> None:
         _insert_logs(tmp_path, 2, level="info")
         _insert_logs(tmp_path, 3, level="error", prefix="err")
@@ -179,7 +173,6 @@ class TestSSELevelFilter:
 
 
 class TestSSEDisconnect:
-    @pytest.mark.asyncio
     async def test_client_disconnect_no_error(self, tmp_path) -> None:
         _insert_logs(tmp_path, 1)
         gen = _log_event_stream(None)
@@ -201,7 +194,6 @@ class TestSSEImplementation:
         routes = [r.path for r in pipeline.router.routes]
         assert "/api/logs/stream" in routes
 
-    @pytest.mark.asyncio
     async def test_response_is_streaming(self, tmp_path) -> None:
         from forge.routers.pipeline import stream_logs
         from starlette.responses import StreamingResponse

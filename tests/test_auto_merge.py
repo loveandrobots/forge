@@ -64,7 +64,6 @@ def _make_feature_branch(repo, branch="feature", file="feature.txt", content="fe
 
 
 class TestCleanMerge:
-    @pytest.mark.asyncio
     async def test_full_merge_sequence(self, git_repo):
         _make_feature_branch(git_repo, "feature", "feature.txt", "hello")
 
@@ -99,7 +98,6 @@ class TestCleanMerge:
 
 
 class TestRebaseConflict:
-    @pytest.mark.asyncio
     async def test_rebase_conflict_returns_false(self, git_repo):
         # Create feature branch modifying README
         _run(git_repo, "git", "checkout", "-b", "feature")
@@ -129,7 +127,6 @@ class TestRebaseConflict:
 
 
 class TestPostRebaseGateFailure:
-    @pytest.mark.asyncio
     async def test_gate_failure_sets_needs_human(self, git_repo):
         """Simulate the _auto_merge flow with a failing gate."""
         from forge.engine import PipelineEngine
@@ -200,7 +197,6 @@ class TestPostRebaseGateFailure:
 
 
 class TestBranchDeletion:
-    @pytest.mark.asyncio
     async def test_delete_branch_removes_it(self, git_repo):
         _make_feature_branch(git_repo, "to-delete", "file.txt", "data")
 
@@ -221,7 +217,6 @@ class TestBranchDeletion:
 
 
 class TestMergeSkippedForNonDone:
-    @pytest.mark.asyncio
     async def test_advance_to_next_stage_no_merge(self):
         """When there's a next stage, _auto_merge should not be called."""
         from forge.engine import PipelineEngine
@@ -253,7 +248,6 @@ class TestMergeSkippedForNonDone:
 
 
 class TestAdvanceTaskCallOrder:
-    @pytest.mark.asyncio
     async def test_merge_before_done(self):
         """_auto_merge is called before update_task(status=done)."""
         from forge.engine import PipelineEngine
@@ -300,13 +294,11 @@ class TestAdvanceTaskCallOrder:
 
 
 class TestGitOperationFailure:
-    @pytest.mark.asyncio
     async def test_checkout_nonexistent_dir_fails(self, tmp_path):
         bad_path = str(tmp_path / "nonexistent")
         result = await checkout_and_pull(bad_path, "main")
         assert result.success is False
 
-    @pytest.mark.asyncio
     async def test_ff_merge_nonexistent_branch(self, git_repo):
         result = await ff_merge(git_repo, "no-such-branch")
         assert result.success is False
@@ -318,7 +310,6 @@ class TestGitOperationFailure:
 
 
 class TestNoBranchNameSkipsMerge:
-    @pytest.mark.asyncio
     async def test_advance_no_branch_marks_done(self):
         from forge.engine import PipelineEngine
         from forge.config import Settings
@@ -356,7 +347,6 @@ class TestNoBranchNameSkipsMerge:
 
 
 class TestCheckoutAndPullNoRemote:
-    @pytest.mark.asyncio
     async def test_local_only_repo_succeeds(self, git_repo):
         """checkout_and_pull returns True even without a remote (pull fails but is tolerated)."""
         result = await checkout_and_pull(git_repo, "main")

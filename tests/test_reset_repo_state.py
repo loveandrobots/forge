@@ -48,7 +48,6 @@ def _init_repo(tmp_path) -> str:
 
 # ---- AC9 a: cleanup after uncommitted changes (modified tracked files) ----
 
-@pytest.mark.asyncio
 async def test_cleanup_modified_tracked_files(tmp_path):
     repo = _init_repo(tmp_path)
     # Modify a tracked file without committing
@@ -64,7 +63,6 @@ async def test_cleanup_modified_tracked_files(tmp_path):
 
 # ---- AC9 b: cleanup after an in-progress rebase ----
 
-@pytest.mark.asyncio
 async def test_cleanup_in_progress_rebase(tmp_path):
     repo = _init_repo(tmp_path)
 
@@ -104,7 +102,6 @@ async def test_cleanup_in_progress_rebase(tmp_path):
 
 # ---- AC9 c: cleanup after untracked files ----
 
-@pytest.mark.asyncio
 async def test_cleanup_untracked_files(tmp_path):
     repo = _init_repo(tmp_path)
 
@@ -126,7 +123,6 @@ async def test_cleanup_untracked_files(tmp_path):
 
 # ---- AC9 d: cleanup failure escalating to needs_human ----
 
-@pytest.mark.asyncio
 async def test_cleanup_failure_returns_error(tmp_path):
     """reset_repo_state returns failure if a required command fails."""
     repo = _init_repo(tmp_path)
@@ -138,7 +134,6 @@ async def test_cleanup_failure_returns_error(tmp_path):
     assert "nonexistent-branch" in result["output"]
 
 
-@pytest.mark.asyncio
 async def test_cleanup_failure_marks_task_needs_human(tmp_path):
     """When _reset_and_log fails, the task is marked needs_human."""
     repo = _init_repo(tmp_path)
@@ -170,7 +165,6 @@ async def test_cleanup_failure_marks_task_needs_human(tmp_path):
 
 # ---- AC9 e: next task starts with clean working directory after previous failure ----
 
-@pytest.mark.asyncio
 async def test_next_task_clean_after_previous_failure(tmp_path):
     """After a failure leaves dirty state, reset_repo_state cleans it up."""
     repo = _init_repo(tmp_path)
@@ -190,7 +184,6 @@ async def test_next_task_clean_after_previous_failure(tmp_path):
 
 # ---- AC1/AC2: structured result and command logging ----
 
-@pytest.mark.asyncio
 async def test_result_contains_command_output(tmp_path):
     """The result dict includes command logs."""
     repo = _init_repo(tmp_path)
@@ -207,7 +200,6 @@ async def test_result_contains_command_output(tmp_path):
 
 # ---- AC8: uses asyncio subprocess ----
 
-@pytest.mark.asyncio
 async def test_reset_is_async(tmp_path):
     """Verify reset_repo_state is a coroutine (async)."""
     repo = _init_repo(tmp_path)
@@ -219,7 +211,6 @@ async def test_reset_is_async(tmp_path):
 
 # ---- Combined dirty state: modified files + untracked files ----
 
-@pytest.mark.asyncio
 async def test_cleanup_combined_dirty_state(tmp_path):
     repo = _init_repo(tmp_path)
 

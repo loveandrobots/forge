@@ -415,7 +415,6 @@ class TestServerInit:
     def test_server_instance_created(self):
         assert isinstance(mcp, FastMCP)
 
-    @pytest.mark.asyncio
     async def test_tools_registered(self):
         tool_names = {tool.name for tool in await mcp.list_tools()}
         assert "list_projects" in tool_names

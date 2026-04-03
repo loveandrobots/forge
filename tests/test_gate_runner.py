@@ -104,7 +104,6 @@ class TestBuildGateEnv:
 
 
 class TestRunGate:
-    @pytest.mark.asyncio
     async def test_passing_gate(self, tmp_path: Path) -> None:
         gate_dir = str(tmp_path)
         _write_gate_script(
@@ -128,7 +127,6 @@ class TestRunGate:
         assert result.gate_name == "post-spec.sh"
         assert result.duration_seconds >= 0
 
-    @pytest.mark.asyncio
     async def test_failing_gate(self, tmp_path: Path) -> None:
         gate_dir = str(tmp_path)
         _write_gate_script(
@@ -151,7 +149,6 @@ class TestRunGate:
         assert "missing required section" in result.stderr
         assert result.gate_name == "post-plan.sh"
 
-    @pytest.mark.asyncio
     async def test_missing_gate_passes_by_default(self, tmp_path: Path) -> None:
         gate_dir = str(tmp_path)
         env = _make_env(gate_dir, stage="review")
@@ -163,7 +160,6 @@ class TestRunGate:
         assert result.gate_name == "post-review.sh"
         assert result.duration_seconds == 0.0
 
-    @pytest.mark.asyncio
     async def test_env_vars_available_in_script(self, tmp_path: Path) -> None:
         gate_dir = str(tmp_path)
         _write_gate_script(
@@ -190,7 +186,6 @@ class TestRunGate:
         assert "ATTEMPT=3" in result.stdout
         assert "BRANCH=forge/my-branch" in result.stdout
 
-    @pytest.mark.asyncio
     async def test_nonzero_exit_code_other_than_one(self, tmp_path: Path) -> None:
         gate_dir = str(tmp_path)
         _write_gate_script(

@@ -140,7 +140,6 @@ async def _run_engine_iterations(
 class TestFullPipelineFlow:
     """End-to-end pipeline flow with mocked dispatcher and gates."""
 
-    @pytest.mark.asyncio
     async def test_task_completes_all_stages(
         self,
         conn: sqlite3.Connection,
@@ -218,7 +217,6 @@ class TestFullPipelineFlow:
             )
             assert len(runs) == 1, f"Expected 1 passed run for {stage}, got {len(runs)}"
 
-    @pytest.mark.asyncio
     async def test_stage_advancement_order(
         self,
         conn: sqlite3.Connection,
@@ -280,7 +278,6 @@ class TestFullPipelineFlow:
 
 
 class TestBounceFlow:
-    @pytest.mark.asyncio
     async def test_gate_failure_triggers_retry(
         self,
         conn: sqlite3.Connection,
@@ -360,7 +357,6 @@ class TestBounceFlow:
 
 
 class TestNeedsHumanFlow:
-    @pytest.mark.asyncio
     async def test_max_retries_marks_needs_human(
         self,
         conn: sqlite3.Connection,
@@ -421,7 +417,6 @@ class TestNeedsHumanFlow:
 
 
 class TestEnginePauseResume:
-    @pytest.mark.asyncio
     async def test_pause_stops_processing(self, settings: Settings) -> None:
         """Engine does not process tasks when paused."""
         engine = PipelineEngine(settings, ":memory:")
@@ -430,7 +425,6 @@ class TestEnginePauseResume:
         # run_loop exits immediately when running=False
         await asyncio.wait_for(engine.run_loop(), timeout=1.0)
 
-    @pytest.mark.asyncio
     async def test_start_pause_cycle(self, settings: Settings) -> None:
         """Engine can be started and paused."""
         engine = PipelineEngine(settings, ":memory:")

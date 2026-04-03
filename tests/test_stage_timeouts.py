@@ -177,7 +177,6 @@ class TestDatabaseStageTimeouts:
 
 
 class TestCheckTimeoutsPerStage:
-    @pytest.mark.asyncio
     async def test_implement_uses_longer_timeout(self, conn: sqlite3.Connection) -> None:
         """AC 7: implement stage at 700s should NOT time out (900s timeout)."""
         settings = Settings()
@@ -198,7 +197,6 @@ class TestCheckTimeoutsPerStage:
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "running"  # 700 < 900, not timed out
 
-    @pytest.mark.asyncio
     async def test_spec_times_out_at_default(self, conn: sqlite3.Connection) -> None:
         """AC 7: spec stage at 700s should time out (600s default timeout)."""
         settings = Settings()
@@ -220,7 +218,6 @@ class TestCheckTimeoutsPerStage:
         assert sr["status"] == "error"
         assert "timed out" in sr["error_message"]
 
-    @pytest.mark.asyncio
     async def test_project_override_extends_timeout(self, conn: sqlite3.Connection) -> None:
         """AC 6, 7: project override of implement=1200 prevents timeout at 1000s."""
         settings = Settings()
