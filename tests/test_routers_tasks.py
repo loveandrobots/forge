@@ -646,6 +646,16 @@ class TestCancelTask:
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
 
+    def test_cancel_epic_with_failed_children_succeeds_without_force(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        epic_id, _child_ids = self._create_epic_with_children(
+            client, project_id, tmp_path, ["done", "failed"]
+        )
+        resp = client.post(f"/api/tasks/{epic_id}/cancel")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
     def test_retry_cancelled_task_returns_400(
         self, client: TestClient, task_id: str
     ) -> None:

@@ -1215,6 +1215,15 @@ class TestCancelTask:
         result = cancel_task(task_id=epic_id)
         assert result["status"] == "cancelled"
 
+    def test_cancel_epic_with_failed_children_succeeds_without_force(
+        self, project_id
+    ):
+        epic_id, _child_ids = self._create_epic_with_children(
+            project_id, ["done", "failed"]
+        )
+        result = cancel_task(task_id=epic_id)
+        assert result["status"] == "cancelled"
+
 
 class TestGetProjectSkills:
     def test_returns_skill_files(self, tmp_path):

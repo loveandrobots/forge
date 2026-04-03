@@ -906,7 +906,7 @@ def get_logs_since(
 # Task cancellation helpers (shared by MCP + REST)
 # ---------------------------------------------------------------------------
 
-TERMINAL_STATUSES = frozenset({"done", "cancelled", "error"})
+TERMINAL_STATUSES = frozenset({"done", "cancelled", "failed"})
 
 
 def cancel_single_task(
