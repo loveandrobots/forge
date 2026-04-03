@@ -3524,6 +3524,70 @@ class TestEpicDecomposition:
         assert task["status"] == "needs_human"
 
 
+class TestEpicDecompositionEdgeCases:
+    @pytest.mark.asyncio
+    async def test_epic_spec_without_project_marks_needs_human(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Issue 1: Epic at spec stage with no project context marks needs_human."""
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic without project",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=None)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_title_skipped_in_decomposition(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Issue 2: Whitespace-only titles are skipped during decomposition."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic with bad titles",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        import json
+        import os
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump([
+                {"title": "   ", "description": "Whitespace title"},
+                {"title": "", "description": "Empty title"},
+                {"title": "Valid child", "description": "This one is fine"},
+            ], f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        children = db.get_child_tasks(conn, task_id)
+        assert len(children) == 1
+        assert children[0]["title"] == "Valid child"
+
+
 class TestEpicGateNameOverride:
     @pytest.mark.asyncio
     async def test_epic_gate_name_override(

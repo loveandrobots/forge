@@ -602,7 +602,11 @@ class PipelineEngine:
         flow = task_row["flow"] if task_row else "standard"
 
         # Epic flow: after spec passes, decompose into child tasks
-        if flow == "epic" and current_stage == "spec" and project is not None:
+        if flow == "epic" and current_stage == "spec":
+            if project is None:
+                database.update_task(conn, task_id, status="needs_human")
+                self._log("error", "Cannot decompose epic without project context", task_id=task_id)
+                return
             self._process_epic_decomposition(conn, task_id, project)
             return
 
@@ -981,9 +985,11 @@ class PipelineEngine:
 
         created = 0
         for entry in entries:
-            if not isinstance(entry, dict) or not entry.get("title"):
+            if not isinstance(entry, dict):
                 continue
-            title = entry["title"]
+            title = (entry.get("title") or "").strip()
+            if not title:
+                continue
             description = entry.get("description", "")
             flow = entry.get("flow", "standard")
             if flow not in VALID_FLOWS or flow == "epic":
