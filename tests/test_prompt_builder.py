@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from forge.prompt_builder import (
+    EPIC_REVIEW_TEMPLATE,
+    EPIC_STAGE_TEMPLATES,
     STAGE_TEMPLATES,
     build_prompt,
     build_retry_context,
@@ -799,3 +801,35 @@ class TestBuildPromptEpicFlow:
         import re
         unfilled = re.findall(r"\{[a-z_]+\}", prompt)
         assert not unfilled, f"Unfilled placeholders: {unfilled}"
+
+    def test_epic_review_template_in_epic_stage_templates(self) -> None:
+        """EPIC_STAGE_TEMPLATES includes review mapped to EPIC_REVIEW_TEMPLATE."""
+        assert "review" in EPIC_STAGE_TEMPLATES
+        assert EPIC_STAGE_TEMPLATES["review"] is EPIC_REVIEW_TEMPLATE
+
+    def test_epic_review_prompt_content(
+        self,
+        epic_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        """Epic review prompt includes title, description, decomposition, and verdict instructions."""
+        artifacts = {
+            "spec_content": '[{"title": "Child task A"}]',
+            "git_diff": "diff --git a/foo.py b/foo.py",
+        }
+        prompt = build_prompt(
+            "review", epic_task, sample_project, sample_stage_run, artifacts
+        )
+        # Contains epic title and description
+        assert "Overhaul authentication system" in prompt
+        assert "Replace the legacy auth with OAuth2." in prompt
+        # Contains decomposition content
+        assert "Child task A" in prompt
+        # Contains verdict instructions
+        assert "PASS" in prompt
+        assert "ISSUES" in prompt
+        # Contains review file path instruction
+        assert f"_forge/reviews/{epic_task['id']}.md" in prompt
+        # Contains follow-ups file instruction
+        assert f"_forge/follow-ups/{epic_task['id']}.json" in prompt

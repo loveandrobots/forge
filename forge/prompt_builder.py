@@ -240,8 +240,43 @@ QUICK_STAGE_TEMPLATES: dict[str, str] = {
     "review": QUICK_REVIEW_TEMPLATE,
 }
 
+EPIC_REVIEW_TEMPLATE = """\
+You are working on the project "{project_name}".
+
+## Epic
+{task_title}
+
+{task_description}
+
+## Decomposition spec
+{spec_content}
+
+## Changes on default branch
+{git_diff}
+
+## Your job
+Review the integrated result of all child tasks against the original epic intent. Save your review to: _forge/reviews/{task_id}.md
+
+Your review must include:
+- **Verdict**: Either "PASS" or "ISSUES"
+- **Epic intent check**: Does the current state of the codebase satisfy what the epic set out to accomplish? Evaluate each child task's contribution.
+- **Integration check**: Do the child task results work together coherently? Look for inconsistencies, missing glue code, or gaps between individually-completed pieces.
+- **Issues found**: If verdict is ISSUES, list each issue with: what's wrong, where it is, and what should be done about it. Be specific — cite file paths and line numbers.
+
+Your verdict must be one of:
+- PASS: The integrated result fully satisfies the original epic intent and all child tasks work together coherently.
+- ISSUES: You found gaps or problems. List every issue.
+
+If verdict is ISSUES, also write follow-up tasks to `_forge/follow-ups/{task_id}.json` as a JSON array of objects, each with `title`, `description`, and an optional `flow` field (default `"quick"`).
+
+Load the following skills for context:
+{skill_references}
+
+{retry_context}"""
+
 EPIC_STAGE_TEMPLATES: dict[str, str] = {
     "spec": EPIC_SPEC_TEMPLATE,
+    "review": EPIC_REVIEW_TEMPLATE,
 }
 
 # ---------------------------------------------------------------------------

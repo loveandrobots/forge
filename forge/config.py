@@ -20,7 +20,7 @@ STAGES: list[str] = ["spec", "plan", "implement", "review"]
 FLOW_STAGES: dict[str, list[str]] = {
     "standard": ["spec", "plan", "implement", "review"],
     "quick": ["implement", "review"],
-    "epic": ["spec"],
+    "epic": ["spec", "review"],
 }
 
 # Valid flow values

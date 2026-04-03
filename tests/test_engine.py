@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
@@ -3229,13 +3230,13 @@ class TestEpicDecomposition:
         assert task["status"] == "paused"
 
     @pytest.mark.asyncio
-    async def test_advance_task_epic_completion_when_children_done(
+    async def test_advance_task_epic_transitions_to_reviewing_when_children_done(
         self,
         conn: sqlite3.Connection,
         settings: Settings,
         project_id: str,
     ) -> None:
-        """AC 7: When all children are done, epic completes."""
+        """AC 7: When all children are done, epic transitions to reviewing."""
         # Create epic task
         epic_id = db.insert_task(
             conn,
@@ -3268,7 +3269,7 @@ class TestEpicDecomposition:
         db.update_task(conn, child1_id, status="active", current_stage="review")
         await engine.advance_task(conn, child1_id, "review")
 
-        # Epic should NOT be complete yet
+        # Epic should NOT be in review yet
         epic = db.get_task(conn, epic_id)
         assert epic["status"] == "paused"
         assert epic["epic_status"] == "decomposed"
@@ -3277,10 +3278,17 @@ class TestEpicDecomposition:
         db.update_task(conn, child2_id, status="active", current_stage="review")
         await engine.advance_task(conn, child2_id, "review")
 
-        # Now epic should be complete
+        # Now epic should be in reviewing status with a queued review stage_run
         epic = db.get_task(conn, epic_id)
-        assert epic["status"] == "done"
-        assert epic["epic_status"] == "complete"
+        assert epic["status"] == "active"
+        assert epic["epic_status"] == "reviewing"
+        assert epic["current_stage"] == "review"
+
+        # Verify a queued review stage_run was created
+        stage_runs = db.list_stage_runs(conn, task_id=epic_id, status="queued")
+        assert len(stage_runs) == 1
+        assert stage_runs[0]["stage"] == "review"
+        assert stage_runs[0]["attempt"] == 1
 
     @pytest.mark.asyncio
     async def test_advance_task_epic_not_complete_when_children_pending(
@@ -3646,3 +3654,300 @@ class TestEpicGateNameOverride:
                 pass
 
         assert "epic-spec" in captured_gate_stage
+
+
+# ---------------------------------------------------------------------------
+# Epic review tests
+# ---------------------------------------------------------------------------
+
+
+class TestEpicReview:
+    """Tests for epic review triggering, advance, and bounce."""
+
+    @pytest.mark.asyncio
+    async def test_check_epic_completion_partial_children(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Completing one child when siblings are pending does NOT trigger epic review."""
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="decomposed",
+        )
+        db.update_task(conn, epic_id, status="paused")
+
+        child1_id = db.insert_task(
+            conn, project_id=project_id, title="Child 1", flow="quick", parent_task_id=epic_id,
+        )
+        db.insert_task(
+            conn, project_id=project_id, title="Child 2", flow="quick", parent_task_id=epic_id,
+        )
+
+        # Complete only child 1
+        db.update_task(conn, child1_id, status="done")
+
+        engine = PipelineEngine(settings, ":memory:")
+        engine._check_epic_completion(conn, epic_id)
+
+        epic = db.get_task(conn, epic_id)
+        assert epic["epic_status"] == "decomposed"
+        assert epic["status"] == "paused"
+
+        # No stage_runs should have been created for the epic
+        runs = db.list_stage_runs(conn, task_id=epic_id)
+        assert len(runs) == 0
+
+    @pytest.mark.asyncio
+    async def test_check_epic_completion_all_children_done(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Completing the last child triggers epic review (parent moves to reviewing)."""
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="decomposed",
+        )
+        db.update_task(conn, epic_id, status="paused")
+
+        child1_id = db.insert_task(
+            conn, project_id=project_id, title="Child 1", flow="quick", parent_task_id=epic_id,
+        )
+        child2_id = db.insert_task(
+            conn, project_id=project_id, title="Child 2", flow="quick", parent_task_id=epic_id,
+        )
+        db.update_task(conn, child1_id, status="done")
+        db.update_task(conn, child2_id, status="done")
+
+        engine = PipelineEngine(settings, ":memory:")
+        engine._check_epic_completion(conn, epic_id)
+
+        epic = db.get_task(conn, epic_id)
+        assert epic["epic_status"] == "reviewing"
+        assert epic["status"] == "active"
+        assert epic["current_stage"] == "review"
+
+        runs = db.list_stage_runs(conn, task_id=epic_id, status="queued")
+        assert len(runs) == 1
+        assert runs[0]["stage"] == "review"
+        assert runs[0]["attempt"] == 1
+
+    @pytest.mark.asyncio
+    async def test_check_epic_completion_guards_double_transition(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """If epic is already reviewing, a second call does not create another stage_run."""
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="reviewing",
+        )
+        db.update_task(conn, epic_id, status="active", current_stage="review")
+
+        child_id = db.insert_task(
+            conn, project_id=project_id, title="Child", flow="quick", parent_task_id=epic_id,
+        )
+        db.update_task(conn, child_id, status="done")
+
+        engine = PipelineEngine(settings, ":memory:")
+        engine._check_epic_completion(conn, epic_id)
+
+        # epic_status should remain "reviewing" — no double transition
+        epic = db.get_task(conn, epic_id)
+        assert epic["epic_status"] == "reviewing"
+
+        # No new stage_runs created
+        runs = db.list_stage_runs(conn, task_id=epic_id)
+        assert len(runs) == 0
+
+    @pytest.mark.asyncio
+    async def test_advance_task_epic_review_pass(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """PASS verdict on epic review sets epic to complete."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="reviewing",
+        )
+        db.update_task(conn, epic_id, status="active", current_stage="review")
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, epic_id, "review", project=project)
+
+        epic = db.get_task(conn, epic_id)
+        assert epic["epic_status"] == "complete"
+        assert epic["status"] == "done"
+        assert epic["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_bounce_task_epic_review_issues(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """ISSUES verdict creates follow-up tasks and resets epic to decomposed."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="reviewing",
+        )
+        db.update_task(conn, epic_id, status="active", current_stage="review")
+        epic_task = dict(db.get_task(conn, epic_id))
+
+        # Write follow-ups file
+        followups_dir = tmp_path / "_forge" / "follow-ups"
+        followups_dir.mkdir(parents=True)
+        followups = [
+            {"title": "Fix integration gap", "description": "Missing glue code"},
+            {"title": "Add missing test", "description": "Coverage gap"},
+        ]
+        (followups_dir / f"{epic_id}.json").write_text(json.dumps(followups))
+
+        gate_result = GateResult(
+            gate_name="post-epic-review",
+            exit_code=1,
+            passed=False,
+            stdout="",
+            stderr="ISSUES found",
+            duration_seconds=0.1,
+        )
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.bounce_task(conn, epic_task, "review", gate_result, project=project)
+
+        # Epic should be reset to decomposed/paused
+        epic = db.get_task(conn, epic_id)
+        assert epic["epic_status"] == "decomposed"
+        assert epic["status"] == "paused"
+
+        # Follow-up tasks should have been created
+        children = conn.execute(
+            "SELECT * FROM tasks WHERE parent_task_id IS NULL AND title IN (?, ?)",
+            ("Fix integration gap", "Add missing test"),
+        ).fetchall()
+        # _process_follow_ups creates tasks without parent_task_id (they're independent follow-ups)
+        assert len(children) == 2
+        for child in children:
+            assert child["flow"] == "quick"
+
+    @pytest.mark.asyncio
+    async def test_bounce_task_epic_review_followups_default_quick(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Follow-up tasks from epic review default to quick flow."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="reviewing",
+        )
+        db.update_task(conn, epic_id, status="active", current_stage="review")
+        epic_task = dict(db.get_task(conn, epic_id))
+
+        # Follow-ups without explicit flow field
+        followups_dir = tmp_path / "_forge" / "follow-ups"
+        followups_dir.mkdir(parents=True)
+        followups = [
+            {"title": "Task A", "description": "Do A"},
+        ]
+        (followups_dir / f"{epic_id}.json").write_text(json.dumps(followups))
+
+        gate_result = GateResult(
+            gate_name="post-epic-review", exit_code=1, passed=False, stdout="", stderr="ISSUES",
+            duration_seconds=0.1,
+        )
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.bounce_task(conn, epic_task, "review", gate_result, project=project)
+
+        # The created follow-up should default to quick
+        tasks = conn.execute(
+            "SELECT flow FROM tasks WHERE title = 'Task A'"
+        ).fetchall()
+        assert len(tasks) == 1
+        assert tasks[0]["flow"] == "quick"
+
+    @pytest.mark.asyncio
+    async def test_epic_review_integration_two_children(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Integration: completing 2 children transitions epic to reviewing with queued stage_run."""
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic integration test",
+            flow="epic",
+            epic_status="decomposed",
+        )
+        db.update_task(conn, epic_id, status="paused")
+
+        child1_id = db.insert_task(
+            conn, project_id=project_id, title="Child A", flow="quick", parent_task_id=epic_id,
+        )
+        child2_id = db.insert_task(
+            conn, project_id=project_id, title="Child B", flow="quick", parent_task_id=epic_id,
+        )
+
+        engine = PipelineEngine(settings, ":memory:")
+
+        # Complete child 1 via advance_task
+        db.update_task(conn, child1_id, status="active", current_stage="review")
+        await engine.advance_task(conn, child1_id, "review")
+
+        # Epic still paused
+        epic = db.get_task(conn, epic_id)
+        assert epic["epic_status"] == "decomposed"
+
+        # Complete child 2
+        db.update_task(conn, child2_id, status="active", current_stage="review")
+        await engine.advance_task(conn, child2_id, "review")
+
+        # Epic should now be reviewing
+        epic = db.get_task(conn, epic_id)
+        assert epic["epic_status"] == "reviewing"
+        assert epic["status"] == "active"
+        assert epic["current_stage"] == "review"
+
+        runs = db.list_stage_runs(conn, task_id=epic_id, status="queued")
+        assert len(runs) == 1
+        assert runs[0]["stage"] == "review"

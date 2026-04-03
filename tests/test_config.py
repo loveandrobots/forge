@@ -99,5 +99,5 @@ def test_log_levels_constant() -> None:
 
 
 def test_epic_flow_stages() -> None:
-    """Epic flow should only have the spec stage."""
-    assert FLOW_STAGES["epic"] == ["spec"]
+    """Epic flow should have spec and review stages."""
+    assert FLOW_STAGES["epic"] == ["spec", "review"]

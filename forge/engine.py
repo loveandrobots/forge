@@ -396,6 +396,8 @@ class PipelineEngine:
                 flow = task.get("flow", "standard")
                 if flow == "epic" and stage == "spec":
                     gate_stage = "epic-spec"
+                elif flow == "epic" and stage == "review":
+                    gate_stage = "epic-review"
 
                 gate_result: GateResult = await run_gate(
                     gate_dir=gate_dir,
@@ -616,6 +618,21 @@ class PipelineEngine:
             if current_stage == "review" and project is not None:
                 self._process_follow_ups(conn, task_id, project)
 
+            # Epic review pass: complete the epic
+            if flow == "epic" and current_stage == "review":
+                database.update_task(
+                    conn,
+                    task_id,
+                    status="done",
+                    current_stage=current_stage,
+                    completed_at=_now(),
+                    epic_status="complete",
+                )
+                self._log("info", f"Epic {task_id} review passed — completed", task_id=task_id)
+                if project is not None:
+                    await self._maybe_auto_pause(conn, task_id, project)
+                return
+
             # Attempt auto-merge before marking done
             if project is not None:
                 task_row = database.get_task(conn, task_id)
@@ -697,7 +714,27 @@ class PipelineEngine:
     ) -> None:
         """Handle gate failure: retry or mark needs_human."""
         task_id = task["id"]
+        flow = task.get("flow", "standard")
         max_retries = task.get("max_retries", self.settings.engine.default_max_retries)
+
+        # Epic review bounce: create follow-up tasks and reset epic to decomposed
+        if flow == "epic" and stage == "review":
+            if project is not None:
+                self._process_follow_ups(conn, task_id, project)
+            database.update_task(
+                conn,
+                task_id,
+                epic_status="decomposed",
+                status="paused",
+                current_stage="review",
+            )
+            self._log(
+                "info",
+                f"Epic {task_id} review found issues — reset to decomposed, awaiting follow-up children",
+                task_id=task_id,
+            )
+            return
+
         if stage == "review":
             # Review bounces go back to implement with shared retry budget
             retry_count = database.get_implement_review_retry_count(conn, task_id)
@@ -1040,21 +1077,31 @@ class PipelineEngine:
         conn: sqlite3.Connection,
         parent_task_id: str,
     ) -> None:
-        """Check if all children of a parent epic are done; if so, complete the epic."""
+        """Check if all children of a parent epic are done; if so, transition to review."""
         parent = database.get_task(conn, parent_task_id)
         if not parent or parent["flow"] != "epic":
+            return
+        # Guard against double-transition (concurrent child completion)
+        if parent["epic_status"] != "decomposed":
             return
         if database.all_children_complete(conn, parent_task_id):
             database.update_task(
                 conn,
                 parent_task_id,
-                epic_status="complete",
-                status="done",
-                completed_at=_now(),
+                epic_status="reviewing",
+                status="active",
+                current_stage="review",
+            )
+            database.insert_stage_run(
+                conn,
+                task_id=parent_task_id,
+                stage="review",
+                attempt=1,
+                status="queued",
             )
             self._log(
                 "info",
-                f"Epic {parent_task_id} completed — all children done",
+                f"Epic {parent_task_id} all children done — queued for review",
                 task_id=parent_task_id,
             )
 
@@ -1132,18 +1179,30 @@ class PipelineEngine:
         """Load artifacts needed for the current stage's prompt."""
         artifacts: dict = {}
 
-        if stage in ("plan", "implement", "review") and task.get("spec_path"):
-            artifacts["spec_content"] = load_artifact(task["spec_path"])
+        flow = task.get("flow", "standard")
 
-        if stage in ("implement",) and task.get("plan_path"):
-            artifacts["plan_content"] = load_artifact(task["plan_path"])
+        # Epic review: load decomposition as spec_content and diff from default branch
+        if flow == "epic" and stage == "review":
+            repo_path = project.get("repo_path", "")
+            decomp_path = os.path.join(
+                repo_path, f"_forge/epic-decompositions/{task['id']}.json"
+            )
+            artifacts["spec_content"] = load_artifact(decomp_path)
+            # Epic has no feature branch — diff is empty (children merged to default)
+            artifacts["git_diff"] = ""
+        else:
+            if stage in ("plan", "implement", "review") and task.get("spec_path"):
+                artifacts["spec_content"] = load_artifact(task["spec_path"])
 
-        if stage == "review":
-            branch = task.get("branch_name", "")
-            base = project.get("default_branch", "main")
-            repo = project.get("repo_path", "")
-            if branch and repo:
-                artifacts["git_diff"] = get_git_diff(repo, branch, base)
+            if stage in ("implement",) and task.get("plan_path"):
+                artifacts["plan_content"] = load_artifact(task["plan_path"])
+
+            if stage == "review":
+                branch = task.get("branch_name", "")
+                base = project.get("default_branch", "main")
+                repo = project.get("repo_path", "")
+                if branch and repo:
+                    artifacts["git_diff"] = get_git_diff(repo, branch, base)
 
         # Load review feedback for implement retries after a review bounce
         if stage == "implement":
