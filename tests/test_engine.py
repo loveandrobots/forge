@@ -3655,6 +3655,63 @@ class TestEpicGateNameOverride:
 
         assert "epic-spec" in captured_gate_stage
 
+    @pytest.mark.asyncio
+    async def test_epic_review_gate_name_override(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Engine uses 'epic-review' gate name for epic review runs."""
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic task",
+            flow="epic",
+            epic_status="reviewing",
+        )
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="forge/epic-review-test",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="queued"
+        )
+
+        captured_gate_stage = []
+
+        async def mock_run_gate(gate_dir, stage, env_vars):
+            captured_gate_stage.append(stage)
+            return GateResult(
+                passed=True, exit_code=0, stdout="ok", stderr="",
+                gate_name=f"post-{stage}.sh", duration_seconds=0.1,
+            )
+
+        async def mock_dispatch(**kwargs):
+            return DispatchResult(
+                output="done", exit_code=0, error=None, duration_seconds=1.0, tokens_used=10
+            )
+
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        with patch("forge.engine.run_gate", side_effect=mock_run_gate), \
+             patch("forge.engine.dispatch_claude", side_effect=mock_dispatch), \
+             patch("forge.engine.database.get_connection", return_value=_UnclosableConnection(conn)):
+            engine._loop_task = asyncio.ensure_future(engine.run_loop())
+            await asyncio.sleep(0.5)
+            engine.running = False
+            engine._loop_task.cancel()
+            try:
+                await engine._loop_task
+            except asyncio.CancelledError:
+                pass
+
+        assert "epic-review" in captured_gate_stage
+
 
 # ---------------------------------------------------------------------------
 # Epic review tests
@@ -3773,6 +3830,41 @@ class TestEpicReview:
         # No new stage_runs created
         runs = db.list_stage_runs(conn, task_id=epic_id)
         assert len(runs) == 0
+
+    @pytest.mark.asyncio
+    async def test_check_epic_completion_increments_attempt(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Second epic review after bounce uses attempt=2, not attempt=1."""
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="decomposed",
+        )
+        db.update_task(conn, epic_id, status="paused")
+
+        # Simulate a prior review stage_run (from first review cycle)
+        db.insert_stage_run(
+            conn, task_id=epic_id, stage="review", attempt=1, status="complete"
+        )
+
+        child_id = db.insert_task(
+            conn, project_id=project_id, title="Follow-up child", flow="quick", parent_task_id=epic_id,
+        )
+        db.update_task(conn, child_id, status="done")
+
+        engine = PipelineEngine(settings, ":memory:")
+        engine._check_epic_completion(conn, epic_id)
+
+        runs = db.list_stage_runs(conn, task_id=epic_id, status="queued")
+        assert len(runs) == 1
+        assert runs[0]["stage"] == "review"
+        assert runs[0]["attempt"] == 2
 
     @pytest.mark.asyncio
     async def test_advance_task_epic_review_pass(

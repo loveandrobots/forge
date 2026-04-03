@@ -1092,11 +1092,12 @@ class PipelineEngine:
                 status="active",
                 current_stage="review",
             )
+            attempt = database.get_stage_run_count(conn, parent_task_id, "review") + 1
             database.insert_stage_run(
                 conn,
                 task_id=parent_task_id,
                 stage="review",
-                attempt=1,
+                attempt=attempt,
                 status="queued",
             )
             self._log(
