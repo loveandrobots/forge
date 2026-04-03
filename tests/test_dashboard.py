@@ -534,6 +534,142 @@ class TestTaskDetail:
         assert "Just one line" in desc_section
         assert "<p>" not in desc_section
 
+    def test_shows_cancel_button_for_backlog(
+        self,
+        client: TestClient,
+        sample_task: str,
+    ) -> None:
+        """Cancel button appears for backlog tasks."""
+        resp = client.get(f"/tasks/{sample_task}")
+        assert "Cancel" in resp.text
+        assert f"/api/tasks/{sample_task}/cancel" in resp.text
+
+    def test_shows_cancel_button_for_active(
+        self,
+        client: TestClient,
+        active_task_with_runs: str,
+    ) -> None:
+        """Cancel button appears for active tasks."""
+        resp = client.get(f"/tasks/{active_task_with_runs}")
+        assert "Cancel" in resp.text
+        assert f"/api/tasks/{active_task_with_runs}/cancel" in resp.text
+
+    def test_shows_cancel_button_for_paused(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Cancel button appears for paused tasks."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Paused Task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="paused", current_stage="spec")
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert "Cancel" in resp.text
+        assert f"/api/tasks/{tid}/cancel" in resp.text
+
+    def test_shows_cancel_button_for_needs_human(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Cancel button appears for needs_human tasks."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Stuck Task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="needs_human", current_stage="spec")
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert "Cancel" in resp.text
+        assert f"/api/tasks/{tid}/cancel" in resp.text
+
+    def test_no_cancel_button_for_done(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Cancel button does not appear for done tasks."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Done Task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="done", current_stage="review")
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert f"/api/tasks/{tid}/cancel" not in resp.text
+
+    def test_no_cancel_button_for_cancelled(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Cancel button does not appear for already-cancelled tasks."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Cancelled Task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="cancelled")
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert f"/api/tasks/{tid}/cancel" not in resp.text
+
+    def test_no_cancel_button_for_failed(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Cancel button does not appear for failed tasks."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Failed Task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="failed", current_stage="spec")
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert f"/api/tasks/{tid}/cancel" not in resp.text
+
+    def test_cancel_button_uses_btn_danger_class(
+        self,
+        client: TestClient,
+        sample_task: str,
+    ) -> None:
+        """Cancel button uses btn-danger styling."""
+        resp = client.get(f"/tasks/{sample_task}")
+        assert "btn btn-danger" in resp.text
+
     def test_css_has_pre_wrap(self) -> None:
         """The .task-description CSS rule includes white-space: pre-wrap."""
         import pathlib

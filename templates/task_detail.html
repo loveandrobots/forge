@@ -38,6 +38,9 @@
         {% if task.status in ('active', 'needs_human') %}
         <button class="btn" hx-post="/api/tasks/{{ task.id }}/retry" hx-swap="none" hx-on::after-request="window.location.reload()">Retry</button>
         {% endif %}
+        {% if task.status in ('backlog', 'active', 'paused', 'needs_human') %}
+        <button class="btn btn-danger" hx-post="/api/tasks/{{ task.id }}/cancel" hx-swap="none" hx-on::after-request="window.location.reload()">Cancel</button>
+        {% endif %}
         {% if task.status in ('needs_human', 'failed', 'paused') %}
         <div class="reset-group">
             <select id="reset-stage-{{ task.id }}">
