@@ -27,7 +27,7 @@
         </div>
         <div class="kanban-cards">
             {% for task in columns[col_name] %}
-            <div onclick="window.location='/tasks/{{ task.id }}'" class="card {% if task.status == 'needs_human' %}card-needs-human{% elif task.status == 'failed' %}card-failed{% elif task.status == 'cancelled' %}card-cancelled{% endif %}">
+            <div onclick="window.location='/tasks/{{ task.id }}'" onkeydown="if(event.key==='Enter')window.location='/tasks/{{ task.id }}'" tabindex="0" role="link" class="card {% if task.status == 'needs_human' %}card-needs-human{% elif task.status == 'failed' %}card-failed{% elif task.status == 'cancelled' %}card-cancelled{% endif %}">
                 <div class="card-title">{{ task.title }}</div>
                 {% if task.id in parent_map %}
                 <div class="card-parent-link"><a href="/tasks/{{ parent_map[task.id].id }}" onclick="event.stopPropagation()">↑ {{ parent_map[task.id].title }}</a></div>

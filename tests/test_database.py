@@ -784,3 +784,141 @@ class TestEscalatedFromQuick:
         row = db.get_task(conn, tid)
         assert "escalated_from_quick" in row.keys()
         assert row["escalated_from_quick"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Batch query functions
+# ---------------------------------------------------------------------------
+
+
+class TestGetParentTasksBatch:
+    def test_empty_input_returns_empty_dict(self, conn: sqlite3.Connection) -> None:
+        assert db.get_parent_tasks_batch(conn, []) == {}
+
+    def test_single_child_with_parent(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        parent_id = db.insert_task(conn, project_id=project_id, title="Epic parent")
+        child_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Child task",
+            parent_task_id=parent_id,
+        )
+        result = db.get_parent_tasks_batch(conn, [child_id])
+        assert child_id in result
+        assert result[child_id]["id"] == parent_id
+        assert result[child_id]["title"] == "Epic parent"
+
+    def test_multiple_children_with_parents(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        p1 = db.insert_task(conn, project_id=project_id, title="Parent 1")
+        p2 = db.insert_task(conn, project_id=project_id, title="Parent 2")
+        c1 = db.insert_task(
+            conn, project_id=project_id, title="Child 1", parent_task_id=p1
+        )
+        c2 = db.insert_task(
+            conn, project_id=project_id, title="Child 2", parent_task_id=p2
+        )
+        result = db.get_parent_tasks_batch(conn, [c1, c2])
+        assert result[c1]["id"] == p1
+        assert result[c2]["id"] == p2
+
+    def test_task_without_parent_not_in_result(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="No parent")
+        result = db.get_parent_tasks_batch(conn, [tid])
+        assert tid not in result
+
+    def test_orphan_parent_id_not_in_result(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        """A child whose parent was deleted is excluded by the JOIN."""
+        parent_id = db.insert_task(conn, project_id=project_id, title="Doomed parent")
+        child_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Orphan child",
+            parent_task_id=parent_id,
+        )
+        # Delete parent to create orphan, temporarily disabling FK checks
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("DELETE FROM tasks WHERE id = ?", (parent_id,))
+        conn.execute("PRAGMA foreign_keys = ON")
+        result = db.get_parent_tasks_batch(conn, [child_id])
+        assert child_id not in result
+
+
+class TestGetChildCountsBatch:
+    def test_empty_input_returns_empty_dict(self, conn: sqlite3.Connection) -> None:
+        assert db.get_child_counts_batch(conn, []) == {}
+
+    def test_parent_with_no_children_not_in_result(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        pid = db.insert_task(conn, project_id=project_id, title="Lonely parent")
+        result = db.get_child_counts_batch(conn, [pid])
+        assert pid not in result
+
+    def test_parent_with_zero_done(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        pid = db.insert_task(conn, project_id=project_id, title="Parent")
+        db.insert_task(
+            conn, project_id=project_id, title="Child A", parent_task_id=pid
+        )
+        db.insert_task(
+            conn, project_id=project_id, title="Child B", parent_task_id=pid
+        )
+        result = db.get_child_counts_batch(conn, [pid])
+        assert result[pid]["total"] == 2
+        assert result[pid]["done"] == 0
+
+    def test_parent_with_partial_done(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        pid = db.insert_task(conn, project_id=project_id, title="Parent")
+        c1 = db.insert_task(
+            conn, project_id=project_id, title="Child 1", parent_task_id=pid
+        )
+        db.insert_task(
+            conn, project_id=project_id, title="Child 2", parent_task_id=pid
+        )
+        db.update_task(conn, c1, status="done")
+        result = db.get_child_counts_batch(conn, [pid])
+        assert result[pid]["total"] == 2
+        assert result[pid]["done"] == 1
+
+    def test_parent_with_all_done(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        pid = db.insert_task(conn, project_id=project_id, title="Parent")
+        c1 = db.insert_task(
+            conn, project_id=project_id, title="Child 1", parent_task_id=pid
+        )
+        c2 = db.insert_task(
+            conn, project_id=project_id, title="Child 2", parent_task_id=pid
+        )
+        db.update_task(conn, c1, status="done")
+        db.update_task(conn, c2, status="done")
+        result = db.get_child_counts_batch(conn, [pid])
+        assert result[pid]["total"] == 2
+        assert result[pid]["done"] == 2
+
+    def test_multiple_parents(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        p1 = db.insert_task(conn, project_id=project_id, title="Parent 1")
+        p2 = db.insert_task(conn, project_id=project_id, title="Parent 2")
+        db.insert_task(
+            conn, project_id=project_id, title="P1 Child", parent_task_id=p1
+        )
+        c2 = db.insert_task(
+            conn, project_id=project_id, title="P2 Child", parent_task_id=p2
+        )
+        db.update_task(conn, c2, status="done")
+        result = db.get_child_counts_batch(conn, [p1, p2])
+        assert result[p1] == {"total": 1, "done": 0}
+        assert result[p2] == {"total": 1, "done": 1}
