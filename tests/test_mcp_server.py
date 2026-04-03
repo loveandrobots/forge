@@ -390,6 +390,11 @@ class TestCreateTask:
         assert "error" in result
         assert "project" in result["error"].lower()
 
+    def test_create_task_empty_title(self, project_id):
+        result = create_task(project_id=project_id, title="")
+        assert "error" in result
+        assert "title" in result["error"].lower()
+
     def test_create_task_invalid_flow(self, project_id):
         result = create_task(project_id=project_id, title="Task", flow="invalid")
         assert "error" in result
@@ -653,3 +658,25 @@ class TestCreateTaskBatch:
         assert isinstance(result, dict)
         assert "error" in result
         assert "circular" in result["error"].lower()
+
+    def test_batch_empty_array(self, project_id):
+        result = create_task_batch(project_id=project_id, tasks="[]")
+        assert isinstance(result, dict)
+        assert "error" in result
+
+    def test_batch_invalid_json(self, project_id):
+        result = create_task_batch(project_id=project_id, tasks="not json")
+        assert isinstance(result, dict)
+        assert "error" in result
+
+    def test_batch_non_list_json(self, project_id):
+        result = create_task_batch(project_id=project_id, tasks='{"title": "x"}')
+        assert isinstance(result, dict)
+        assert "error" in result
+
+    def test_batch_missing_title(self, project_id):
+        tasks_json = json.dumps([{"description": "no title"}])
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "title" in result["error"].lower()

@@ -153,6 +153,10 @@ def create_task(
         if project is None:
             return {"error": f"Project not found: {project_id}"}
 
+        # Validate title
+        if not title:
+            return {"error": "title must not be empty"}
+
         # Validate flow
         if flow not in config.VALID_FLOWS:
             return {
@@ -170,25 +174,31 @@ def create_task(
                         "error": f"Dependency task {dep_id} belongs to a different project"
                     }
 
-        # Insert task
-        task_id = database.insert_task(
-            conn,
-            project_id=project_id,
-            title=title,
-            description=description,
-            priority=priority,
-            flow=flow,
-        )
+        # Insert task and links atomically
+        conn.execute("BEGIN")
+        try:
+            task_id = database.insert_task_no_commit(
+                conn,
+                project_id=project_id,
+                title=title,
+                description=description,
+                priority=priority,
+                flow=flow,
+            )
 
-        # Create dependency links
-        if depends_on:
-            for dep_id in depends_on:
-                database.insert_task_link(
-                    conn,
-                    source_task_id=dep_id,
-                    target_task_id=task_id,
-                    link_type="blocks",
-                )
+            if depends_on:
+                for dep_id in depends_on:
+                    database.insert_task_link_no_commit(
+                        conn,
+                        source_task_id=dep_id,
+                        target_task_id=task_id,
+                        link_type="blocks",
+                    )
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
         row = database.get_task(conn, task_id)
         return _row_to_dict(row)
