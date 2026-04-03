@@ -119,14 +119,14 @@ The server exposes the following tools:
 (calls list_projects)
 
 > Show me the backlog for project "forge"
-(calls get_project_backlog with project_name="forge")
+(calls get_project_backlog with project_id="<project-uuid>")
 ```
 
 ### Create and manage tasks
 
 ```
 > Create a task to add input validation to the API
-(calls create_task with project_name, title, description)
+(calls create_task with project_id, title, description)
 
 > Activate task abc123
 (calls activate_task with task_id="abc123")
@@ -142,5 +142,5 @@ The server exposes the following tools:
 > 1. Add rate limiting
 > 2. Fix login redirect bug
 > 3. Update dependencies
-(calls create_task_batch with project_name and list of tasks)
+(calls create_task_batch with project_id and list of tasks)
 ```
