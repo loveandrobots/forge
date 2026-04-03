@@ -129,7 +129,7 @@ _UUID_RE = re.compile(
 
 
 def _is_uuid(value: str) -> bool:
-    """Return True if *value* looks like a UUID v4 string."""
+    """Return True if *value* looks like a UUID string."""
     return bool(_UUID_RE.match(value))
 
 
@@ -233,8 +233,13 @@ def create_task_batch(
         if project is None:
             return {"error": f"Project not found: {project_id}"}
 
+        # Validate each task's fields (must run before duplicate title check)
+        for i, task_obj in enumerate(task_list):
+            if not task_obj.get("title"):
+                return {"error": f"Task at index {i} is missing a title"}
+
         # Check for duplicate titles in the batch
-        titles = [t.get("title", "") for t in task_list]
+        titles = [t["title"] for t in task_list]
         seen_titles: set[str] = set()
         dupes: list[str] = []
         for t in titles:
@@ -246,10 +251,8 @@ def create_task_batch(
 
         title_set = set(titles)
 
-        # Validate each task's fields
+        # Validate each task's remaining fields
         for i, task_obj in enumerate(task_list):
-            if not task_obj.get("title"):
-                return {"error": f"Task at index {i} is missing a title"}
             task_flow = task_obj.get("flow", "standard")
             if task_flow not in config.VALID_FLOWS:
                 return {

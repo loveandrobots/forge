@@ -556,6 +556,19 @@ class TestCreateTaskBatch:
         assert "error" in result
         assert "circular" in result["error"].lower()
 
+    def test_batch_multiple_missing_titles(self, project_id):
+        """Two tasks with no title should get 'missing title', not 'duplicate'."""
+        tasks_json = json.dumps(
+            [
+                {"description": "a"},
+                {"description": "b"},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "missing a title" in result["error"].lower()
+
     def test_batch_duplicate_titles(self, project_id):
         tasks_json = json.dumps(
             [
