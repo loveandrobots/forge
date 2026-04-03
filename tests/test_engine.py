@@ -4075,7 +4075,7 @@ class TestParseStageTimeouts:
 # ---------------------------------------------------------------------------
 
 
-class TestAutoMergeErrorContext2:
+class TestAutoMergeErrorContext:
     @pytest.mark.asyncio
     async def test_auto_merge_checkout_failure_includes_stderr(
         self,
@@ -4431,3 +4431,29 @@ class TestAutoMergeRestoresDefaultBranch:
         assert result is False
         # checkout_and_pull called 3 times: step 1, step 4, cleanup
         assert checkout_mock.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# AC 10: Engine status template handles current_stage=None
+# ---------------------------------------------------------------------------
+
+
+class TestEngineStatusNullStage:
+    def test_engine_status_null_stage(self) -> None:
+        """AC 10: Template renders without 'None' when current_stage is None."""
+        from pathlib import Path
+
+        from jinja2 import Environment, FileSystemLoader
+
+        template_dir = Path(__file__).resolve().parent.parent / "templates"
+        env = Environment(loader=FileSystemLoader(str(template_dir)))
+        template = env.get_template("partials/engine_status.html")
+
+        class _Status:
+            running = True
+            current_task_title = "My Task"
+            current_stage = None
+
+        html = template.render(status=_Status())
+        assert "None" not in html
+        assert "()" not in html

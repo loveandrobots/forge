@@ -578,7 +578,6 @@ class PipelineEngine:
                 task_id=task_id,
                 metadata=_git_metadata(cop_result2),
             )
-            await self._restore_default_branch(repo_path, default_branch, task_id)
             return False
 
         merge_result = await ff_merge(repo_path, branch_name)
