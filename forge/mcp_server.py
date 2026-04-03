@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from collections import deque
@@ -665,8 +666,6 @@ def get_project_skills(project_id: str) -> list[dict] | dict:
         if not skill_refs:
             return []
 
-        import os
-
         repo_path = project["repo_path"]
         results = []
         for ref in skill_refs:
@@ -696,7 +695,7 @@ def get_project_config(project_id: str) -> dict:
         if project is None:
             return {"error": f"Project not found: {project_id}"}
 
-        d = _row_to_dict(dict(project))
+        d = _row_to_dict(project)
         return {
             "gate_dir": d["gate_dir"],
             "skill_refs": d.get("skill_refs"),
@@ -717,8 +716,6 @@ def get_project_gate_scripts(project_id: str) -> list[dict] | dict:
     dicts with 'name' and 'content' keys. Returns an error dict if the project
     doesn't exist, or an empty list if the gate directory is missing.
     """
-    import os
-
     conn = database.get_connection()
     try:
         project = database.get_project(conn, project_id)
@@ -741,8 +738,8 @@ def get_project_gate_scripts(project_id: str) -> list[dict] | dict:
                 with open(filepath) as f:
                     content = f.read()
                 results.append({"name": filename, "content": content})
-            except OSError:
-                continue
+            except OSError as exc:
+                results.append({"name": filename, "error": str(exc)})
         return results
     finally:
         conn.close()

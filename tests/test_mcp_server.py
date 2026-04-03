@@ -1278,6 +1278,39 @@ class TestGetProjectGateScripts:
         result = get_project_gate_scripts(project_id=pid)
         assert result == []
 
+    def test_unreadable_gate_script_returns_error_entry(self, tmp_path):
+        """Test that unreadable gate scripts produce an error entry, not silent skip."""
+        gate_dir = tmp_path / "gates"
+        gate_dir.mkdir()
+        good = gate_dir / "good.sh"
+        good.write_text("#!/bin/bash\nexit 0\n")
+        bad = gate_dir / "bad.sh"
+        bad.write_text("#!/bin/bash\nexit 1\n")
+        bad.chmod(0o000)
+
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="UnreadableGateProject",
+                repo_path=str(tmp_path),
+                gate_dir="gates",
+            )
+        finally:
+            conn.close()
+
+        result = get_project_gate_scripts(project_id=pid)
+        names = [r["name"] for r in result]
+        assert "bad.sh" in names
+        assert "good.sh" in names
+        bad_entry = next(r for r in result if r["name"] == "bad.sh")
+        assert "error" in bad_entry
+        good_entry = next(r for r in result if r["name"] == "good.sh")
+        assert "content" in good_entry
+
+        # Restore permissions for cleanup
+        bad.chmod(0o644)
+
     def test_nonexistent_project_returns_error(self):
         """Test requesting gates for non-existent project returns clear error message."""
         fake_id = "00000000-0000-0000-0000-000000000000"
