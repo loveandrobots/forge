@@ -720,7 +720,7 @@ class PipelineEngine:
         # Epic review bounce: create follow-up tasks and reset epic to decomposed
         if flow == "epic" and stage == "review":
             if project is not None:
-                self._process_follow_ups(conn, task_id, project)
+                self._process_follow_ups(conn, task_id, project, parent_task_id=task_id)
             database.update_task(
                 conn,
                 task_id,
@@ -1110,6 +1110,7 @@ class PipelineEngine:
         conn: sqlite3.Connection,
         task_id: str,
         project: dict,
+        parent_task_id: str | None = None,
     ) -> None:
         """Create backlog tasks from follow-ups JSON written by the reviewer."""
         repo_path = project.get("repo_path", "")
@@ -1151,6 +1152,7 @@ class PipelineEngine:
                     title=title,
                     description=description,
                     flow=flow,
+                    parent_task_id=parent_task_id,
                 )
                 database.insert_task_link(
                     conn,

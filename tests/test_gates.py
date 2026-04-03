@@ -998,3 +998,75 @@ class TestParseVerdictUnit:
 
     def test_returns_none_for_unrecognized_keyword_rejected(self) -> None:
         assert self.parse_verdict("## Verdict: REJECTED\n\nNot acceptable.\n") is None
+
+
+# ---------------------------------------------------------------------------
+# post-epic-review.sh
+# ---------------------------------------------------------------------------
+
+
+class TestPostEpicReview:
+    SCRIPT = "post-epic-review.sh"
+
+    def test_post_epic_review_gate_pass(self, tmp_path: Path) -> None:
+        """PASS verdict exits 0."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Epic Review
+
+            Everything looks good across all child tasks.
+
+            ## Verdict: PASS
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+    def test_post_epic_review_gate_issues(self, tmp_path: Path) -> None:
+        """ISSUES verdict with follow-ups file exits 1."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Epic Review
+
+            Found gaps in the implementation.
+
+            ## Verdict: ISSUES
+            """,
+        )
+        followups_path = os.path.join(repo, "_forge/follow-ups/test-task-42.json")
+        os.makedirs(os.path.dirname(followups_path), exist_ok=True)
+        with open(followups_path, "w") as f:
+            json.dump([{"title": "Fix gap", "description": "Address the gap"}], f)
+
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "ISSUES" in result.stderr
+
+    def test_fails_when_review_missing(self, tmp_path: Path) -> None:
+        """Missing review file exits 1."""
+        repo = str(tmp_path)
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "not found" in result.stderr
+
+    def test_fails_when_issues_without_followups(self, tmp_path: Path) -> None:
+        """ISSUES verdict without follow-ups file exits 1."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Epic Review
+
+            Found gaps in the implementation.
+
+            ## Verdict: ISSUES
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "follow-ups" in result.stderr.lower()

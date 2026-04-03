@@ -3850,15 +3850,15 @@ class TestEpicReview:
         assert epic["epic_status"] == "decomposed"
         assert epic["status"] == "paused"
 
-        # Follow-up tasks should have been created
+        # Follow-up tasks should have been created as children of the epic
         children = conn.execute(
-            "SELECT * FROM tasks WHERE parent_task_id IS NULL AND title IN (?, ?)",
-            ("Fix integration gap", "Add missing test"),
+            "SELECT * FROM tasks WHERE parent_task_id = ? AND title IN (?, ?)",
+            (epic_id, "Fix integration gap", "Add missing test"),
         ).fetchall()
-        # _process_follow_ups creates tasks without parent_task_id (they're independent follow-ups)
         assert len(children) == 2
         for child in children:
             assert child["flow"] == "quick"
+            assert child["parent_task_id"] == epic_id
 
     @pytest.mark.asyncio
     async def test_bounce_task_epic_review_followups_default_quick(
