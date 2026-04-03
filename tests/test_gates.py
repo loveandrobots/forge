@@ -760,6 +760,62 @@ class TestPostEpicSpec:
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 0
 
+    # -- New tests: whitespace-only title --
+
+    def test_fails_with_whitespace_only_title(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, [
+            _valid_child("Task A"),
+            {"title": "   ", "description": _valid_desc()},
+        ])
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "title" in result.stderr.lower()
+
+    # -- New tests: self-referential depends_on --
+
+    def test_fails_with_self_referential_depends_on_index(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, [
+            _valid_child("Task A", depends_on=[0]),
+            _valid_child("Task B"),
+        ])
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "references itself" in result.stderr.lower()
+
+    def test_fails_with_self_referential_depends_on_title(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, [
+            _valid_child("Task A", depends_on=["Task A"]),
+            _valid_child("Task B"),
+        ])
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "references itself" in result.stderr.lower()
+
+    # -- New tests: depends_on type validation --
+
+    def test_fails_with_depends_on_not_a_list(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, [
+            _valid_child("Task A", depends_on="Task B"),
+            _valid_child("Task B"),
+        ])
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "depends_on must be an array" in result.stderr
+
+    def test_fails_with_depends_on_invalid_entry_type(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, [
+            _valid_child("Task A", depends_on=[{"task": "B"}]),
+            _valid_child("Task B"),
+        ])
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "integer index or string title" in result.stderr
+
     # -- New tests: cross-reference convention --
 
     def test_fails_when_description_references_parent_epic(

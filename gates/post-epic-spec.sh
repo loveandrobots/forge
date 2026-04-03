@@ -100,10 +100,14 @@ for i, entry in enumerate(data):
         else:
             for dep in deps:
                 if isinstance(dep, int):
-                    if dep < 0 or dep >= len(data):
+                    if dep == i:
+                        errors.append(\"Child %d ('%s'): depends_on references itself\" % (i, title_label))
+                    elif dep < 0 or dep >= len(data):
                         errors.append(\"Child %d ('%s'): dangling depends_on reference to index %d (valid range 0-%d)\" % (i, title_label, dep, len(data) - 1))
                 elif isinstance(dep, str):
-                    if dep.strip() not in all_titles:
+                    if dep.strip() == title_label:
+                        errors.append(\"Child %d ('%s'): depends_on references itself\" % (i, title_label))
+                    elif dep.strip() not in all_titles:
                         errors.append(\"Child %d ('%s'): dangling depends_on reference to title '%s'\" % (i, title_label, dep))
                 else:
                     errors.append(\"Child %d ('%s'): depends_on entry must be an integer index or string title\" % (i, title_label))
