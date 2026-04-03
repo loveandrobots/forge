@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -745,10 +746,8 @@ def get_project_gate_scripts(project_id: str) -> list[dict] | dict:
         conn.close()
 
 
-def build_arg_parser() -> "argparse.ArgumentParser":
+def build_arg_parser() -> argparse.ArgumentParser:
     """Build the argument parser for the MCP server CLI entry point."""
-    import argparse
-
     parser = argparse.ArgumentParser(description="Forge MCP Server")
     parser.add_argument(
         "--transport",
@@ -765,7 +764,7 @@ def build_arg_parser() -> "argparse.ArgumentParser":
     return parser
 
 
-def build_run_kwargs(args: "argparse.Namespace") -> dict:
+def build_run_kwargs(args: argparse.Namespace) -> dict:
     """Build kwargs dict for mcp.run() from parsed CLI arguments."""
     kwargs: dict = {}
     if args.transport in ("http", "sse"):
