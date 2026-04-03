@@ -900,3 +900,24 @@ def get_logs_since(
         f"SELECT * FROM run_log WHERE {where} ORDER BY id ASC LIMIT ?",
         params,
     ).fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Task cancellation helpers (shared by MCP + REST)
+# ---------------------------------------------------------------------------
+
+TERMINAL_STATUSES = frozenset({"done", "cancelled", "error"})
+
+
+def cancel_single_task(
+    conn: sqlite3.Connection, task_id: str, reason: str | None = None
+) -> None:
+    """Cancel a single task: mark running stage runs as errored, set status, log."""
+    running_runs = list_stage_runs(conn, task_id=task_id, status="running")
+    for sr in running_runs:
+        update_stage_run(conn, sr["id"], status="error", error_message="Task cancelled")
+    update_task(conn, task_id, status="cancelled")
+    message = "Task cancelled"
+    if reason:
+        message = f"Task cancelled: {reason}"
+    insert_log(conn, level="info", task_id=task_id, message=message)

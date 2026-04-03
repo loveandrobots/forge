@@ -605,7 +605,7 @@ class TestCancelTask:
             client, project_id, tmp_path, ["active"]
         )
         resp = client.post(f"/api/tasks/{epic_id}/cancel")
-        assert resp.status_code == 200
+        assert resp.status_code == 409
         data = resp.json()
         assert "warning" in data
         assert "active_children" in data

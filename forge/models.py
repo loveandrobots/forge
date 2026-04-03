@@ -134,6 +134,17 @@ class CancelRequest(BaseModel):
     force: bool = False
 
 
+class ActiveChildSummary(BaseModel):
+    id: str
+    title: str
+    status: str
+
+
+class CancelWarningResponse(BaseModel):
+    warning: str
+    active_children: list[ActiveChildSummary]
+
+
 class ResetRequest(BaseModel):
     from_stage: str | None = None
 

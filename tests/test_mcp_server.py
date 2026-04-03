@@ -1144,6 +1144,77 @@ class TestCancelTask:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
+    def _create_epic_with_children(
+        self, project_id: str, child_statuses: list[str]
+    ) -> tuple[str, list[str]]:
+        """Create an epic-flow task with children in the given statuses."""
+        epic = create_task(
+            project_id=project_id, title="Epic task", flow="epic"
+        )
+        epic_id = epic["id"]
+        conn = database.get_connection()
+        child_ids = []
+        try:
+            for i, status in enumerate(child_statuses):
+                cid = database.insert_task(
+                    conn,
+                    project_id=project_id,
+                    title=f"Child {i}",
+                    parent_task_id=epic_id,
+                )
+                if status != "backlog":
+                    database.update_task(conn, cid, status=status)
+                child_ids.append(cid)
+        finally:
+            conn.close()
+        return epic_id, child_ids
+
+    def test_cancel_epic_without_children(self, project_id):
+        epic = create_task(
+            project_id=project_id, title="Epic no kids", flow="epic"
+        )
+        result = cancel_task(task_id=epic["id"])
+        assert result["status"] == "cancelled"
+
+    def test_cancel_epic_with_active_children_without_force_returns_warning(
+        self, project_id
+    ):
+        epic_id, child_ids = self._create_epic_with_children(
+            project_id, ["active"]
+        )
+        result = cancel_task(task_id=epic_id)
+        assert "warning" in result
+        assert "active_children" in result
+        assert len(result["active_children"]) == 1
+        assert result["active_children"][0]["id"] == child_ids[0]
+        # Epic should NOT be cancelled
+        epic = get_task_detail(task_id=epic_id)
+        assert epic["status"] != "cancelled"
+
+    def test_cancel_epic_with_force_cancels_all_children(self, project_id):
+        epic_id, child_ids = self._create_epic_with_children(
+            project_id, ["active", "backlog"]
+        )
+        result = cancel_task(task_id=epic_id, force=True)
+        assert result["status"] == "cancelled"
+        # All children should be cancelled
+        conn = database.get_connection()
+        try:
+            for cid in child_ids:
+                child = database.get_task(conn, cid)
+                assert child["status"] == "cancelled"
+        finally:
+            conn.close()
+
+    def test_cancel_epic_with_only_completed_children_succeeds_without_force(
+        self, project_id
+    ):
+        epic_id, _child_ids = self._create_epic_with_children(
+            project_id, ["done", "cancelled"]
+        )
+        result = cancel_task(task_id=epic_id)
+        assert result["status"] == "cancelled"
+
 
 class TestGetProjectSkills:
     def test_returns_skill_files(self, tmp_path):

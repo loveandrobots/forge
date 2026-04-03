@@ -648,25 +648,7 @@ def reset_task(task_id: str, from_stage: str | None = None) -> dict:
 _CANCELLABLE_STATUSES = {"backlog", "active", "paused", "needs_human"}
 
 
-def _cancel_single_task_mcp(
-    conn, task_id: str, reason: str | None = None
-) -> None:
-    """Cancel a single task: mark running stage runs as errored, set status, log."""
-    running_runs = database.list_stage_runs(
-        conn, task_id=task_id, status="running"
-    )
-    for sr in running_runs:
-        database.update_stage_run(
-            conn, sr["id"], status="error", error_message="Task cancelled"
-        )
-    database.update_task(conn, task_id, status="cancelled")
-    message = "Task cancelled"
-    if reason:
-        message = f"Task cancelled: {reason}"
-    database.insert_log(conn, level="info", task_id=task_id, message=message)
-
-
-_TERMINAL_STATUSES = {"done", "cancelled", "error"}
+_TERMINAL_STATUSES = database.TERMINAL_STATUSES
 
 
 @mcp.tool()
@@ -703,9 +685,9 @@ def cancel_task(task_id: str, reason: str | None = None, force: bool = False) ->
                     ],
                 }
             for child in active_children:
-                _cancel_single_task_mcp(conn, child["id"], reason="Parent epic cancelled")
+                database.cancel_single_task(conn, child["id"], reason="Parent epic cancelled")
 
-        _cancel_single_task_mcp(conn, task_id, reason)
+        database.cancel_single_task(conn, task_id, reason)
 
         updated_row = database.get_task(conn, task_id)
         return _row_to_dict(updated_row)
