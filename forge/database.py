@@ -101,6 +101,8 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE projects ADD COLUMN pause_after_completion INTEGER NOT NULL DEFAULT 0"
         )
+        # Enable pause_after_completion for Forge's own project on first migration
+        conn.execute("UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'")
     except sqlite3.OperationalError:
         pass  # Column already exists
 
@@ -135,8 +137,6 @@ def migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
-    # Enable pause_after_completion for Forge's own project
-    conn.execute("UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'")
     conn.commit()
 
 

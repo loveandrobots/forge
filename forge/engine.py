@@ -121,6 +121,14 @@ def _truncate_stderr(stderr: str) -> str:
     return stderr[:_STDERR_MAX_BYTES]
 
 
+def _parse_stage_timeouts(project: dict) -> dict | None:
+    """Parse the stage_timeouts JSON string from a project row, or return None."""
+    raw = project.get("stage_timeouts")
+    if not raw:
+        return None
+    return json.loads(raw)
+
+
 def _git_metadata(result: GitResult) -> dict:
     """Build metadata dict from a GitResult for log entries."""
     return {
@@ -328,11 +336,7 @@ class PipelineEngine:
                 )
 
                 # Step 4: Dispatch to Claude Code
-                proj_timeouts = (
-                    json.loads(project["stage_timeouts"])
-                    if project.get("stage_timeouts")
-                    else None
-                )
+                proj_timeouts = _parse_stage_timeouts(project)
                 stage_timeout = resolve_stage_timeout(
                     stage, proj_timeouts, self.settings.engine
                 )
@@ -468,7 +472,13 @@ class PipelineEngine:
         task_id: str,
         project: dict,
     ) -> None:
-        """Pause the engine if the project has pause_after_completion enabled."""
+        """Pause the engine if the project has pause_after_completion enabled.
+
+        Sets self.running = False so the while-loop in run_loop() exits
+        naturally at the top of the next iteration.  When the loop exits,
+        _loop_task completes (not cancelled), so start() can safely
+        create a fresh task without cancelling a dangling one.
+        """
         if not project.get("pause_after_completion"):
             return
         task = database.get_task(conn, task_id)
@@ -554,6 +564,7 @@ class PipelineEngine:
                 f"Post-merge gate failed after rebasing onto {default_branch}. Gate output: {gate_result.stderr}",
                 task_id=task_id,
             )
+            await self._restore_default_branch(repo_path, default_branch, task_id)
             return False
 
         # Step 4: Checkout default branch and fast-forward merge
@@ -567,6 +578,7 @@ class PipelineEngine:
                 task_id=task_id,
                 metadata=_git_metadata(cop_result2),
             )
+            await self._restore_default_branch(repo_path, default_branch, task_id)
             return False
 
         merge_result = await ff_merge(repo_path, branch_name)
@@ -579,6 +591,7 @@ class PipelineEngine:
                 task_id=task_id,
                 metadata=_git_metadata(merge_result),
             )
+            await self._restore_default_branch(repo_path, default_branch, task_id)
             return False
 
         # Step 5: Delete feature branch (best-effort)
@@ -591,6 +604,22 @@ class PipelineEngine:
             task_id=task_id,
         )
         return True
+
+    async def _restore_default_branch(
+        self,
+        repo_path: str,
+        default_branch: str,
+        task_id: str,
+    ) -> None:
+        """Best-effort checkout of the default branch after an auto-merge failure."""
+        try:
+            await checkout_and_pull(repo_path, default_branch)
+        except Exception:
+            self._log(
+                "warn",
+                f"Failed to restore {default_branch} after auto-merge failure",
+                task_id=task_id,
+            )
 
     async def advance_task(
         self,
@@ -863,8 +892,8 @@ class PipelineEngine:
                     proj_row = database.get_project(conn, pid)
                     project_cache[pid] = _row_to_dict(proj_row) if proj_row else None
                 project = project_cache[pid]
-                if project and project.get("stage_timeouts"):
-                    proj_timeouts = json.loads(project["stage_timeouts"])
+                if project:
+                    proj_timeouts = _parse_stage_timeouts(project)
 
             timeout_seconds = resolve_stage_timeout(
                 sr["stage"], proj_timeouts, self.settings.engine

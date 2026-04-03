@@ -409,6 +409,25 @@ class TestPostReview:
         assert "Bouncing" in result.stderr
         assert "actionable item(s)" in result.stderr
 
+    def test_pass_verdict_with_issues_keyword_in_body(
+        self, tmp_path: Path
+    ) -> None:
+        """AC 5: PASS verdict with the word 'issues' in the body text exits 0."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.md"),
+            """\
+            # Review: Widget feature
+
+            ## Verdict: PASS
+
+            No issues found. All tests pass.
+            """,
+        )
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
     def test_passes_with_multiline_pass_verdict(self, tmp_path: Path) -> None:
         """Verdict heading on one line, PASS value on the next non-blank line."""
         repo = str(tmp_path)

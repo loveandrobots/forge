@@ -17,6 +17,7 @@ from forge.engine import (
     PipelineEngine,
     _make_branch_name,
     _next_stage,
+    _parse_stage_timeouts,
 )
 from forge.gate_runner import GateResult
 
@@ -4043,3 +4044,390 @@ class TestEpicReview:
         runs = db.list_stage_runs(conn, task_id=epic_id, status="queued")
         assert len(runs) == 1
         assert runs[0]["stage"] == "review"
+
+
+# ---------------------------------------------------------------------------
+# AC 1: _parse_stage_timeouts helper
+# ---------------------------------------------------------------------------
+
+
+class TestParseStageTimeouts:
+    def test_returns_dict_when_present(self) -> None:
+        project = {"stage_timeouts": '{"implement": 900}'}
+        result = _parse_stage_timeouts(project)
+        assert result == {"implement": 900}
+
+    def test_returns_none_when_null(self) -> None:
+        project = {"stage_timeouts": None}
+        assert _parse_stage_timeouts(project) is None
+
+    def test_returns_none_when_missing(self) -> None:
+        project = {}
+        assert _parse_stage_timeouts(project) is None
+
+    def test_returns_none_when_empty_string(self) -> None:
+        project = {"stage_timeouts": ""}
+        assert _parse_stage_timeouts(project) is None
+
+
+# ---------------------------------------------------------------------------
+# AC 2: Auto-merge error context tests
+# ---------------------------------------------------------------------------
+
+
+class TestAutoMergeErrorContext2:
+    @pytest.mark.asyncio
+    async def test_auto_merge_checkout_failure_includes_stderr(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 2: checkout_and_pull failure stderr appears in run_log."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn, task_id, status="active", current_stage="review",
+            branch_name="forge/test-branch",
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        task = dict(db.get_task(conn, task_id))
+
+        cop_fail = GitResult(
+            success=False, stdout="", stderr="fatal: not a git repo", returncode=128,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=cop_fail),
+        ):
+            result = await engine._auto_merge(conn, task, project)
+
+        assert result is False
+        logs = db.get_logs(conn, task_id=task_id)
+        error_logs = [r for r in logs if r["level"] == "error"]
+        assert any("fatal: not a git repo" in r["message"] for r in error_logs)
+
+    @pytest.mark.asyncio
+    async def test_auto_merge_rebase_failure_includes_stderr(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 2: rebase_branch failure stderr appears in run_log."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn, task_id, status="active", current_stage="review",
+            branch_name="forge/test-branch",
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        task = dict(db.get_task(conn, task_id))
+
+        cop_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
+        rebase_fail = GitResult(
+            success=False, stdout="", stderr="CONFLICT: merge conflict in foo.py", returncode=1,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=cop_ok),
+            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=rebase_fail),
+        ):
+            result = await engine._auto_merge(conn, task, project)
+
+        assert result is False
+        logs = db.get_logs(conn, task_id=task_id)
+        error_logs = [r for r in logs if r["level"] == "error"]
+        assert any("CONFLICT" in r["message"] for r in error_logs)
+
+    @pytest.mark.asyncio
+    async def test_auto_merge_ff_merge_failure_includes_stderr(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 2: ff_merge failure stderr appears in run_log."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn, task_id, status="active", current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        # Create an implement stage_run for the gate env
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="passed",
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        task = dict(db.get_task(conn, task_id))
+
+        cop_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
+        rebase_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
+        gate_pass = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-implement.sh", duration_seconds=1.0,
+        )
+        merge_fail = GitResult(
+            success=False, stdout="", stderr="not possible to fast-forward", returncode=1,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=cop_ok),
+            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=rebase_ok),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_pass),
+            patch("forge.engine.ff_merge", new_callable=AsyncMock, return_value=merge_fail),
+        ):
+            result = await engine._auto_merge(conn, task, project)
+
+        assert result is False
+        logs = db.get_logs(conn, task_id=task_id)
+        error_logs = [r for r in logs if r["level"] == "error"]
+        assert any("not possible to fast-forward" in r["message"] for r in error_logs)
+
+
+# ---------------------------------------------------------------------------
+# AC 4: Multi-bounce attempt numbering
+# ---------------------------------------------------------------------------
+
+
+class TestMultiBounceAttemptNumbering:
+    @pytest.mark.asyncio
+    async def test_multi_bounce_attempt_numbering(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 4: After two review bounces, implement attempts are numbered 1, 2, 3."""
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, max_retries=10,
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+
+        gate_result = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="ISSUES",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        # Implement attempt 1 passes
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="passed",
+        )
+        # Review attempt 1 bounces
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced",
+        )
+
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            task = dict(db.get_task(conn, task_id))
+            await engine.bounce_task(conn, task, "review", gate_result)
+
+            # Should create implement attempt 2
+            queued = db.list_stage_runs(conn, task_id=task_id, stage="implement", status="queued")
+            assert len(queued) == 1
+            assert queued[0]["attempt"] == 2
+
+            # Mark implement attempt 2 as passed
+            db.update_stage_run(conn, queued[0]["id"], status="passed")
+
+            # Review attempt 2 bounces
+            db.insert_stage_run(
+                conn, task_id=task_id, stage="review", attempt=2, status="bounced",
+            )
+
+            task = dict(db.get_task(conn, task_id))
+            await engine.bounce_task(conn, task, "review", gate_result)
+
+            # Should create implement attempt 3
+            queued2 = db.list_stage_runs(conn, task_id=task_id, stage="implement", status="queued")
+            assert len(queued2) == 1
+            assert queued2[0]["attempt"] == 3
+
+
+# ---------------------------------------------------------------------------
+# AC 6: migrate() does not override pause_after_completion
+# ---------------------------------------------------------------------------
+
+
+class TestMigrateDoesNotOverridePause:
+    def test_migrate_does_not_override_pause_after_completion(self) -> None:
+        """AC 6: Calling migrate() again must not re-enable pause_after_completion."""
+        c = db.get_connection(":memory:")
+        db.migrate(c)
+
+        # Insert a project named "Forge" with pause enabled
+        pid = db.insert_project(c, name="Forge", repo_path="/tmp/forge")
+        # Manually disable pause
+        c.execute("UPDATE projects SET pause_after_completion = 0 WHERE id = ?", (pid,))
+        c.commit()
+
+        # Verify it's off
+        proj = db.get_project(c, pid)
+        assert proj["pause_after_completion"] == 0
+
+        # Run migrate again
+        db.migrate(c)
+
+        # Should still be off
+        proj = db.get_project(c, pid)
+        assert proj["pause_after_completion"] == 0
+        c.close()
+
+
+# ---------------------------------------------------------------------------
+# AC 8: Auto-pause triggers on timeout path
+# ---------------------------------------------------------------------------
+
+
+class TestAutoPauseOnTimeout:
+    @pytest.mark.asyncio
+    async def test_auto_pause_triggers_on_timeout_path(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+    ) -> None:
+        """AC 8: Engine auto-pauses when a timeout causes needs_human on a pause-enabled project."""
+        pause_project_id = db.insert_project(
+            conn,
+            name="PauseTimeoutProject",
+            repo_path="/tmp/repo",
+            gate_dir="/tmp/repo/gates",
+            pause_after_completion=True,
+        )
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(
+            conn,
+            project_id=pause_project_id,
+            title="Timeout Task",
+            priority=1,
+            max_retries=0,
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        # Create a running stage_run that started long ago
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running",
+        )
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        assert engine.running is False
+
+
+# ---------------------------------------------------------------------------
+# AC 11: Auto-merge restores default branch on failure
+# ---------------------------------------------------------------------------
+
+
+class TestAutoMergeRestoresDefaultBranch:
+    @pytest.mark.asyncio
+    async def test_auto_merge_restores_default_branch_on_gate_failure(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 11: After gate failure post-rebase, cleanup checkout restores default branch."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn, task_id, status="active", current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="passed",
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        task = dict(db.get_task(conn, task_id))
+
+        cop_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
+        rebase_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
+        gate_fail = GateResult(
+            passed=False, exit_code=1, stdout="", stderr="gate failed",
+            gate_name="post-implement.sh", duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        checkout_mock = AsyncMock(return_value=cop_ok)
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.checkout_and_pull", checkout_mock),
+            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=rebase_ok),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_fail),
+        ):
+            result = await engine._auto_merge(conn, task, project)
+
+        assert result is False
+        # checkout_and_pull should be called twice: once at step 1, once for cleanup
+        assert checkout_mock.call_count == 2
+        # Second call should be the cleanup with default branch
+        assert checkout_mock.call_args_list[1][0] == ("/tmp/repo", "main")
+
+    @pytest.mark.asyncio
+    async def test_auto_merge_restores_default_branch_on_merge_failure(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 11: After ff_merge failure, cleanup checkout restores default branch."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn, task_id, status="active", current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="passed",
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        task = dict(db.get_task(conn, task_id))
+
+        cop_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
+        rebase_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
+        gate_pass = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-implement.sh", duration_seconds=1.0,
+        )
+        merge_fail = GitResult(
+            success=False, stdout="", stderr="ff failed", returncode=1,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        checkout_mock = AsyncMock(return_value=cop_ok)
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.checkout_and_pull", checkout_mock),
+            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=rebase_ok),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_pass),
+            patch("forge.engine.ff_merge", new_callable=AsyncMock, return_value=merge_fail),
+        ):
+            result = await engine._auto_merge(conn, task, project)
+
+        assert result is False
+        # checkout_and_pull called 3 times: step 1, step 4, cleanup
+        assert checkout_mock.call_count == 3

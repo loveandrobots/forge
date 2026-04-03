@@ -1,7 +1,7 @@
 {% if status.running %}
 <span class="engine-status-dot running"></span>
 {% if status.current_task_title %}
-<span class="engine-status-text">Running — working on: {{ status.current_task_title }} ({{ status.current_stage }})</span>
+<span class="engine-status-text">Running — working on: {{ status.current_task_title }}{% if status.current_stage %} ({{ status.current_stage }}){% endif %}</span>
 {% else %}
 <span class="engine-status-text">Running — idle</span>
 {% endif %}

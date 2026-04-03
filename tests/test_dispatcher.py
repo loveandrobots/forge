@@ -552,3 +552,58 @@ class TestDispatchResult:
         assert r.output == "out"
         assert r.duration_seconds == 2.5
         assert r.tokens_used == 100
+
+
+# ---------------------------------------------------------------------------
+# AC 3: Rebase abort failure preserves original error
+# ---------------------------------------------------------------------------
+
+
+class TestRebaseAbortFailure:
+    @pytest.mark.asyncio
+    async def test_rebase_abort_failure_preserves_original_error(self, git_repo):
+        """AC 3: When rebase conflicts and abort also fails, stderr has both messages."""
+        # Create a conflict scenario
+        await create_branch(git_repo, "forge/abort-test", "main")
+        with open(os.path.join(git_repo, "README.md"), "w") as f:
+            f.write("feature change for abort test")
+        subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feature abort-test"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+        subprocess.run(["git", "checkout", "main"], cwd=git_repo, capture_output=True)
+        with open(os.path.join(git_repo, "README.md"), "w") as f:
+            f.write("main conflicting change for abort test")
+        subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "main conflict abort-test"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+
+        # Mock the abort subprocess to also fail
+        original_create_subprocess_exec = asyncio.create_subprocess_exec
+
+        call_count = 0
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # The third call is the rebase --abort (1: checkout, 2: rebase, 3: abort)
+            if call_count == 3 and args[1:3] == ("rebase", "--abort"):
+                mock_proc = MagicMock()
+                mock_proc.communicate = AsyncMock(
+                    return_value=(b"", b"abort failed: lock held")
+                )
+                mock_proc.returncode = 1
+                return mock_proc
+            return await original_create_subprocess_exec(*args, **kwargs)
+
+        with patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_create_subprocess_exec):
+            result = await rebase_branch(git_repo, "forge/abort-test", "main")
+
+        assert result.success is False
+        assert "(abort also failed:" in result.stderr
+        assert "abort failed: lock held" in result.stderr
