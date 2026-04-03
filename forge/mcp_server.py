@@ -10,6 +10,7 @@ from collections import deque
 from mcp.server.fastmcp import FastMCP
 
 from forge import config, database
+from forge.config import FLOW_STAGES, STAGES, VALID_EPIC_STATUSES
 
 mcp = FastMCP("forge")
 
@@ -354,6 +355,280 @@ def create_task_batch(
             row = database.get_task(conn, task_id)
             result.append(_row_to_dict(row))
         return result
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def update_task(
+    task_id: str,
+    title: str | None = None,
+    description: str | None = None,
+    priority: int | None = None,
+    flow: str | None = None,
+    epic_status: str | None = None,
+) -> dict:
+    """Update task metadata. Returns the updated task dict, or an error dict on failure.
+
+    Cannot change status via this tool — use activate, pause, resume, retry, or cancel instead.
+    Flow can only be changed on backlog tasks. epic_status can only be set on epic-flow tasks.
+    """
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+
+        updates: dict = {}
+        if title is not None:
+            updates["title"] = title
+        if description is not None:
+            updates["description"] = description
+        if priority is not None:
+            updates["priority"] = priority
+        if flow is not None:
+            updates["flow"] = flow
+        if epic_status is not None:
+            updates["epic_status"] = epic_status
+
+        if "flow" in updates and row["status"] != "backlog":
+            return {"error": "Cannot change flow on a task that is not in backlog status"}
+
+        if "epic_status" in updates:
+            if updates["epic_status"] not in VALID_EPIC_STATUSES:
+                return {
+                    "error": f"Invalid epic_status: {updates['epic_status']!r}. "
+                    f"Must be one of {VALID_EPIC_STATUSES}"
+                }
+            effective_flow = updates.get("flow", row["flow"])
+            if effective_flow != "epic":
+                return {"error": "epic_status can only be set on tasks with flow 'epic'"}
+
+        if not updates:
+            return _row_to_dict(row)
+
+        database.update_task(conn, task_id, **updates)
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_dict(updated_row)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def delete_task(task_id: str) -> dict:
+    """Delete a backlog task. Returns {"deleted": True} or an error dict."""
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+        if row["status"] != "backlog":
+            return {"error": "Only backlog tasks can be deleted"}
+
+        database.delete_task(conn, task_id)
+        return {"deleted": True}
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def activate_task(task_id: str) -> dict:
+    """Move a backlog task into the pipeline. Returns the updated task dict or error dict."""
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+        if row["status"] != "backlog":
+            return {"error": "Only backlog tasks can be activated"}
+
+        flow = row["flow"] if row["flow"] else "standard"
+        first_stage = FLOW_STAGES.get(flow, STAGES)[0]
+        database.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage=first_stage,
+            attempt=1,
+            status="queued",
+        )
+        database.update_task(conn, task_id, status="active", current_stage=first_stage)
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_dict(updated_row)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def pause_task(task_id: str) -> dict:
+    """Pause an active task. Returns the updated task dict or error dict."""
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+        if row["status"] != "active":
+            return {"error": "Only active tasks can be paused"}
+
+        database.update_task(conn, task_id, status="paused")
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_dict(updated_row)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def resume_task(task_id: str) -> dict:
+    """Resume a needs_human task. Returns the updated task dict or error dict."""
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+        if row["status"] != "needs_human":
+            return {
+                "error": "Only needs_human tasks can be resumed "
+                "(cancelled tasks cannot be resumed)"
+            }
+
+        stage = row["current_stage"]
+        if not stage:
+            flow = row["flow"] if row["flow"] else "standard"
+            stage = FLOW_STAGES.get(flow, STAGES)[0]
+
+        retry_count = database.get_retry_count(conn, task_id, stage)
+        database.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage=stage,
+            attempt=retry_count + 1,
+            status="queued",
+        )
+        database.update_task(conn, task_id, status="active")
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_dict(updated_row)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def retry_task(task_id: str) -> dict:
+    """Force retry the current stage of a task. Returns the updated task dict or error dict."""
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+        if row["status"] not in ("active", "needs_human"):
+            return {
+                "error": "Only active or needs_human tasks can be retried "
+                "(cancelled tasks cannot be retried)"
+            }
+
+        stage = row["current_stage"]
+        if not stage:
+            flow = row["flow"] if row["flow"] else "standard"
+            stage = FLOW_STAGES.get(flow, STAGES)[0]
+
+        retry_count = database.get_retry_count(conn, task_id, stage)
+        database.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage=stage,
+            attempt=retry_count + 1,
+            status="queued",
+        )
+        database.update_task(conn, task_id, status="active")
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_dict(updated_row)
+    finally:
+        conn.close()
+
+
+_RESETTABLE_STATUSES = {"needs_human", "failed", "paused"}
+
+
+@mcp.tool()
+def reset_task(task_id: str, from_stage: str | None = None) -> dict:
+    """Reset a task to a clean state, wiping stage_run history.
+
+    Only needs_human, failed, or paused tasks can be reset.
+    Optional from_stage sets which stage to restart from (defaults to first stage in flow).
+    Returns the updated task dict or error dict.
+    """
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+
+        flow = row["flow"] if row["flow"] else "standard"
+        flow_stages = FLOW_STAGES.get(flow, STAGES)
+        target_stage = from_stage if from_stage else flow_stages[0]
+        if target_stage not in flow_stages:
+            return {
+                "error": f"Invalid stage '{target_stage}' for flow '{flow}'. "
+                f"Valid stages: {flow_stages}"
+            }
+
+        if row["status"] not in _RESETTABLE_STATUSES:
+            return {
+                "error": f"Cannot reset a task with status '{row['status']}'. "
+                "Only needs_human, failed, or paused tasks can be reset."
+            }
+
+        # Block reset if task has a currently running stage_run
+        running = database.list_stage_runs(conn, task_id=task_id, status="running")
+        if running:
+            return {"error": "Cannot reset task while a stage run is in progress."}
+
+        database.reset_task(conn, task_id, target_stage, row["title"])
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_dict(updated_row)
+    finally:
+        conn.close()
+
+
+_CANCELLABLE_STATUSES = {"backlog", "active", "paused", "needs_human"}
+
+
+@mcp.tool()
+def cancel_task(task_id: str, reason: str | None = None) -> dict:
+    """Cancel a task. Returns the updated task dict or error dict.
+
+    Only backlog, active, paused, or needs_human tasks can be cancelled.
+    Optional reason is recorded in the log.
+    """
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+        if row["status"] not in _CANCELLABLE_STATUSES:
+            return {
+                "error": f"Cannot cancel a task with status '{row['status']}'. "
+                "Only backlog, active, paused, or needs_human tasks can be cancelled."
+            }
+
+        # Mark any running stage runs as errored
+        running_runs = database.list_stage_runs(
+            conn, task_id=task_id, status="running"
+        )
+        for sr in running_runs:
+            database.update_stage_run(
+                conn, sr["id"], status="error", error_message="Task cancelled"
+            )
+
+        # Update task status
+        database.update_task(conn, task_id, status="cancelled")
+
+        # Log the cancellation
+        message = "Task cancelled"
+        if reason:
+            message = f"Task cancelled: {reason}"
+        database.insert_log(conn, level="info", task_id=task_id, message=message)
+
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_dict(updated_row)
     finally:
         conn.close()
 

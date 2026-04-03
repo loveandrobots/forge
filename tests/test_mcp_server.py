@@ -10,13 +10,21 @@ from mcp.server.fastmcp import FastMCP
 
 from forge import database
 from forge.mcp_server import (
+    activate_task,
+    cancel_task,
     create_task,
     create_task_batch,
+    delete_task,
     get_completed_tasks,
     get_project_backlog,
     get_task_detail,
     list_projects,
     mcp,
+    pause_task,
+    reset_task,
+    resume_task,
+    retry_task,
+    update_task,
 )
 
 
@@ -354,6 +362,14 @@ class TestServerInit:
         assert "get_completed_tasks" in tool_names
         assert "create_task" in tool_names
         assert "create_task_batch" in tool_names
+        assert "update_task" in tool_names
+        assert "delete_task" in tool_names
+        assert "activate_task" in tool_names
+        assert "pause_task" in tool_names
+        assert "resume_task" in tool_names
+        assert "retry_task" in tool_names
+        assert "reset_task" in tool_names
+        assert "cancel_task" in tool_names
 
 
 class TestCreateTask:
@@ -725,3 +741,305 @@ class TestCreateTaskBatch:
         assert isinstance(result, dict)
         assert "error" in result
         assert "different project" in result["error"].lower()
+
+
+class TestUpdateTask:
+    def test_update_title(self, project_id):
+        task = create_task(project_id=project_id, title="Original")
+        result = update_task(task_id=task["id"], title="Updated")
+        assert result["title"] == "Updated"
+
+    def test_update_description_and_priority(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = update_task(task_id=task["id"], description="New desc", priority=10)
+        assert result["description"] == "New desc"
+        assert result["priority"] == 10
+
+    def test_update_flow_on_backlog(self, project_id):
+        task = create_task(project_id=project_id, title="Task", flow="standard")
+        result = update_task(task_id=task["id"], flow="quick")
+        assert result["flow"] == "quick"
+
+    def test_update_flow_on_non_backlog_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        result = update_task(task_id=task["id"], flow="quick")
+        assert "error" in result
+        assert "backlog" in result["error"].lower()
+
+    def test_update_epic_status_on_epic(self, project_id):
+        task = create_task(project_id=project_id, title="Epic", flow="epic")
+        result = update_task(task_id=task["id"], epic_status="decomposed")
+        assert result["epic_status"] == "decomposed"
+
+    def test_update_epic_status_on_non_epic_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task", flow="standard")
+        result = update_task(task_id=task["id"], epic_status="decomposed")
+        assert "error" in result
+        assert "epic" in result["error"].lower()
+
+    def test_update_invalid_epic_status_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Epic", flow="epic")
+        result = update_task(task_id=task["id"], epic_status="invalid_value")
+        assert "error" in result
+        assert "epic_status" in result["error"].lower()
+
+    def test_update_nonexistent_task(self):
+        result = update_task(task_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    def test_update_no_changes(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = update_task(task_id=task["id"])
+        assert result["title"] == "Task"
+        assert "error" not in result
+
+
+class TestDeleteTask:
+    def test_delete_backlog_task(self, project_id):
+        task = create_task(project_id=project_id, title="To Delete")
+        result = delete_task(task_id=task["id"])
+        assert result == {"deleted": True}
+        # Verify gone
+        detail = get_task_detail(task["id"])
+        assert detail is None
+
+    def test_delete_active_task_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        result = delete_task(task_id=task["id"])
+        assert "error" in result
+        assert "backlog" in result["error"].lower()
+
+    def test_delete_nonexistent_task(self):
+        result = delete_task(task_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+
+class TestActivateTask:
+    def test_activate_backlog_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = activate_task(task_id=task["id"])
+        assert result["status"] == "active"
+        assert result["current_stage"] == "spec"
+
+    def test_activate_quick_flow(self, project_id):
+        task = create_task(project_id=project_id, title="Quick Task", flow="quick")
+        result = activate_task(task_id=task["id"])
+        assert result["status"] == "active"
+        assert result["current_stage"] == "implement"
+
+    def test_activate_non_backlog_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        result = activate_task(task_id=task["id"])
+        assert "error" in result
+        assert "backlog" in result["error"].lower()
+
+    def test_activate_nonexistent_task(self):
+        result = activate_task(task_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+
+class TestPauseTask:
+    def test_pause_active_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        result = pause_task(task_id=task["id"])
+        assert result["status"] == "paused"
+
+    def test_pause_non_active_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = pause_task(task_id=task["id"])
+        assert "error" in result
+        assert "active" in result["error"].lower()
+
+    def test_pause_nonexistent_task(self):
+        result = pause_task(task_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+
+class TestResumeTask:
+    def test_resume_needs_human_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        # Set to needs_human
+        conn = database.get_connection()
+        try:
+            database.update_task(conn, task["id"], status="needs_human")
+        finally:
+            conn.close()
+        result = resume_task(task_id=task["id"])
+        assert result["status"] == "active"
+
+    def test_resume_non_needs_human_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = resume_task(task_id=task["id"])
+        assert "error" in result
+        assert "needs_human" in result["error"].lower()
+
+    def test_resume_nonexistent_task(self):
+        result = resume_task(task_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+
+class TestRetryTask:
+    def test_retry_active_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        result = retry_task(task_id=task["id"])
+        assert result["status"] == "active"
+        # Verify new stage_run created
+        detail = get_task_detail(task["id"])
+        assert len(detail["stage_runs"]) == 2
+
+    def test_retry_needs_human_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        conn = database.get_connection()
+        try:
+            database.update_task(conn, task["id"], status="needs_human")
+        finally:
+            conn.close()
+        result = retry_task(task_id=task["id"])
+        assert result["status"] == "active"
+
+    def test_retry_backlog_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = retry_task(task_id=task["id"])
+        assert "error" in result
+
+    def test_retry_nonexistent_task(self):
+        result = retry_task(task_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+
+class TestResetTask:
+    def test_reset_failed_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        conn = database.get_connection()
+        try:
+            database.update_task(conn, task["id"], status="failed")
+        finally:
+            conn.close()
+        result = reset_task(task_id=task["id"])
+        assert result["status"] == "active"
+        assert result["current_stage"] == "spec"
+
+    def test_reset_with_from_stage(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        conn = database.get_connection()
+        try:
+            database.update_task(conn, task["id"], status="failed")
+        finally:
+            conn.close()
+        result = reset_task(task_id=task["id"], from_stage="plan")
+        assert result["current_stage"] == "plan"
+
+    def test_reset_invalid_stage_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        conn = database.get_connection()
+        try:
+            database.update_task(conn, task["id"], status="failed")
+        finally:
+            conn.close()
+        result = reset_task(task_id=task["id"], from_stage="nonexistent_stage")
+        assert "error" in result
+        assert "invalid stage" in result["error"].lower()
+
+    def test_reset_active_task_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        result = reset_task(task_id=task["id"])
+        assert "error" in result
+        assert "status" in result["error"].lower()
+
+    def test_reset_with_running_stage_run_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        conn = database.get_connection()
+        try:
+            # Set status to paused (resettable) but leave a running stage_run
+            database.update_task(conn, task["id"], status="paused")
+            # Update the existing queued stage_run to running
+            stage_runs = database.list_stage_runs(conn, task_id=task["id"])
+            database.update_stage_run(conn, stage_runs[0]["id"], status="running")
+        finally:
+            conn.close()
+        result = reset_task(task_id=task["id"])
+        assert "error" in result
+        assert "in progress" in result["error"].lower()
+
+    def test_reset_nonexistent_task(self):
+        result = reset_task(task_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+
+class TestCancelTask:
+    def test_cancel_backlog_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = cancel_task(task_id=task["id"])
+        assert result["status"] == "cancelled"
+
+    def test_cancel_active_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        # Set the stage_run to running
+        conn = database.get_connection()
+        try:
+            stage_runs = database.list_stage_runs(conn, task_id=task["id"])
+            database.update_stage_run(conn, stage_runs[0]["id"], status="running")
+        finally:
+            conn.close()
+        result = cancel_task(task_id=task["id"])
+        assert result["status"] == "cancelled"
+        # Verify running stage_runs marked as error
+        conn = database.get_connection()
+        try:
+            stage_runs = database.list_stage_runs(conn, task_id=task["id"])
+            for sr in stage_runs:
+                if sr["id"] == stage_runs[0]["id"]:
+                    assert sr["status"] == "error"
+        finally:
+            conn.close()
+
+    def test_cancel_with_reason(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = cancel_task(task_id=task["id"], reason="No longer needed")
+        assert result["status"] == "cancelled"
+        # Verify log entry
+        conn = database.get_connection()
+        try:
+            logs = conn.execute(
+                "SELECT message FROM run_log WHERE task_id = ?", (task["id"],)
+            ).fetchall()
+            messages = [log[0] for log in logs]
+            assert any("No longer needed" in m for m in messages)
+        finally:
+            conn.close()
+
+    def test_cancel_done_task_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        conn = database.get_connection()
+        try:
+            database.update_task(conn, task["id"], status="done")
+        finally:
+            conn.close()
+        result = cancel_task(task_id=task["id"])
+        assert "error" in result
+        assert "status" in result["error"].lower()
+
+    def test_cancel_nonexistent_task(self):
+        result = cancel_task(task_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
