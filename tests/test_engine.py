@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
@@ -2040,8 +2041,6 @@ class TestFollowUpMaxRetries:
         tmp_path,
     ) -> None:
         """Follow-up tasks created by _process_follow_ups use the configured default_max_retries."""
-        import json
-
         custom_retries = 8
         custom_settings = Settings(engine=EngineSettings(default_max_retries=custom_retries))
         engine = PipelineEngine(custom_settings, ":memory:")
@@ -2072,8 +2071,6 @@ class TestFollowUpMaxRetries:
         tmp_path,
     ) -> None:
         """Without custom config, follow-up tasks get the built-in default (3)."""
-        import json
-
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
@@ -2104,9 +2101,6 @@ class TestEpicDecompositionMaxRetries:
         tmp_path,
     ) -> None:
         """Child tasks from epic decomposition use the configured default_max_retries."""
-        import json
-        import os
-
         custom_retries = 10
         custom_settings = Settings(engine=EngineSettings(default_max_retries=custom_retries))
 
@@ -2142,9 +2136,6 @@ class TestEpicDecompositionMaxRetries:
         tmp_path,
     ) -> None:
         """Without custom config, epic children get the built-in default (3)."""
-        import json
-        import os
-
         db.update_project(conn, project_id, repo_path=str(tmp_path))
         project = dict(db.get_project(conn, project_id))
 
