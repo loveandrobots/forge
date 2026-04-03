@@ -17,6 +17,9 @@ from forge.mcp_server import (
     delete_task,
     get_completed_tasks,
     get_project_backlog,
+    get_project_config,
+    get_project_gate_scripts,
+    get_project_skills,
     get_task_detail,
     list_projects,
     mcp,
@@ -1057,3 +1060,228 @@ class TestCancelTask:
         result = cancel_task(task_id="nonexistent-id")
         assert "error" in result
         assert "not found" in result["error"].lower()
+
+
+class TestGetProjectSkills:
+    def test_returns_skill_files(self, tmp_path):
+        """Test get_project_skills returns all skill files for a project with configured skills."""
+        skills_dir = tmp_path / ".claude" / "skills"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "skill-a.md").write_text("Skill A content")
+        (skills_dir / "skill-b.md").write_text("Skill B content")
+
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="SkillProject",
+                repo_path=str(tmp_path),
+                skill_refs=["skill-a.md", "skill-b.md"],
+            )
+        finally:
+            conn.close()
+
+        result = get_project_skills(project_id=pid)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        names = {r["name"] for r in result}
+        assert names == {"skill-a.md", "skill-b.md"}
+        for entry in result:
+            assert "content" in entry
+            if entry["name"] == "skill-a.md":
+                assert entry["content"] == "Skill A content"
+            else:
+                assert entry["content"] == "Skill B content"
+
+    def test_returns_empty_list_when_no_skill_refs(self):
+        """Test get_project_skills returns empty list for project with no skill_refs."""
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="NoSkillsProject",
+                repo_path="/tmp/no-skills",
+            )
+        finally:
+            conn.close()
+
+        result = get_project_skills(project_id=pid)
+        assert result == []
+
+    def test_returns_empty_list_when_skill_refs_empty_list(self):
+        """Test get_project_skills returns empty list when skill_refs is an empty list."""
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="EmptySkillsProject",
+                repo_path="/tmp/empty-skills",
+                skill_refs=[],
+            )
+        finally:
+            conn.close()
+
+        result = get_project_skills(project_id=pid)
+        assert result == []
+
+    def test_nonexistent_project_returns_error(self):
+        """Test requesting skills for non-existent project returns clear error message."""
+        fake_id = "00000000-0000-0000-0000-000000000000"
+        result = get_project_skills(project_id=fake_id)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert fake_id in result["error"]
+
+    def test_missing_skill_file_included_with_error(self, tmp_path):
+        """Test that missing skill files are included with an error field."""
+        skills_dir = tmp_path / ".claude" / "skills"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "exists.md").write_text("Exists content")
+
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="MissingSkillProject",
+                repo_path=str(tmp_path),
+                skill_refs=["exists.md", "missing.md"],
+            )
+        finally:
+            conn.close()
+
+        result = get_project_skills(project_id=pid)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        by_name = {r["name"]: r for r in result}
+        assert "content" in by_name["exists.md"]
+        assert by_name["exists.md"]["content"] == "Exists content"
+        assert "error" in by_name["missing.md"]
+
+
+class TestGetProjectConfig:
+    def test_returns_full_config(self):
+        """Test get_project_config returns correct configuration values."""
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="ConfigProject",
+                repo_path="/tmp/config-test",
+                gate_dir="gates",
+                skill_refs=["a.md"],
+                default_branch="main",
+                pause_after_completion=True,
+                stage_timeouts={"implement": 1200},
+                config={"key": "val"},
+            )
+        finally:
+            conn.close()
+
+        result = get_project_config(project_id=pid)
+        assert result["gate_dir"] == "gates"
+        assert result["skill_refs"] == ["a.md"]
+        assert result["default_branch"] == "main"
+        assert result["pause_after_completion"] == 1
+        assert result["stage_timeouts"] == {"implement": 1200}
+        assert result["config"] == {"key": "val"}
+
+    def test_returns_config_with_defaults(self):
+        """Test get_project_config returns correct defaults for minimal project."""
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="DefaultConfigProject",
+                repo_path="/tmp/default-config",
+            )
+        finally:
+            conn.close()
+
+        result = get_project_config(project_id=pid)
+        assert result["gate_dir"] == "gates"
+        assert result["default_branch"] == "main"
+        assert result["skill_refs"] is None
+        assert result["stage_timeouts"] is None
+        assert result["pause_after_completion"] == 0
+
+    def test_nonexistent_project_returns_error(self):
+        """Test requesting config for non-existent project returns clear error message."""
+        fake_id = "00000000-0000-0000-0000-000000000000"
+        result = get_project_config(project_id=fake_id)
+        assert "error" in result
+        assert fake_id in result["error"]
+
+
+class TestGetProjectGateScripts:
+    def test_returns_gate_scripts(self, tmp_path):
+        """Test get_project_gate_scripts returns gate script contents."""
+        gate_dir = tmp_path / "gates"
+        gate_dir.mkdir()
+        (gate_dir / "post-spec.sh").write_text("#!/bin/bash\nexit 0")
+        (gate_dir / "post-plan.sh").write_text("#!/bin/bash\nexit 0")
+
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="GateProject",
+                repo_path=str(tmp_path),
+                gate_dir="gates",
+            )
+        finally:
+            conn.close()
+
+        result = get_project_gate_scripts(project_id=pid)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        names = {r["name"] for r in result}
+        assert names == {"post-spec.sh", "post-plan.sh"}
+        for entry in result:
+            assert entry["content"] == "#!/bin/bash\nexit 0"
+
+    def test_ignores_non_sh_files(self, tmp_path):
+        """Test that non-.sh files in gate dir are ignored."""
+        gate_dir = tmp_path / "gates"
+        gate_dir.mkdir()
+        (gate_dir / "post-spec.sh").write_text("#!/bin/bash\nexit 0")
+        (gate_dir / "helper.py").write_text("print('hello')")
+
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="GateFilterProject",
+                repo_path=str(tmp_path),
+                gate_dir="gates",
+            )
+        finally:
+            conn.close()
+
+        result = get_project_gate_scripts(project_id=pid)
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["name"] == "post-spec.sh"
+
+    def test_returns_empty_list_when_no_gate_dir(self):
+        """Test that missing gate directory returns empty list."""
+        conn = database.get_connection()
+        try:
+            pid = database.insert_project(
+                conn,
+                name="NoGateProject",
+                repo_path="/tmp/no-gates",
+                gate_dir="nonexistent",
+            )
+        finally:
+            conn.close()
+
+        result = get_project_gate_scripts(project_id=pid)
+        assert result == []
+
+    def test_nonexistent_project_returns_error(self):
+        """Test requesting gates for non-existent project returns clear error message."""
+        fake_id = "00000000-0000-0000-0000-000000000000"
+        result = get_project_gate_scripts(project_id=fake_id)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert fake_id in result["error"]

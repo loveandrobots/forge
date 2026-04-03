@@ -637,6 +637,117 @@ def cancel_task(task_id: str, reason: str | None = None) -> dict:
         conn.close()
 
 
+@mcp.tool()
+def get_project_skills(project_id: str) -> list[dict] | dict:
+    """Get all skill file contents for a project.
+
+    Reads skill files from {repo_path}/.claude/skills/{skill_ref} for each
+    skill_ref configured on the project. Returns a list of dicts with 'name'
+    and 'content' keys, or an error dict if the project doesn't exist.
+    """
+    conn = database.get_connection()
+    try:
+        project = database.get_project(conn, project_id)
+        if project is None:
+            return {"error": f"Project not found: {project_id}"}
+
+        raw = project["skill_refs"]
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            try:
+                skill_refs = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        else:
+            skill_refs = raw
+
+        if not skill_refs:
+            return []
+
+        import os
+
+        repo_path = project["repo_path"]
+        results = []
+        for ref in skill_refs:
+            path = os.path.join(repo_path, ".claude", "skills", ref)
+            try:
+                with open(path) as f:
+                    content = f.read()
+                results.append({"name": ref, "content": content})
+            except OSError as exc:
+                results.append({"name": ref, "error": str(exc)})
+        return results
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def get_project_config(project_id: str) -> dict:
+    """Get configuration values for a project.
+
+    Returns a dict with gate_dir, skill_refs, default_branch,
+    pause_after_completion, stage_timeouts, and config fields.
+    Returns an error dict if the project doesn't exist.
+    """
+    conn = database.get_connection()
+    try:
+        project = database.get_project(conn, project_id)
+        if project is None:
+            return {"error": f"Project not found: {project_id}"}
+
+        d = _row_to_dict(dict(project))
+        return {
+            "gate_dir": d["gate_dir"],
+            "skill_refs": d.get("skill_refs"),
+            "default_branch": d["default_branch"],
+            "pause_after_completion": d["pause_after_completion"],
+            "stage_timeouts": d.get("stage_timeouts"),
+            "config": d.get("config"),
+        }
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def get_project_gate_scripts(project_id: str) -> list[dict] | dict:
+    """Get gate script contents for a project.
+
+    Reads all *.sh files from {repo_path}/{gate_dir}/ and returns a list of
+    dicts with 'name' and 'content' keys. Returns an error dict if the project
+    doesn't exist, or an empty list if the gate directory is missing.
+    """
+    import os
+
+    conn = database.get_connection()
+    try:
+        project = database.get_project(conn, project_id)
+        if project is None:
+            return {"error": f"Project not found: {project_id}"}
+
+        repo_path = project["repo_path"]
+        gate_dir = project["gate_dir"]
+        gate_path = os.path.join(repo_path, gate_dir)
+
+        if not os.path.isdir(gate_path):
+            return []
+
+        results = []
+        for filename in sorted(os.listdir(gate_path)):
+            if not filename.endswith(".sh"):
+                continue
+            filepath = os.path.join(gate_path, filename)
+            try:
+                with open(filepath) as f:
+                    content = f.read()
+                results.append({"name": filename, "content": content})
+            except OSError:
+                continue
+        return results
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     import argparse
 
