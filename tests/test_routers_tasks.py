@@ -1209,3 +1209,72 @@ class TestParentChildTasks:
         assert "epic_status" in data
         assert data["parent_task_id"] is None
         assert data["epic_status"] is None
+
+    def test_create_task_invalid_epic_status(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Bad epic status",
+                "epic_status": "bogus",
+            },
+        )
+        assert resp.status_code == 400
+        assert "Invalid epic_status" in resp.json()["detail"]
+
+    def test_update_task_invalid_epic_status(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Epic for update",
+                "flow": "epic",
+            },
+        )
+        task_id = resp.json()["id"]
+        resp = client.patch(
+            f"/api/tasks/{task_id}",
+            json={"epic_status": "bogus"},
+        )
+        assert resp.status_code == 400
+        assert "Invalid epic_status" in resp.json()["detail"]
+
+    def test_batch_create_invalid_parent_task_id(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": project_id,
+                        "title": "Child with bad parent",
+                        "parent_task_id": "nonexistent-id",
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 404
+        assert "Parent task not found" in resp.json()["detail"]
+
+    def test_batch_create_invalid_epic_status(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": project_id,
+                        "title": "Bad epic status",
+                        "epic_status": "bogus",
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 400
+        assert "Invalid epic_status" in resp.json()["detail"]

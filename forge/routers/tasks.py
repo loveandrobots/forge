@@ -109,13 +109,25 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
     try:
         n = len(body.tasks)
 
-        # Validate all project_ids upfront before inserting anything
+        # Validate all project_ids and parent_task_ids upfront before inserting anything
         for task_input in body.tasks:
             project = database.get_project(conn, task_input.project_id)
             if project is None:
                 raise HTTPException(
                     status_code=404,
                     detail=f"Project not found: {task_input.project_id}",
+                )
+            if task_input.parent_task_id is not None:
+                parent = database.get_task(conn, task_input.parent_task_id)
+                if parent is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Parent task not found",
+                    )
+            if task_input.epic_status is not None and task_input.epic_status not in VALID_EPIC_STATUSES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid epic_status: {task_input.epic_status!r}. Must be one of {VALID_EPIC_STATUSES}",
                 )
 
         # Deduplicate depends_on indices
