@@ -107,7 +107,7 @@ The server exposes the following tools:
 - `delete_task` -- Delete a task permanently
 
 ### Task modification
-- `update_task` -- Update task title, description, or skill refs
+- `update_task` -- Update task title, description, priority, flow, or epic status
 - `reprioritize_task` -- Change task priority
 
 ## Usage examples
