@@ -31,14 +31,87 @@ if len(data) == 0:
     print('FAIL: Decomposition array is empty', file=sys.stderr)
     sys.exit(1)
 
+errors = []
+
+# Minimum child count
+if len(data) < 2:
+    errors.append('Decomposition must contain at least 2 child tasks (got %d). A single-task decomposition should not be an epic.' % len(data))
+
+# Build sets for depends_on validation
+all_titles = set()
+for i, entry in enumerate(data):
+    if isinstance(entry, dict):
+        t = entry.get('title', '')
+        if isinstance(t, str) and t.strip():
+            all_titles.add(t.strip())
+
+# Cross-reference phrases to reject in descriptions
+CROSS_REF_PHRASES = [
+    'as described in the epic',
+    'see the epic',
+    'see task above',
+    'see parent',
+    'as mentioned in the epic',
+    'refer to the epic',
+    'described above',
+    'see above',
+    'the parent task',
+    'the epic task',
+    'as outlined in the parent',
+    'as outlined in the epic',
+]
+
 for i, entry in enumerate(data):
     if not isinstance(entry, dict):
-        print(f'FAIL: Entry {i} is not an object', file=sys.stderr)
-        sys.exit(1)
+        errors.append('Child %d: entry is not an object' % i)
+        continue
+
     title = entry.get('title', '')
     if not isinstance(title, str) or not title.strip():
-        print(f'FAIL: Entry {i} missing or empty title', file=sys.stderr)
-        sys.exit(1)
+        errors.append('Child %d: missing or empty title' % i)
+        title_label = '<untitled>'
+    else:
+        title_label = title.strip()
+
+    # Description checks
+    desc = entry.get('description')
+    if desc is None or not isinstance(desc, str):
+        errors.append(\"Child %d ('%s'): missing description\" % (i, title_label))
+    elif len(desc.strip()) < 100:
+        errors.append(\"Child %d ('%s'): description too short (%d chars, minimum 100)\" % (i, title_label, len(desc.strip())))
+    else:
+        # Cross-reference convention check
+        desc_lower = desc.lower()
+        for phrase in CROSS_REF_PHRASES:
+            if phrase in desc_lower:
+                errors.append(\"Child %d ('%s'): description contains cross-reference phrase '%s' — descriptions must be self-contained\" % (i, title_label, phrase))
+                break
+
+    # Flow validation
+    flow = entry.get('flow')
+    if flow is not None and flow not in ('standard', 'quick'):
+        errors.append(\"Child %d ('%s'): invalid flow value '%s' (must be 'standard' or 'quick')\" % (i, title_label, flow))
+
+    # depends_on validation
+    deps = entry.get('depends_on')
+    if deps is not None:
+        if not isinstance(deps, list):
+            errors.append(\"Child %d ('%s'): depends_on must be an array\" % (i, title_label))
+        else:
+            for dep in deps:
+                if isinstance(dep, int):
+                    if dep < 0 or dep >= len(data):
+                        errors.append(\"Child %d ('%s'): dangling depends_on reference to index %d (valid range 0-%d)\" % (i, title_label, dep, len(data) - 1))
+                elif isinstance(dep, str):
+                    if dep.strip() not in all_titles:
+                        errors.append(\"Child %d ('%s'): dangling depends_on reference to title '%s'\" % (i, title_label, dep))
+                else:
+                    errors.append(\"Child %d ('%s'): depends_on entry must be an integer index or string title\" % (i, title_label))
+
+if errors:
+    for err in errors:
+        print('FAIL: ' + err, file=sys.stderr)
+    sys.exit(1)
 " "$DECOMP_FILE"
 
 echo "post-epic-spec gate passed"
