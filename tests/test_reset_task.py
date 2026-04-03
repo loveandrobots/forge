@@ -235,6 +235,52 @@ class TestResetTaskAPI:
         resp = client.post("/api/tasks/nonexistent/reset")
         assert resp.status_code == 404
 
+    def test_reset_api_empty_body_standard_flow(self, client, project_id, task_id):
+        """Empty body {} on standard-flow task defaults to 'spec'."""
+        _pause(client, task_id)
+        resp = client.post(f"/api/tasks/{task_id}/reset", json={})
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "spec"
+
+    def test_reset_api_empty_body_quick_flow(self, client, project_id):
+        """Empty body {} on quick-flow task defaults to 'implement' (not 400)."""
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Quick reset", "priority": 1, "flow": "quick"},
+        )
+        qid = resp.json()["id"]
+        client.post(f"/api/tasks/{qid}/activate")
+        client.post(f"/api/tasks/{qid}/pause")
+        resp = client.post(f"/api/tasks/{qid}/reset", json={})
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "implement"
+
+    def test_reset_api_empty_body_epic_flow(self, client, project_id):
+        """Empty body {} on epic-flow task defaults to 'spec'."""
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Epic reset", "priority": 1, "flow": "epic"},
+        )
+        eid = resp.json()["id"]
+        client.post(f"/api/tasks/{eid}/activate")
+        client.post(f"/api/tasks/{eid}/pause")
+        resp = client.post(f"/api/tasks/{eid}/reset", json={})
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "spec"
+
+    def test_reset_api_no_body_quick_flow(self, client, project_id):
+        """No body at all on quick-flow task defaults to 'implement'."""
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Quick no body", "priority": 1, "flow": "quick"},
+        )
+        qid = resp.json()["id"]
+        client.post(f"/api/tasks/{qid}/activate")
+        client.post(f"/api/tasks/{qid}/pause")
+        resp = client.post(f"/api/tasks/{qid}/reset")
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "implement"
+
 
 # ---------------------------------------------------------------------------
 # CLI-level tests

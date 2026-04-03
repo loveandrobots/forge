@@ -535,7 +535,7 @@ def reset_task(task_id: str, body: ResetRequest | None = Body(default=None)) -> 
 
         flow = row["flow"] if row["flow"] else "standard"
         flow_stages = FLOW_STAGES.get(flow, STAGES)
-        from_stage = body.from_stage if body else flow_stages[0]
+        from_stage = body.from_stage if body and body.from_stage else flow_stages[0]
         if from_stage not in flow_stages:
             raise HTTPException(
                 status_code=400,

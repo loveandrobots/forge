@@ -134,7 +134,7 @@ class CancelRequest(BaseModel):
 
 
 class ResetRequest(BaseModel):
-    from_stage: str = "spec"
+    from_stage: str | None = None
 
 
 # ---------------------------------------------------------------------------
