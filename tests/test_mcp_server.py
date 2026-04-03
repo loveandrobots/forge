@@ -21,6 +21,7 @@ from forge.mcp_server import (
     get_project_gate_scripts,
     get_project_skills,
     get_task_detail,
+    get_task_history,
     list_projects,
     mcp,
     pause_task,
@@ -279,6 +280,63 @@ class TestGetTaskDetail:
     def test_nonexistent_task_returns_none(self):
         result = get_task_detail("nonexistent-task-id")
         assert result is None
+
+
+class TestGetTaskHistory:
+    def test_returns_runs_in_chronological_order(self, populated_db):
+        task_id = populated_db["active_p1"]
+        conn = database.get_connection()
+        try:
+            # Add more stage runs with explicit timestamps
+            sr2 = database.insert_stage_run(
+                conn, task_id=task_id, stage="spec", attempt=1, status="passed"
+            )
+            database.update_stage_run(
+                conn, sr2, started_at="2026-01-01T01:00:00Z",
+                finished_at="2026-01-01T01:05:00Z",
+            )
+            sr3 = database.insert_stage_run(
+                conn, task_id=task_id, stage="plan", attempt=1, status="passed"
+            )
+            database.update_stage_run(
+                conn, sr3, started_at="2026-01-01T02:00:00Z",
+                finished_at="2026-01-01T02:10:00Z",
+            )
+        finally:
+            conn.close()
+
+        result = get_task_history(task_id)
+        assert isinstance(result, list)
+        assert len(result) >= 2
+        # Verify chronological order by started_at
+        timestamps = [r["started_at"] for r in result if r["started_at"] is not None]
+        assert timestamps == sorted(timestamps)
+
+    def test_returns_expected_fields(self, populated_db):
+        task_id = populated_db["active_p1"]
+        result = get_task_history(task_id)
+        assert isinstance(result, list)
+        assert len(result) >= 1
+        run = result[0]
+        expected_fields = {
+            "id", "stage", "status", "attempt", "started_at",
+            "finished_at", "duration_seconds", "gate_name",
+            "gate_exit_code", "error_message",
+        }
+        assert set(run.keys()) == expected_fields
+
+    def test_empty_history_for_new_task(self, populated_db):
+        # backlog_p5 has no stage runs
+        task_id = populated_db["backlog_p5"]
+        result = get_task_history(task_id)
+        assert isinstance(result, list)
+        assert result == []
+
+    def test_nonexistent_task_returns_error(self):
+        result = get_task_history("nonexistent-task-id")
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "not found" in result["error"].lower()
 
 
 class TestGetCompletedTasks:

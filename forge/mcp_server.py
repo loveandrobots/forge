@@ -109,6 +109,38 @@ def get_task_detail(task_id: str) -> dict | None:
 
 
 @mcp.tool()
+def get_task_history(task_id: str) -> list[dict] | dict:
+    """Get stage run history for a task in chronological order.
+
+    Returns a list of stage runs with stage name, status, attempt number,
+    timestamps, and outcome. Returns an error dict if the task is not found.
+    """
+    conn = database.get_connection()
+    try:
+        task = database.get_task(conn, task_id)
+        if task is None:
+            return {"error": f"Task not found: {task_id}"}
+        runs = database.list_stage_runs(conn, task_id=task_id)
+        return [
+            {
+                "id": run["id"],
+                "stage": run["stage"],
+                "status": run["status"],
+                "attempt": run["attempt"],
+                "started_at": run["started_at"],
+                "finished_at": run["finished_at"],
+                "duration_seconds": run["duration_seconds"],
+                "gate_name": run["gate_name"],
+                "gate_exit_code": run["gate_exit_code"],
+                "error_message": run["error_message"],
+            }
+            for run in runs
+        ]
+    finally:
+        conn.close()
+
+
+@mcp.tool()
 def get_completed_tasks(project_id: str, limit: int = 20) -> list[dict]:
     """Get recently completed tasks for a project, ordered by completion date descending."""
     conn = database.get_connection()
