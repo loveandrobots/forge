@@ -24,6 +24,7 @@ from forge.mcp_server import (
     list_projects,
     mcp,
     pause_task,
+    reprioritize_task,
     reset_task,
     resume_task,
     retry_task,
@@ -809,6 +810,30 @@ class TestUpdateTask:
         result = update_task(task_id=task["id"])
         assert result["title"] == "Task"
         assert "error" not in result
+
+
+class TestReprioritizeTask:
+    def test_reprioritize_success(self, project_id):
+        task = create_task(project_id=project_id, title="Task", priority=3)
+        result = reprioritize_task(task_id=task["id"], priority=10)
+        assert result["priority"] == 10
+        assert "error" not in result
+
+    def test_reprioritize_nonexistent_task(self):
+        result = reprioritize_task(task_id="nonexistent-id", priority=5)
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    def test_reprioritize_only_changes_priority(self, project_id):
+        task = create_task(
+            project_id=project_id, title="Original Title", description="Desc", priority=3
+        )
+        result = reprioritize_task(task_id=task["id"], priority=8)
+        assert result["priority"] == 8
+        assert result["title"] == "Original Title"
+        assert result["description"] == "Desc"
+        assert result["project_id"] == project_id
+        assert result["status"] == "backlog"
 
 
 class TestDeleteTask:

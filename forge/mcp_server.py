@@ -421,6 +421,25 @@ def update_task(
 
 
 @mcp.tool()
+def reprioritize_task(task_id: str, priority: int) -> dict:
+    """Change a task's priority. Returns the updated task dict or error dict.
+
+    This is a convenience wrapper around update_task that changes only the priority field.
+    """
+    conn = database.get_connection()
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            return {"error": "Task not found"}
+
+        database.update_task(conn, task_id, priority=priority)
+        updated_row = database.get_task(conn, task_id)
+        return _row_to_dict(updated_row)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
 def delete_task(task_id: str) -> dict:
     """Delete a backlog task. Returns {"deleted": True} or an error dict."""
     conn = database.get_connection()
