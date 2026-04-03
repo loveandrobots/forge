@@ -381,12 +381,16 @@ def update_task(
 
         updates: dict = {}
         if title is not None:
+            if not title:
+                return {"error": "title must not be empty"}
             updates["title"] = title
         if description is not None:
             updates["description"] = description
         if priority is not None:
             updates["priority"] = priority
         if flow is not None:
+            if flow not in config.VALID_FLOWS:
+                return {"error": f"Invalid flow: {flow!r}. Must be one of {config.VALID_FLOWS}"}
             updates["flow"] = flow
         if epic_status is not None:
             updates["epic_status"] = epic_status

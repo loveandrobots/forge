@@ -784,6 +784,18 @@ class TestUpdateTask:
         assert "error" in result
         assert "epic_status" in result["error"].lower()
 
+    def test_update_empty_title_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = update_task(task_id=task["id"], title="")
+        assert "error" in result
+        assert "title" in result["error"].lower()
+
+    def test_update_invalid_flow_rejected(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        result = update_task(task_id=task["id"], flow="nonexistent")
+        assert "error" in result
+        assert "flow" in result["error"].lower()
+
     def test_update_nonexistent_task(self):
         result = update_task(task_id="nonexistent-id")
         assert "error" in result
@@ -875,6 +887,8 @@ class TestResumeTask:
             conn.close()
         result = resume_task(task_id=task["id"])
         assert result["status"] == "active"
+        detail = get_task_detail(task["id"])
+        assert len(detail["stage_runs"]) == 2
 
     def test_resume_non_needs_human_rejected(self, project_id):
         task = create_task(project_id=project_id, title="Task")
