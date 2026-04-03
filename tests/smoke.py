@@ -23,6 +23,7 @@ from forge.config import TASK_STATUSES
 # production database.
 _DB_PATH_LOCATIONS = [
     "forge.config.DB_PATH",
+    "forge.database.DB_PATH",
     "forge.cli.DB_PATH",
     "forge.main.DB_PATH",
     "forge.routers.projects.DB_PATH",

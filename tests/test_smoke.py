@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from tests.smoke import (
     SmokeResult,
+    _DB_PATH_LOCATIONS,
     _EXCLUDED_ROUTES,
     _discover_routes,
     _normalize_path,
@@ -73,6 +74,46 @@ def test_smoke_uses_temp_database():
         )
     else:
         assert not prod_db.exists(), "Smoke test created a production database file"
+
+
+def test_db_path_locations_includes_database_module():
+    """The smoke test patches DB_PATH in forge.database to prevent prod DB access."""
+    assert "forge.database.DB_PATH" in _DB_PATH_LOCATIONS, (
+        "forge.database.DB_PATH must be patched — the database module imports "
+        "DB_PATH at module level and get_connection() uses it as the default path"
+    )
+
+
+def test_db_path_locations_covers_all_importers():
+    """Every module that imports DB_PATH from forge.config is in the patch list."""
+    import ast
+    from pathlib import Path
+
+    forge_dir = Path(__file__).resolve().parent.parent / "forge"
+    importers: set[str] = set()
+    for py_file in forge_dir.rglob("*.py"):
+        try:
+            tree = ast.parse(py_file.read_text())
+        except SyntaxError:
+            continue
+        module_path = (
+            str(py_file.relative_to(forge_dir.parent))
+            .replace("/", ".")
+            .removesuffix(".py")
+            .replace(".__init__", "")
+        )
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "forge.config"
+                and any(alias.name == "DB_PATH" for alias in node.names)
+            ):
+                importers.add(f"{module_path}.DB_PATH")
+
+    missing = importers - set(_DB_PATH_LOCATIONS)
+    assert missing == set(), (
+        f"Modules that import DB_PATH but are not patched in smoke tests: {missing}"
+    )
 
 
 def test_smoke_cleans_up_temp_database():
