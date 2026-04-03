@@ -1278,3 +1278,86 @@ class TestParentChildTasks:
         )
         assert resp.status_code == 400
         assert "Invalid epic_status" in resp.json()["detail"]
+
+    def test_create_task_epic_status_on_non_epic_flow_rejected(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Not an epic",
+                "flow": "standard",
+                "epic_status": "pending",
+            },
+        )
+        assert resp.status_code == 400
+        assert "epic_status can only be set on tasks with flow 'epic'" in resp.json()["detail"]
+
+    def test_batch_create_epic_status_on_non_epic_flow_rejected(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks/batch",
+            json={
+                "tasks": [
+                    {
+                        "project_id": project_id,
+                        "title": "Not an epic",
+                        "flow": "standard",
+                        "epic_status": "pending",
+                    },
+                ],
+            },
+        )
+        assert resp.status_code == 400
+        assert "epic_status can only be set on tasks with flow 'epic'" in resp.json()["detail"]
+
+    def test_update_epic_status_on_non_epic_flow_rejected(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Standard task"},
+        )
+        task_id = resp.json()["id"]
+        resp = client.patch(
+            f"/api/tasks/{task_id}",
+            json={"epic_status": "pending"},
+        )
+        assert resp.status_code == 400
+        assert "epic_status can only be set on tasks with flow 'epic'" in resp.json()["detail"]
+
+    def test_get_parent_task(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        # Create parent
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Parent"},
+        )
+        parent_id = resp.json()["id"]
+
+        # Create child
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Child",
+                "parent_task_id": parent_id,
+            },
+        )
+        child_id = resp.json()["id"]
+
+        # Verify get_parent_task returns the correct parent
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            parent_row = database.get_parent_task(conn, child_id)
+            assert parent_row is not None
+            assert parent_row["id"] == parent_id
+
+            # Task without parent returns None
+            no_parent = database.get_parent_task(conn, parent_id)
+            assert no_parent is None
+        finally:
+            conn.close()

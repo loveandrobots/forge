@@ -82,6 +82,11 @@ def create_task(body: TaskCreate) -> dict:
                 status_code=400,
                 detail=f"Invalid epic_status: {epic_status!r}. Must be one of {VALID_EPIC_STATUSES}",
             )
+        if epic_status is not None and body.flow != "epic":
+            raise HTTPException(
+                status_code=400,
+                detail="epic_status can only be set on tasks with flow 'epic'",
+            )
         if body.flow == "epic" and epic_status is None:
             epic_status = "pending"
 
@@ -128,6 +133,11 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid epic_status: {task_input.epic_status!r}. Must be one of {VALID_EPIC_STATUSES}",
+                )
+            if task_input.epic_status is not None and task_input.flow != "epic":
+                raise HTTPException(
+                    status_code=400,
+                    detail="epic_status can only be set on tasks with flow 'epic'",
                 )
 
         # Deduplicate depends_on indices
@@ -360,6 +370,12 @@ def update_task(task_id: str, body: TaskUpdate) -> dict:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid epic_status: {updates['epic_status']!r}. Must be one of {VALID_EPIC_STATUSES}",
+                )
+            effective_flow = updates.get("flow", row["flow"])
+            if effective_flow != "epic":
+                raise HTTPException(
+                    status_code=400,
+                    detail="epic_status can only be set on tasks with flow 'epic'",
                 )
         if not updates:
             return _row_to_task(row)
