@@ -1213,8 +1213,6 @@ class PipelineEngine:
                 status="bounced",
             )
             if bounced_reviews:
-                import os
-
                 review_path = os.path.join(
                     project.get("repo_path", ""),
                     f"_forge/reviews/{task['id']}.md",
