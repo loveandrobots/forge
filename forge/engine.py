@@ -391,9 +391,15 @@ class PipelineEngine:
                 if not os.path.isabs(gate_dir):
                     gate_dir = os.path.join(project["repo_path"], gate_dir)
 
+                # Override gate stage name for epic spec runs
+                gate_stage = stage
+                flow = task.get("flow", "standard")
+                if flow == "epic" and stage == "spec":
+                    gate_stage = "epic-spec"
+
                 gate_result: GateResult = await run_gate(
                     gate_dir=gate_dir,
-                    stage=stage,
+                    stage=gate_stage,
                     env_vars=gate_env,
                 )
 
@@ -594,6 +600,12 @@ class PipelineEngine:
         """Create the next stage_run or mark the task done."""
         task_row = database.get_task(conn, task_id)
         flow = task_row["flow"] if task_row else "standard"
+
+        # Epic flow: after spec passes, decompose into child tasks
+        if flow == "epic" and current_stage == "spec" and project is not None:
+            self._process_epic_decomposition(conn, task_id, project)
+            return
+
         next_stage = _next_stage(current_stage, flow=flow)
         if next_stage is None:
             # Process follow-ups from review before completing
@@ -618,6 +630,11 @@ class PipelineEngine:
                 completed_at=_now(),
             )
             self._log("info", f"Task {task_id} completed", task_id=task_id)
+
+            # Check if this task's parent epic is now complete
+            if task_row and task_row["parent_task_id"]:
+                self._check_epic_completion(conn, task_row["parent_task_id"])
+
             if project is not None:
                 await self._maybe_auto_pause(conn, task_id, project)
         else:
@@ -921,6 +938,119 @@ class PipelineEngine:
                     task_id=task_id,
                     stage_run_id=stage_run_id,
                 )
+
+    def _process_epic_decomposition(
+        self,
+        conn: sqlite3.Connection,
+        task_id: str,
+        project: dict,
+    ) -> None:
+        """Read decomposition JSON and create child tasks for an epic."""
+        repo_path = project.get("repo_path", "")
+        path = os.path.join(repo_path, f"_forge/epic-decompositions/{task_id}.json")
+
+        if not os.path.exists(path):
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                f"Epic decomposition file not found: {path}",
+                task_id=task_id,
+            )
+            return
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                entries = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                f"Failed to read epic decomposition JSON: {exc}",
+                task_id=task_id,
+            )
+            return
+
+        if not isinstance(entries, list) or not entries:
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                "Epic decomposition JSON is empty or not an array",
+                task_id=task_id,
+            )
+            return
+
+        created = 0
+        for entry in entries:
+            if not isinstance(entry, dict) or not entry.get("title"):
+                continue
+            title = entry["title"]
+            description = entry.get("description", "")
+            flow = entry.get("flow", "standard")
+            if flow not in VALID_FLOWS:
+                flow = "standard"
+            priority = entry.get("priority", 0)
+
+            child_id = database.insert_task(
+                conn,
+                project_id=project["id"],
+                title=title,
+                description=description,
+                priority=priority,
+                flow=flow,
+                parent_task_id=task_id,
+            )
+            database.insert_task_link(
+                conn,
+                source_task_id=child_id,
+                target_task_id=task_id,
+                link_type="created_by",
+            )
+            created += 1
+
+        if created == 0:
+            database.update_task(conn, task_id, status="needs_human")
+            self._log(
+                "error",
+                "Epic decomposition produced zero valid child tasks",
+                task_id=task_id,
+            )
+            return
+
+        # Transition epic to decomposed/paused
+        database.update_task(
+            conn,
+            task_id,
+            epic_status="decomposed",
+            status="paused",
+        )
+        self._log(
+            "info",
+            f"Epic {task_id} decomposed into {created} child task(s)",
+            task_id=task_id,
+        )
+
+    def _check_epic_completion(
+        self,
+        conn: sqlite3.Connection,
+        parent_task_id: str,
+    ) -> None:
+        """Check if all children of a parent epic are done; if so, complete the epic."""
+        parent = database.get_task(conn, parent_task_id)
+        if not parent or parent["flow"] != "epic":
+            return
+        if database.all_children_complete(conn, parent_task_id):
+            database.update_task(
+                conn,
+                parent_task_id,
+                epic_status="complete",
+                status="done",
+                completed_at=_now(),
+            )
+            self._log(
+                "info",
+                f"Epic {parent_task_id} completed — all children done",
+                task_id=parent_task_id,
+            )
 
     def _process_follow_ups(
         self,

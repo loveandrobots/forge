@@ -9,6 +9,7 @@ from forge.config import (
     BASE_DIR,
     CONFIG_PATH,
     DB_PATH,
+    FLOW_STAGES,
     LINK_TYPES,
     LOG_LEVELS,
     STAGE_RUN_STATUSES,
@@ -95,3 +96,8 @@ def test_link_types_constant() -> None:
 
 def test_log_levels_constant() -> None:
     assert LOG_LEVELS == ["info", "warn", "error"]
+
+
+def test_epic_flow_stages() -> None:
+    """Epic flow should only have the spec stage."""
+    assert FLOW_STAGES["epic"] == ["spec"]

@@ -544,6 +544,70 @@ class TestPostReview:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# post-epic-spec.sh
+# ---------------------------------------------------------------------------
+
+
+class TestPostEpicSpec:
+    SCRIPT = "post-epic-spec.sh"
+
+    def test_passes_with_valid_decomposition(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/epic-decompositions/test-task-42.json"),
+            '[{"title": "Child task A", "description": "Do A"}, {"title": "Child task B"}]',
+        )
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+    def test_fails_when_file_missing(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "not found" in result.stderr
+
+    def test_fails_with_empty_array(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/epic-decompositions/test-task-42.json"),
+            "[]",
+        )
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "empty" in result.stderr.lower()
+
+    def test_fails_with_missing_title(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/epic-decompositions/test-task-42.json"),
+            '[{"description": "no title here"}]',
+        )
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "title" in result.stderr.lower()
+
+    def test_fails_with_invalid_json(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/epic-decompositions/test-task-42.json"),
+            "{not valid json",
+        )
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode != 0
+
+    def test_fails_with_empty_title(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/epic-decompositions/test-task-42.json"),
+            '[{"title": ""}]',
+        )
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "title" in result.stderr.lower()
+
+
 class TestParseVerdictScript:
     SCRIPT = os.path.join(GATES_DIR, "parse_verdict.py")
 

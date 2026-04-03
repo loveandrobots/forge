@@ -193,6 +193,41 @@ Load the following skills:
 
 {retry_context}"""
 
+EPIC_SPEC_TEMPLATE = """\
+You are working on the project "{project_name}".
+
+## Epic
+{task_title}
+
+{task_description}
+
+## Your job
+Decompose this epic into concrete, actionable child tasks. Save the result to: _forge/epic-decompositions/{task_id}.json
+
+Before decomposing:
+- Read the project's existing code and documentation to understand the current state.
+- Identify logical units of work that can each be completed in a single pipeline pass.
+- Keep each child task narrow and self-contained.
+
+The output file must contain a JSON array of task objects. Each object has:
+- `title` (string, required): A concise, descriptive title for the child task.
+- `description` (string, optional): What the task should accomplish, with enough detail for an agent to implement it without additional context.
+- `flow` (string, optional): Either `"standard"` (default — full spec/plan/implement/review pipeline) or `"quick"` (skip spec/plan, go straight to implement/review). Use `"quick"` only for simple, mechanical fixes.
+- `priority` (integer, optional): Higher numbers run first. Default is 0.
+
+Example output:
+```json
+[
+  {{"title": "Add user authentication endpoint", "description": "Create POST /auth/login ...", "flow": "standard", "priority": 2}},
+  {{"title": "Fix typo in README", "description": "Change 'recieve' to 'receive'", "flow": "quick", "priority": 0}}
+]
+```
+
+Load the following skills for context:
+{skill_references}
+
+{retry_context}"""
+
 STAGE_TEMPLATES: dict[str, str] = {
     "spec": SPEC_TEMPLATE,
     "plan": PLAN_TEMPLATE,
@@ -203,6 +238,10 @@ STAGE_TEMPLATES: dict[str, str] = {
 QUICK_STAGE_TEMPLATES: dict[str, str] = {
     "implement": QUICK_IMPLEMENT_TEMPLATE,
     "review": QUICK_REVIEW_TEMPLATE,
+}
+
+EPIC_STAGE_TEMPLATES: dict[str, str] = {
+    "spec": EPIC_SPEC_TEMPLATE,
 }
 
 # ---------------------------------------------------------------------------
@@ -293,7 +332,9 @@ def build_prompt(
         ``git_diff``, ``previous_gate_stderr``.
     """
     flow = task.get("flow", "standard")
-    if flow == "quick" and stage in QUICK_STAGE_TEMPLATES:
+    if flow == "epic" and stage in EPIC_STAGE_TEMPLATES:
+        template = EPIC_STAGE_TEMPLATES[stage]
+    elif flow == "quick" and stage in QUICK_STAGE_TEMPLATES:
         template = QUICK_STAGE_TEMPLATES[stage]
     else:
         template = STAGE_TEMPLATES.get(stage)

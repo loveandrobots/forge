@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from forge.prompt_builder import (
-    QUICK_STAGE_TEMPLATES,
     STAGE_TEMPLATES,
     build_prompt,
     build_retry_context,
@@ -705,3 +704,98 @@ class TestBuildPromptQuickFlow:
             "implement", task, sample_project, sample_stage_run, artifacts
         )
         assert "## Specification" in prompt
+
+
+# ---------------------------------------------------------------------------
+# build_prompt — epic-flow templates
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPromptEpicFlow:
+    @pytest.fixture()
+    def epic_task(self) -> dict:
+        return {
+            "id": "epic-001",
+            "title": "Overhaul authentication system",
+            "description": "Replace the legacy auth with OAuth2.",
+            "branch_name": "forge/epic-001-overhaul-auth",
+            "spec_path": "",
+            "plan_path": "",
+            "skill_overrides": None,
+            "flow": "epic",
+        }
+
+    def test_epic_spec_uses_epic_template(
+        self,
+        epic_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """AC 1: Epic tasks use a dedicated spec-stage prompt."""
+        prompt = build_prompt(
+            "spec", epic_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "decompose" in prompt.lower()
+        assert "epic-decompositions" in prompt
+        assert "JSON" in prompt
+        # Should NOT contain standard spec template text
+        assert "Acceptance criteria" not in prompt
+        assert "Out of scope" not in prompt
+
+    def test_epic_spec_includes_task_id_in_path(
+        self,
+        epic_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """AC 2: Prompt directs agent to write JSON to path with task ID."""
+        prompt = build_prompt(
+            "spec", epic_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert f"_forge/epic-decompositions/{epic_task['id']}.json" in prompt
+
+    def test_epic_spec_retry_context(
+        self,
+        epic_task: dict,
+        sample_project: dict,
+    ) -> None:
+        """AC 3: Retry context appears in the epic prompt."""
+        stage_run = {"attempt": 2}
+        artifacts = {"previous_gate_stderr": "decomposition file missing"}
+        prompt = build_prompt(
+            "spec", epic_task, sample_project, stage_run, artifacts
+        )
+        assert "attempt 2" in prompt
+        assert "decomposition file missing" in prompt
+
+    def test_non_epic_spec_unchanged(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """AC 4: Standard flow still uses original SPEC_TEMPLATE."""
+        prompt = build_prompt(
+            "spec", sample_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "Acceptance criteria" in prompt
+        assert "Out of scope" in prompt
+        assert "decompose" not in prompt.lower()
+
+    def test_epic_spec_no_unfilled_placeholders(
+        self,
+        epic_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        prompt = build_prompt(
+            "spec", epic_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        # Check no Python format placeholders remain (but JSON braces are ok)
+        import re
+        unfilled = re.findall(r"\{[a-z_]+\}", prompt)
+        assert not unfilled, f"Unfilled placeholders: {unfilled}"

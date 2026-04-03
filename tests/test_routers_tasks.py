@@ -1125,11 +1125,11 @@ class TestParentChildTasks:
             },
         )
 
-        # Mark both children complete via DB
+        # Mark both children done via DB
         conn = database.get_connection(str(tmp_path / "test.db"))
         try:
-            database.update_task(conn, r1.json()["id"], status="complete")
-            database.update_task(conn, r2.json()["id"], status="complete")
+            database.update_task(conn, r1.json()["id"], status="done")
+            database.update_task(conn, r2.json()["id"], status="done")
             assert database.all_children_complete(conn, parent_id) is True
         finally:
             conn.close()

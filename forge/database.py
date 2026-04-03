@@ -478,7 +478,7 @@ def get_parent_task(
 
 
 def all_children_complete(conn: sqlite3.Connection, parent_task_id: str) -> bool:
-    """Return True when all children of a parent exist and have status='complete'."""
+    """Return True when all children of a parent exist and have status='done'."""
     cur = conn.execute(
         "SELECT COUNT(*) FROM tasks WHERE parent_task_id = ?",
         (parent_task_id,),
@@ -487,7 +487,7 @@ def all_children_complete(conn: sqlite3.Connection, parent_task_id: str) -> bool
     if total == 0:
         return False
     cur = conn.execute(
-        "SELECT COUNT(*) FROM tasks WHERE parent_task_id = ? AND status != 'complete'",
+        "SELECT COUNT(*) FROM tasks WHERE parent_task_id = ? AND status != 'done'",
         (parent_task_id,),
     )
     incomplete = cur.fetchone()[0]

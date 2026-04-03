@@ -3120,3 +3120,360 @@ class TestAutoEscalation:
         ]
         assert len(escalation_logs) >= 1
         assert task_id in escalation_logs[0]["message"]
+
+
+# ---------------------------------------------------------------------------
+# Epic decomposition tests
+# ---------------------------------------------------------------------------
+
+
+class TestEpicDecomposition:
+    @pytest.mark.asyncio
+    async def test_advance_task_epic_spec_creates_children(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 3, 4: After epic spec passes, engine creates child tasks."""
+        # Update project repo_path to tmp_path so we can write the decomposition file
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Big epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        # Write decomposition JSON
+        import os
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        import json
+        decomp = [
+            {"title": "Child A", "description": "Do A", "flow": "standard", "priority": 2},
+            {"title": "Child B", "description": "Do B", "flow": "quick", "priority": 1},
+            {"title": "Child C", "description": "Do C"},
+        ]
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump(decomp, f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        # Check children were created
+        children = db.get_child_tasks(conn, task_id)
+        assert len(children) == 3
+
+        # Check child properties
+        child_a = [c for c in children if c["title"] == "Child A"][0]
+        assert child_a["parent_task_id"] == task_id
+        assert child_a["flow"] == "standard"
+        assert child_a["priority"] == 2
+        assert child_a["status"] == "backlog"
+
+        child_b = [c for c in children if c["title"] == "Child B"][0]
+        assert child_b["flow"] == "quick"
+        assert child_b["priority"] == 1
+
+        # Default flow is standard
+        child_c = [c for c in children if c["title"] == "Child C"][0]
+        assert child_c["flow"] == "standard"
+        assert child_c["priority"] == 0
+
+        # Check created_by links exist for each child
+        for child in children:
+            links = db.get_task_links(conn, child["id"])
+            created_by = [lk for lk in links if lk["link_type"] == "created_by"]
+            assert len(created_by) == 1
+            assert created_by[0]["target_task_id"] == task_id
+
+    @pytest.mark.asyncio
+    async def test_advance_task_epic_status_transitions(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 5: Epic transitions to decomposed/paused after child creation."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic task",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        import json
+        import os
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump([{"title": "Sub task"}], f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["epic_status"] == "decomposed"
+        assert task["status"] == "paused"
+
+    @pytest.mark.asyncio
+    async def test_advance_task_epic_completion_when_children_done(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 7: When all children are done, epic completes."""
+        # Create epic task
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic parent",
+            flow="epic",
+            epic_status="decomposed",
+        )
+        db.update_task(conn, epic_id, status="paused")
+
+        # Create two child tasks (quick flow so they finish at review)
+        child1_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Child 1",
+            flow="quick",
+            parent_task_id=epic_id,
+        )
+        child2_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Child 2",
+            flow="quick",
+            parent_task_id=epic_id,
+        )
+
+        engine = PipelineEngine(settings, ":memory:")
+
+        # Mark child 1 done via advance_task at end of its pipeline
+        db.update_task(conn, child1_id, status="active", current_stage="review")
+        await engine.advance_task(conn, child1_id, "review")
+
+        # Epic should NOT be complete yet
+        epic = db.get_task(conn, epic_id)
+        assert epic["status"] == "paused"
+        assert epic["epic_status"] == "decomposed"
+
+        # Mark child 2 done
+        db.update_task(conn, child2_id, status="active", current_stage="review")
+        await engine.advance_task(conn, child2_id, "review")
+
+        # Now epic should be complete
+        epic = db.get_task(conn, epic_id)
+        assert epic["status"] == "done"
+        assert epic["epic_status"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_advance_task_epic_not_complete_when_children_pending(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 8: Epic stays paused/decomposed when children aren't all done."""
+        epic_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="decomposed",
+        )
+        db.update_task(conn, epic_id, status="paused")
+
+        child1_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Child 1",
+            flow="quick",
+            parent_task_id=epic_id,
+        )
+        db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Child 2",
+            flow="quick",
+            parent_task_id=epic_id,
+        )
+
+        engine = PipelineEngine(settings, ":memory:")
+
+        # Only mark child 1 done
+        db.update_task(conn, child1_id, status="active", current_stage="review")
+        await engine.advance_task(conn, child1_id, "review")
+
+        epic = db.get_task(conn, epic_id)
+        assert epic["status"] == "paused"
+        assert epic["epic_status"] == "decomposed"
+
+    @pytest.mark.asyncio
+    async def test_process_epic_decomposition_missing_file(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 10: Missing decomposition file marks task needs_human."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_process_epic_decomposition_invalid_json(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 11: Invalid JSON marks task needs_human."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        import os
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            f.write("{not valid json")
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    @pytest.mark.asyncio
+    async def test_process_epic_decomposition_empty_array(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 12: Empty array marks task needs_human."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        import json
+        import os
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump([], f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+
+class TestEpicGateNameOverride:
+    @pytest.mark.asyncio
+    async def test_epic_gate_name_override(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 9: Engine uses 'epic-spec' gate name for epic spec runs."""
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic task",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="spec",
+            branch_name="forge/epic-test",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="queued"
+        )
+
+        captured_gate_stage = []
+
+        async def mock_run_gate(gate_dir, stage, env_vars):
+            captured_gate_stage.append(stage)
+            return GateResult(
+                passed=True, exit_code=0, stdout="ok", stderr="",
+                gate_name=f"post-{stage}.sh", duration_seconds=0.1,
+            )
+
+        async def mock_dispatch(**kwargs):
+            return DispatchResult(
+                output="done", exit_code=0, error=None, duration_seconds=1.0, tokens_used=10
+            )
+
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        with patch("forge.engine.run_gate", side_effect=mock_run_gate), \
+             patch("forge.engine.dispatch_claude", side_effect=mock_dispatch), \
+             patch("forge.engine.database.get_connection", return_value=_UnclosableConnection(conn)):
+            # Run one iteration of the loop
+            engine._loop_task = asyncio.ensure_future(engine.run_loop())
+            await asyncio.sleep(0.5)
+            engine.running = False
+            engine._loop_task.cancel()
+            try:
+                await engine._loop_task
+            except asyncio.CancelledError:
+                pass
+
+        assert "epic-spec" in captured_gate_stage
