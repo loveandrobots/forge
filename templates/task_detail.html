@@ -11,6 +11,11 @@
             {% endif %}
             {% if task.flow == 'quick' %}
             <span class="badge badge-flow-quick">Quick Flow</span>
+            {% elif task.flow == 'epic' %}
+            <span class="badge badge-flow-epic">Epic Flow</span>
+            {% if task.epic_status %}
+            <span class="badge badge-epic-status badge-epic-status-{{ task.epic_status }}">{{ task.epic_status }}</span>
+            {% endif %}
             {% else %}
             <span class="badge">Standard Flow</span>
             {% endif %}
@@ -52,9 +57,35 @@
     </div>
 </div>
 
+{% if parent_task %}
+<div class="parent-epic-link">
+    <strong>Parent Epic:</strong> <a href="/tasks/{{ parent_task.id }}">{{ parent_task.title }}</a>
+</div>
+{% endif %}
+
 {% if task.description %}
 <div class="task-description">
     {{- task.description -}}
+</div>
+{% endif %}
+
+{% if child_tasks %}
+<h2>Child Tasks</h2>
+<div class="child-tasks-list">
+    {% for child in child_tasks %}
+    <div class="child-task-row">
+        <a href="/tasks/{{ child.id }}">{{ child.title }}</a>
+        <div>
+            <span class="badge badge-{{ child.status }}">{{ child.status }}</span>
+            {% if child.current_stage %}
+            <span class="badge">{{ child.current_stage }}</span>
+            {% endif %}
+            {% if child.flow == 'quick' %}
+            <span class="badge badge-flow-quick">Quick</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
 </div>
 {% endif %}
 

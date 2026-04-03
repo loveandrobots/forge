@@ -274,6 +274,99 @@ body {
     color: var(--flow-quick);
 }
 
+.badge-flow-epic {
+    background: #fefce8;
+    color: #b45309;
+}
+
+.badge-epic-status {
+    background: #f5f5f4;
+    color: #57534e;
+}
+
+.badge-epic-status-pending {
+    background: #f5f5f4;
+    color: #57534e;
+}
+
+.badge-epic-status-decomposed {
+    background: #eff6ff;
+    color: var(--primary);
+}
+
+.badge-epic-status-reviewing {
+    background: #fef3c7;
+    color: var(--warning);
+}
+
+.badge-epic-status-complete {
+    background: #f0fdf4;
+    color: var(--success);
+}
+
+/* Parent indicator on kanban cards */
+.card-parent-link {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Child progress on epic cards */
+.card-child-progress {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* Child tasks section on task detail */
+.child-tasks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.child-task-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.child-task-row a {
+    text-decoration: none;
+    color: var(--text);
+    font-size: 0.875rem;
+}
+
+.child-task-row a:hover {
+    color: var(--primary);
+}
+
+.child-task-row .badge {
+    flex-shrink: 0;
+}
+
+/* Parent epic link in task detail */
+.parent-epic-link {
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+}
+
+.parent-epic-link a {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+.parent-epic-link a:hover {
+    text-decoration: underline;
+}
+
 /* Buttons */
 .btn {
     display: inline-block;

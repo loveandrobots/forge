@@ -29,9 +29,20 @@
             {% for task in columns[col_name] %}
             <a href="/tasks/{{ task.id }}" class="card {% if task.status == 'needs_human' %}card-needs-human{% elif task.status == 'failed' %}card-failed{% elif task.status == 'cancelled' %}card-cancelled{% endif %}">
                 <div class="card-title">{{ task.title }}</div>
+                {% if task.id in parent_map %}
+                <div class="card-parent-link">↑ {{ parent_map[task.id].title }}</div>
+                {% endif %}
                 <div class="card-meta">
                     {% if task.flow == 'quick' %}
                     <span class="badge badge-flow-quick">Quick</span>
+                    {% elif task.flow == 'epic' %}
+                    <span class="badge badge-flow-epic">Epic</span>
+                    {% if task.epic_status %}
+                    <span class="badge badge-epic-status badge-epic-status-{{ task.epic_status }}">{{ task.epic_status }}</span>
+                    {% endif %}
+                    {% if task.id in child_counts and child_counts[task.id].total > 0 %}
+                    <span class="card-child-progress">{{ child_counts[task.id].done }}/{{ child_counts[task.id].total }} children done</span>
+                    {% endif %}
                     {% endif %}
                     {% if task.escalated_from_quick %}
                     <span class="badge badge-info">Escalated</span>

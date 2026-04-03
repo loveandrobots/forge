@@ -88,6 +88,23 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
                     stage_run_info[t["id"]].get("started_at"), suffix=""
                 )
 
+        # Build parent map for child tasks (task_id → parent dict)
+        parent_map: dict[str, dict] = {}
+        for t in task_list:
+            if t.get("parent_task_id"):
+                parent_row = database.get_parent_task(conn, t["id"])
+                if parent_row:
+                    parent_map[t["id"]] = _row_to_dict(parent_row)
+
+        # Build child counts for epic tasks (task_id → {total, done})
+        child_counts: dict[str, dict] = {}
+        for t in task_list:
+            if t.get("flow") == "epic":
+                children = database.get_child_tasks(conn, t["id"])
+                total = len(children)
+                done = sum(1 for c in children if c["status"] == "done")
+                child_counts[t["id"]] = {"total": total, "done": done}
+
         return templates.TemplateResponse(
             request,
             "pipeline.html",
@@ -97,6 +114,8 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
                 "projects": projects,
                 "selected_project_id": project_id,
                 "stage_run_info": stage_run_info,
+                "parent_map": parent_map,
+                "child_counts": child_counts,
             },
         )
     finally:
@@ -122,6 +141,21 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
 
         flow_stages = FLOW_STAGES.get(task.get("flow", "standard"), FLOW_STAGES["standard"])
 
+        # Fetch child tasks for epics
+        child_tasks: list[dict] = []
+        if task.get("flow") == "epic":
+            child_tasks = [
+                _row_to_dict(c)
+                for c in database.get_child_tasks(conn, task_id)
+            ]
+
+        # Fetch parent task for children
+        parent_task: dict | None = None
+        if task.get("parent_task_id"):
+            parent_row = database.get_parent_task(conn, task_id)
+            if parent_row:
+                parent_task = _row_to_dict(parent_row)
+
         return templates.TemplateResponse(
             request,
             "task_detail.html",
@@ -130,6 +164,8 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
                 "project": project,
                 "stage_runs": stage_runs,
                 "flow_stages": flow_stages,
+                "child_tasks": child_tasks,
+                "parent_task": parent_task,
             },
         )
     finally:
