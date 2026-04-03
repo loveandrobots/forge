@@ -27,10 +27,10 @@
         </div>
         <div class="kanban-cards">
             {% for task in columns[col_name] %}
-            <a href="/tasks/{{ task.id }}" class="card {% if task.status == 'needs_human' %}card-needs-human{% elif task.status == 'failed' %}card-failed{% elif task.status == 'cancelled' %}card-cancelled{% endif %}">
+            <div onclick="window.location='/tasks/{{ task.id }}'" class="card {% if task.status == 'needs_human' %}card-needs-human{% elif task.status == 'failed' %}card-failed{% elif task.status == 'cancelled' %}card-cancelled{% endif %}">
                 <div class="card-title">{{ task.title }}</div>
                 {% if task.id in parent_map %}
-                <div class="card-parent-link">↑ {{ parent_map[task.id].title }}</div>
+                <div class="card-parent-link"><a href="/tasks/{{ parent_map[task.id].id }}" onclick="event.stopPropagation()">↑ {{ parent_map[task.id].title }}</a></div>
                 {% endif %}
                 <div class="card-meta">
                     {% if task.flow == 'quick' %}
@@ -70,7 +70,7 @@
                     <span class="timestamp">Completed {{ task.completed_ago }}</span>
                     {% endif %}
                 </div>
-            </a>
+            </div>
             {% endfor %}
         </div>
     </div>

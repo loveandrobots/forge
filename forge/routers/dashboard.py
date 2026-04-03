@@ -88,22 +88,18 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
                     stage_run_info[t["id"]].get("started_at"), suffix=""
                 )
 
-        # Build parent map for child tasks (task_id → parent dict)
-        parent_map: dict[str, dict] = {}
-        for t in task_list:
-            if t.get("parent_task_id"):
-                parent_row = database.get_parent_task(conn, t["id"])
-                if parent_row:
-                    parent_map[t["id"]] = _row_to_dict(parent_row)
+        # Build parent map for child tasks (task_id → parent dict) — batched
+        child_task_ids = [t["id"] for t in task_list if t.get("parent_task_id")]
+        parent_map_raw = database.get_parent_tasks_batch(conn, child_task_ids)
+        parent_map: dict[str, dict] = {
+            tid: _row_to_dict(row) for tid, row in parent_map_raw.items()
+        }
 
-        # Build child counts for epic tasks (task_id → {total, done})
-        child_counts: dict[str, dict] = {}
-        for t in task_list:
-            if t.get("flow") == "epic":
-                children = database.get_child_tasks(conn, t["id"])
-                total = len(children)
-                done = sum(1 for c in children if c["status"] == "done")
-                child_counts[t["id"]] = {"total": total, "done": done}
+        # Build child counts for epic tasks (task_id → {total, done}) — batched
+        epic_task_ids = [t["id"] for t in task_list if t.get("flow") == "epic"]
+        child_counts: dict[str, dict] = database.get_child_counts_batch(
+            conn, epic_task_ids
+        )
 
         return templates.TemplateResponse(
             request,

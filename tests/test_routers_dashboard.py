@@ -142,11 +142,16 @@ class TestEpicPipelineVisibility:
         html = resp.text
         assert "card-parent-link" in html
         assert "Parent Epic" in html
+        # Parent indicator should be a clickable link to the parent task
+        assert f'/tasks/{epic_id}' in html
 
     def test_epic_child_progress_on_pipeline(
         self, client: TestClient, project_id: str
     ) -> None:
         """Epic cards show child progress like '1/2 children done'."""
+        from forge import database
+        from forge.config import DB_PATH
+
         epic_resp = client.post(
             "/api/tasks",
             json={
@@ -174,14 +179,23 @@ class TestEpicPipelineVisibility:
             },
         )
 
-        # Mark child 1 as done
-        child1_id = child1_resp.json()["id"]
-        client.post(f"/api/tasks/{child1_id}/cancel")
-        # Cancel won't set done. Use direct DB update via activate + complete flow.
-        # Instead, just check the 0/2 progress for two backlog children.
+        # Initially both children are in backlog → 0/2 done
         resp = client.get("/")
         assert resp.status_code == 200
         assert "0/2 children done" in resp.text
+
+        # Mark child 1 as done via direct DB update and verify 1/2
+        child1_id = child1_resp.json()["id"]
+        conn = database.get_connection(str(DB_PATH))
+        try:
+            database.update_task(conn, child1_id, status="done")
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "1/2 children done" in resp.text
 
     def test_pipeline_no_epics_still_works(self, client: TestClient, project_id: str) -> None:
         """Pipeline renders correctly when there are no epic tasks."""

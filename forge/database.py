@@ -477,6 +477,45 @@ def get_parent_task(
     return cur.fetchone()
 
 
+def get_parent_tasks_batch(
+    conn: sqlite3.Connection, task_ids: list[str]
+) -> dict[str, sqlite3.Row]:
+    """Return a mapping of child task_id → parent Row for all given child task IDs."""
+    if not task_ids:
+        return {}
+    placeholders = ",".join("?" for _ in task_ids)
+    cur = conn.execute(
+        f"""SELECT child.id AS child_id, parent.*
+            FROM tasks child
+            JOIN tasks parent ON child.parent_task_id = parent.id
+            WHERE child.id IN ({placeholders})""",
+        task_ids,
+    )
+    return {row["child_id"]: row for row in cur.fetchall()}
+
+
+def get_child_counts_batch(
+    conn: sqlite3.Connection, parent_task_ids: list[str]
+) -> dict[str, dict[str, int]]:
+    """Return {parent_id: {"total": N, "done": M}} for all given parent IDs."""
+    if not parent_task_ids:
+        return {}
+    placeholders = ",".join("?" for _ in parent_task_ids)
+    cur = conn.execute(
+        f"""SELECT parent_task_id,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
+            FROM tasks
+            WHERE parent_task_id IN ({placeholders})
+            GROUP BY parent_task_id""",
+        parent_task_ids,
+    )
+    return {
+        row["parent_task_id"]: {"total": row["total"], "done": row["done"]}
+        for row in cur.fetchall()
+    }
+
+
 def all_children_complete(conn: sqlite3.Connection, parent_task_id: str) -> bool:
     """Return True when all children of a parent exist and have status='done'."""
     cur = conn.execute(
