@@ -568,7 +568,28 @@ def reset_task(task_id: str, body: ResetRequest | None = Body(default=None)) -> 
 _CANCELLABLE_STATUSES = {"backlog", "active", "paused", "needs_human"}
 
 
-@router.post("/{task_id}/cancel", response_model=TaskResponse)
+def _cancel_single_task(
+    conn, task_id: str, reason: str | None = None
+) -> None:
+    """Cancel a single task: mark running stage runs as errored, set status, log."""
+    running_runs = database.list_stage_runs(
+        conn, task_id=task_id, status="running"
+    )
+    for sr in running_runs:
+        database.update_stage_run(
+            conn, sr["id"], status="error", error_message="Task cancelled"
+        )
+    database.update_task(conn, task_id, status="cancelled")
+    message = "Task cancelled"
+    if reason:
+        message = f"Task cancelled: {reason}"
+    database.insert_log(conn, level="info", task_id=task_id, message=message)
+
+
+_TERMINAL_STATUSES = {"done", "cancelled", "error"}
+
+
+@router.post("/{task_id}/cancel", response_model=None)
 def cancel_task(
     task_id: str, body: CancelRequest | None = Body(default=None)
 ) -> dict:
@@ -585,24 +606,28 @@ def cancel_task(
                 "Only backlog, active, paused, or needs_human tasks can be cancelled.",
             )
 
-        # Mark any running stage runs as errored
-        running_runs = database.list_stage_runs(
-            conn, task_id=task_id, status="running"
-        )
-        for sr in running_runs:
-            database.update_stage_run(
-                conn, sr["id"], status="error", error_message="Task cancelled"
-            )
-
-        # Update task status
-        database.update_task(conn, task_id, status="cancelled")
-
-        # Log the cancellation
+        force = body.force if body else False
         reason = body.reason if body else None
-        message = "Task cancelled"
-        if reason:
-            message = f"Task cancelled: {reason}"
-        database.insert_log(conn, level="info", task_id=task_id, message=message)
+
+        # Epic-flow tasks: check for active children
+        if row["flow"] == "epic":
+            children = database.get_child_tasks(conn, task_id)
+            active_children = [
+                dict(c) for c in children if c["status"] not in _TERMINAL_STATUSES
+            ]
+            if active_children and not force:
+                return {
+                    "warning": "Epic has active children. Use force=true to cancel them all.",
+                    "active_children": [
+                        {"id": c["id"], "title": c["title"], "status": c["status"]}
+                        for c in active_children
+                    ],
+                }
+            # Force-cancel: cancel all active children first
+            for child in active_children:
+                _cancel_single_task(conn, child["id"], reason="Parent epic cancelled")
+
+        _cancel_single_task(conn, task_id, reason)
 
         updated_row = database.get_task(conn, task_id)
         return _row_to_task(updated_row)

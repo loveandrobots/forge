@@ -131,6 +131,7 @@ class GenerateResponse(BaseModel):
 
 class CancelRequest(BaseModel):
     reason: str | None = None
+    force: bool = False
 
 
 class ResetRequest(BaseModel):

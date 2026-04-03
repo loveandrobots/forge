@@ -547,6 +547,105 @@ class TestCancelTask:
         assert resp.status_code == 400
         assert "cancelled" in resp.json()["detail"].lower()
 
+    # --- Epic force-cancel ---
+
+    def _create_epic_with_children(
+        self, client: TestClient, project_id: str, tmp_path, child_statuses: list[str]
+    ) -> tuple[str, list[str]]:
+        """Create an epic-flow task with children in the given statuses."""
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Epic task",
+                "priority": 5,
+                "flow": "epic",
+            },
+        )
+        epic_id = resp.json()["id"]
+        db_path = str(tmp_path / "test.db")
+        conn = database.get_connection(db_path)
+        child_ids = []
+        try:
+            for i, status in enumerate(child_statuses):
+                cid = database.insert_task(
+                    conn,
+                    project_id=project_id,
+                    title=f"Child {i}",
+                    parent_task_id=epic_id,
+                )
+                if status != "backlog":
+                    database.update_task(conn, cid, status=status)
+                child_ids.append(cid)
+        finally:
+            conn.close()
+        return epic_id, child_ids
+
+    def test_cancel_epic_without_children(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Epic no kids",
+                "priority": 5,
+                "flow": "epic",
+            },
+        )
+        epic_id = resp.json()["id"]
+        resp = client.post(f"/api/tasks/{epic_id}/cancel")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+    def test_cancel_epic_with_active_children_without_force_returns_warning(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        epic_id, child_ids = self._create_epic_with_children(
+            client, project_id, tmp_path, ["active"]
+        )
+        resp = client.post(f"/api/tasks/{epic_id}/cancel")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "warning" in data
+        assert "active_children" in data
+        assert len(data["active_children"]) == 1
+        assert data["active_children"][0]["id"] == child_ids[0]
+        # Epic should NOT be cancelled
+        epic_resp = client.get(f"/api/tasks/{epic_id}")
+        assert epic_resp.json()["status"] != "cancelled"
+
+    def test_cancel_epic_with_force_cancels_all_children(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        epic_id, child_ids = self._create_epic_with_children(
+            client, project_id, tmp_path, ["active", "backlog"]
+        )
+        resp = client.post(
+            f"/api/tasks/{epic_id}/cancel", json={"force": True}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+        # All children should be cancelled
+        db_path = str(tmp_path / "test.db")
+        conn = database.get_connection(db_path)
+        try:
+            for cid in child_ids:
+                child = database.get_task(conn, cid)
+                assert child["status"] == "cancelled"
+        finally:
+            conn.close()
+
+    def test_cancel_epic_with_only_completed_children_succeeds_without_force(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        epic_id, _child_ids = self._create_epic_with_children(
+            client, project_id, tmp_path, ["done", "cancelled"]
+        )
+        resp = client.post(f"/api/tasks/{epic_id}/cancel")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
     def test_retry_cancelled_task_returns_400(
         self, client: TestClient, task_id: str
     ) -> None:
