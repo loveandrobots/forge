@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from forge import database
-from forge.config import DB_PATH, FLOW_STAGES, STAGES
+from forge.config import CONFIG_PATH, DB_PATH, FLOW_STAGES, STAGES, get_settings
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -189,12 +189,14 @@ def _cmd_add_task(args: argparse.Namespace) -> None:
         if not project:
             print(f"Error: project '{args.project}' not found.", file=sys.stderr)
             sys.exit(1)
+        settings = get_settings(CONFIG_PATH)
         task_id = database.insert_task(
             conn,
             project_id=project["id"],
             title=args.title,
             description=args.description,
             priority=args.priority,
+            max_retries=settings.engine.default_max_retries,
             flow=args.flow,
         )
         print(f"Task '{args.title}' added to '{args.project}' (id={task_id}).")

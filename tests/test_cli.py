@@ -200,6 +200,40 @@ class TestAddTask:
         assert "not found" in err
 
 
+class TestAddTaskMaxRetries:
+    """CLI add-task should use configured default_max_retries, not the hardcoded default."""
+
+    def test_uses_configured_max_retries(self, db_path, tmp_path, monkeypatch, capsys):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("engine:\n  default_max_retries: 7\n")
+        monkeypatch.setattr("forge.cli.CONFIG_PATH", config_file)
+
+        main(["init-project", "--name", "Proj", "--repo-path", "/tmp/repo"])
+        main(["add-task", "--project", "Proj", "--title", "Retry task"])
+        capsys.readouterr()
+
+        conn = _get_conn(db_path)
+        tasks = database.list_tasks(conn, status="backlog")
+        conn.close()
+        assert len(tasks) == 1
+        assert tasks[0]["max_retries"] == 7
+
+    def test_default_max_retries_without_config(self, db_path, tmp_path, monkeypatch, capsys):
+        """Without a config file, max_retries should use the built-in default (3)."""
+        config_file = tmp_path / "nonexistent_config.yaml"
+        monkeypatch.setattr("forge.cli.CONFIG_PATH", config_file)
+
+        main(["init-project", "--name", "Proj", "--repo-path", "/tmp/repo"])
+        main(["add-task", "--project", "Proj", "--title", "Default retry"])
+        capsys.readouterr()
+
+        conn = _get_conn(db_path)
+        tasks = database.list_tasks(conn, status="backlog")
+        conn.close()
+        assert len(tasks) == 1
+        assert tasks[0]["max_retries"] == 3
+
+
 class TestAddTaskFlow:
     def test_add_task_with_flow_quick(self, db_path, capsys):
         main(["migrate"])
