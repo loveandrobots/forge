@@ -745,7 +745,8 @@ def get_project_gate_scripts(project_id: str) -> list[dict] | dict:
         conn.close()
 
 
-if __name__ == "__main__":
+def build_arg_parser() -> "argparse.ArgumentParser":
+    """Build the argument parser for the MCP server CLI entry point."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Forge MCP Server")
@@ -761,8 +762,19 @@ if __name__ == "__main__":
         default=8390,
         help="Port for HTTP/SSE transport (default: 8390)",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def build_run_kwargs(args: "argparse.Namespace") -> dict:
+    """Build kwargs dict for mcp.run() from parsed CLI arguments."""
     kwargs: dict = {}
     if args.transport in ("http", "sse"):
         kwargs["port"] = args.port
+    return kwargs
+
+
+if __name__ == "__main__":
+    parser = build_arg_parser()
+    args = parser.parse_args()
+    kwargs = build_run_kwargs(args)
     mcp.run(transport=args.transport, **kwargs)
