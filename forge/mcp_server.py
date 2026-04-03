@@ -8,7 +8,7 @@ import re
 import sqlite3
 from collections import deque
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from forge import config, database
 from forge.config import FLOW_STAGES, STAGES, VALID_EPIC_STATUSES, VALID_FLOWS
@@ -751,9 +751,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Forge MCP Server")
     parser.add_argument(
         "--transport",
-        choices=["stdio", "sse"],
+        choices=["stdio", "sse", "http"],
         default="stdio",
         help="Transport to use (default: stdio)",
     )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8390,
+        help="Port for HTTP/SSE transport (default: 8390)",
+    )
     args = parser.parse_args()
-    mcp.run(transport=args.transport)
+    kwargs: dict = {}
+    if args.transport in ("http", "sse"):
+        kwargs["port"] = args.port
+    mcp.run(transport=args.transport, **kwargs)

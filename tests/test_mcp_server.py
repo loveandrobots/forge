@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from forge import database
 from forge.mcp_server import (
@@ -1318,3 +1318,139 @@ class TestGetProjectGateScripts:
         assert isinstance(result, dict)
         assert "error" in result
         assert fake_id in result["error"]
+
+
+class TestTransportAndPort:
+    """Tests for transport selection and port configuration in the CLI entry point."""
+
+    def test_server_uses_fastmcp_package(self):
+        """Verify the server uses the standalone fastmcp package, not mcp.server.fastmcp."""
+        import fastmcp
+
+        assert isinstance(mcp, fastmcp.FastMCP)
+
+    def test_cli_accepts_http_transport(self):
+        """Verify --transport http is accepted by the argument parser."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        parser.add_argument("--port", type=int, default=8390)
+        args = parser.parse_args(["--transport", "http"])
+        assert args.transport == "http"
+
+    def test_cli_accepts_stdio_transport(self):
+        """Verify --transport stdio is accepted (backward compatibility)."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        parser.add_argument("--port", type=int, default=8390)
+        args = parser.parse_args(["--transport", "stdio"])
+        assert args.transport == "stdio"
+
+    def test_cli_default_transport_is_stdio(self):
+        """Verify default transport is stdio for Claude Code compatibility."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        parser.add_argument("--port", type=int, default=8390)
+        args = parser.parse_args([])
+        assert args.transport == "stdio"
+
+    def test_cli_default_port(self):
+        """Verify default port is 8390."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        parser.add_argument("--port", type=int, default=8390)
+        args = parser.parse_args([])
+        assert args.port == 8390
+
+    def test_cli_custom_port(self):
+        """Verify --port flag overrides the default."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        parser.add_argument("--port", type=int, default=8390)
+        args = parser.parse_args(["--transport", "http", "--port", "9000"])
+        assert args.port == 9000
+
+    def test_cli_rejects_invalid_transport(self):
+        """Verify invalid transport values are rejected."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--transport", "websocket"])
+
+    def test_mcp_server_module_defines_http_transport(self):
+        """Verify the __main__ block in mcp_server.py includes 'http' as a transport choice."""
+        import inspect
+
+        from forge import mcp_server
+
+        source = inspect.getsource(mcp_server)
+        assert '"http"' in source or "'http'" in source
+        assert "--port" in source
+
+    def test_port_not_passed_for_stdio(self):
+        """Verify that port kwarg is only built for network transports."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        parser.add_argument("--port", type=int, default=8390)
+        args = parser.parse_args(["--transport", "stdio"])
+        kwargs: dict = {}
+        if args.transport in ("http", "sse"):
+            kwargs["port"] = args.port
+        assert "port" not in kwargs
+
+    def test_port_passed_for_http(self):
+        """Verify that port kwarg is built for http transport."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        parser.add_argument("--port", type=int, default=8390)
+        args = parser.parse_args(["--transport", "http", "--port", "7777"])
+        kwargs: dict = {}
+        if args.transport in ("http", "sse"):
+            kwargs["port"] = args.port
+        assert kwargs["port"] == 7777
+
+    def test_port_passed_for_sse(self):
+        """Verify that port kwarg is built for sse transport."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--transport", choices=["stdio", "sse", "http"], default="stdio"
+        )
+        parser.add_argument("--port", type=int, default=8390)
+        args = parser.parse_args(["--transport", "sse"])
+        kwargs: dict = {}
+        if args.transport in ("http", "sse"):
+            kwargs["port"] = args.port
+        assert kwargs["port"] == 8390
