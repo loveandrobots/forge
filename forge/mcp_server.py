@@ -226,6 +226,9 @@ def create_task_batch(
     if not isinstance(task_list, list) or len(task_list) == 0:
         return {"error": "tasks must be a non-empty JSON array"}
 
+    if not all(isinstance(t, dict) for t in task_list):
+        return {"error": "Each item in tasks must be a JSON object"}
+
     conn = database.get_connection()
     try:
         # Validate project

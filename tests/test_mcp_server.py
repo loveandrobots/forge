@@ -693,3 +693,35 @@ class TestCreateTaskBatch:
         assert isinstance(result, dict)
         assert "error" in result
         assert "title" in result["error"].lower()
+
+    def test_batch_non_dict_items(self, project_id):
+        result = create_task_batch(project_id=project_id, tasks="[1, 2]")
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "JSON object" in result["error"]
+
+    def test_batch_depends_on_wrong_project(self, project_id):
+        # Create a second project and a task in it
+        conn = database.get_connection()
+        try:
+            pid2 = database.insert_project(
+                conn,
+                name="OtherProject2",
+                repo_path="/tmp/other2",
+                default_branch="main",
+            )
+            other_task_id = database.insert_task(
+                conn,
+                project_id=pid2,
+                title="Other Task",
+            )
+        finally:
+            conn.close()
+
+        tasks_json = json.dumps(
+            [{"title": "Task A", "depends_on": [other_task_id]}]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "different project" in result["error"].lower()
