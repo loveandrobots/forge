@@ -9,7 +9,7 @@ import re
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from forge import database, dispatcher
-from forge.config import CONFIG_PATH, DB_PATH, FLOW_STAGES, STAGES, get_settings
+from forge.config import CONFIG_PATH, DB_PATH, FLOW_STAGES, STAGES, VALID_EPIC_STATUSES, get_settings
 from forge.models import (
     BatchTaskCreate,
     CancelRequest,
@@ -69,6 +69,22 @@ def create_task(body: TaskCreate) -> dict:
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
 
+        # Validate parent_task_id references an existing task
+        if body.parent_task_id is not None:
+            parent = database.get_task(conn, body.parent_task_id)
+            if parent is None:
+                raise HTTPException(status_code=404, detail="Parent task not found")
+
+        # Validate epic_status
+        epic_status = body.epic_status
+        if epic_status is not None and epic_status not in VALID_EPIC_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid epic_status: {epic_status!r}. Must be one of {VALID_EPIC_STATUSES}",
+            )
+        if body.flow == "epic" and epic_status is None:
+            epic_status = "pending"
+
         task_id = database.insert_task(
             conn,
             project_id=body.project_id,
@@ -78,6 +94,8 @@ def create_task(body: TaskCreate) -> dict:
             skill_overrides=body.skill_overrides,
             max_retries=_resolve_max_retries(body.max_retries),
             flow=body.flow,
+            parent_task_id=body.parent_task_id,
+            epic_status=epic_status,
         )
         row = database.get_task(conn, task_id)
         return _row_to_task(row)
@@ -129,6 +147,9 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
         try:
             for idx in order:
                 task_input = body.tasks[idx]
+                epic_status = task_input.epic_status
+                if task_input.flow == "epic" and epic_status is None:
+                    epic_status = "pending"
                 task_id = database.insert_task_no_commit(
                     conn,
                     project_id=task_input.project_id,
@@ -138,6 +159,8 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                     skill_overrides=task_input.skill_overrides,
                     max_retries=_resolve_max_retries(task_input.max_retries),
                     flow=task_input.flow,
+                    parent_task_id=task_input.parent_task_id,
+                    epic_status=epic_status,
                 )
                 index_to_task_id[idx] = task_id
 
@@ -275,6 +298,20 @@ async def generate_tasks(body: GenerateRequest) -> dict:
     return {"tasks": tasks}
 
 
+@router.get("/{task_id}/children", response_model=list[TaskResponse])
+def get_children(task_id: str) -> list[dict]:
+    """Return all child tasks of the given parent task."""
+    conn = database.get_connection(str(DB_PATH))
+    try:
+        row = database.get_task(conn, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        rows = database.get_child_tasks(conn, task_id)
+        return [_row_to_task(r) for r in rows]
+    finally:
+        conn.close()
+
+
 @router.get("/{task_id}", response_model=TaskResponse)
 def get_task(task_id: str) -> dict:
     conn = database.get_connection(str(DB_PATH))
@@ -306,6 +343,12 @@ def update_task(task_id: str, body: TaskUpdate) -> dict:
                 status_code=400,
                 detail="Cannot change flow on a task that is not in backlog status",
             )
+        if "epic_status" in updates and updates["epic_status"] is not None:
+            if updates["epic_status"] not in VALID_EPIC_STATUSES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid epic_status: {updates['epic_status']!r}. Must be one of {VALID_EPIC_STATUSES}",
+                )
         if not updates:
             return _row_to_task(row)
 

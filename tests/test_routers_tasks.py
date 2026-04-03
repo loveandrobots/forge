@@ -961,3 +961,251 @@ class TestMaxRetriesDefault:
             json={"project_id": project_id, "title": "Second task"},
         )
         assert resp.json()["max_retries"] == 9
+
+
+# ---------------------------------------------------------------------------
+# Parent-child task schema (epic decomposition)
+# ---------------------------------------------------------------------------
+
+
+class TestParentChildTasks:
+    """Tests for parent-child task hierarchy and epic support."""
+
+    def test_create_task_with_parent_id(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        # Create parent
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Parent task"},
+        )
+        parent_id = resp.json()["id"]
+
+        # Create child
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Child task",
+                "parent_task_id": parent_id,
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["parent_task_id"] == parent_id
+
+        # GET child also returns parent_task_id
+        resp = client.get(f"/api/tasks/{data['id']}")
+        assert resp.json()["parent_task_id"] == parent_id
+
+    def test_create_task_invalid_parent_id(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Orphan",
+                "parent_task_id": "nonexistent-id",
+            },
+        )
+        assert resp.status_code == 404
+        assert "Parent task not found" in resp.json()["detail"]
+
+    def test_get_children_returns_only_children(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        # Create parent
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Parent"},
+        )
+        parent_id = resp.json()["id"]
+
+        # Create children
+        resp1 = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Child 1",
+                "parent_task_id": parent_id,
+            },
+        )
+        c1_id = resp1.json()["id"]
+        resp2 = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "Child 2",
+                "parent_task_id": parent_id,
+            },
+        )
+        c2_id = resp2.json()["id"]
+
+        # Create unrelated task
+        client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Unrelated"},
+        )
+
+        # Fetch children
+        resp = client.get(f"/api/tasks/{parent_id}/children")
+        assert resp.status_code == 200
+        children = resp.json()
+        child_ids = {c["id"] for c in children}
+        assert child_ids == {c1_id, c2_id}
+
+    def test_get_children_empty(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "No children"},
+        )
+        task_id = resp.json()["id"]
+        resp = client.get(f"/api/tasks/{task_id}/children")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_all_children_complete_false_when_incomplete(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        # Create parent and children via API
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Epic parent"},
+        )
+        parent_id = resp.json()["id"]
+        client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "C1",
+                "parent_task_id": parent_id,
+            },
+        )
+        client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "C2",
+                "parent_task_id": parent_id,
+            },
+        )
+
+        # Check via DB function — children are in backlog, not complete
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            assert database.all_children_complete(conn, parent_id) is False
+        finally:
+            conn.close()
+
+    def test_all_children_complete_true_when_all_complete(
+        self, client: TestClient, project_id: str, tmp_path
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Epic parent 2"},
+        )
+        parent_id = resp.json()["id"]
+        r1 = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "C1",
+                "parent_task_id": parent_id,
+            },
+        )
+        r2 = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "C2",
+                "parent_task_id": parent_id,
+            },
+        )
+
+        # Mark both children complete via DB
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            database.update_task(conn, r1.json()["id"], status="complete")
+            database.update_task(conn, r2.json()["id"], status="complete")
+            assert database.all_children_complete(conn, parent_id) is True
+        finally:
+            conn.close()
+
+    def test_existing_tasks_null_parent(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        # Create a normal task without parent_task_id
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Normal task"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        task_id = data["id"]
+        assert data["parent_task_id"] is None
+        assert data["epic_status"] is None
+
+        # List, get, update, delete all work
+        resp = client.get(f"/api/tasks?project_id={project_id}")
+        assert resp.status_code == 200
+
+        resp = client.get(f"/api/tasks/{task_id}")
+        assert resp.status_code == 200
+        assert resp.json()["parent_task_id"] is None
+
+        resp = client.patch(f"/api/tasks/{task_id}", json={"title": "Updated"})
+        assert resp.status_code == 200
+
+        resp = client.delete(f"/api/tasks/{task_id}")
+        assert resp.status_code == 204
+
+    def test_epic_flow_sets_default_epic_status(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "My epic",
+                "flow": "epic",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["epic_status"] == "pending"
+
+    def test_update_epic_status(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "title": "My epic",
+                "flow": "epic",
+            },
+        )
+        task_id = resp.json()["id"]
+        resp = client.patch(
+            f"/api/tasks/{task_id}",
+            json={"epic_status": "decomposed"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["epic_status"] == "decomposed"
+
+    def test_task_response_includes_new_fields(
+        self, client: TestClient, project_id: str
+    ) -> None:
+        resp = client.post(
+            "/api/tasks",
+            json={"project_id": project_id, "title": "Field check"},
+        )
+        task_id = resp.json()["id"]
+        resp = client.get(f"/api/tasks/{task_id}")
+        data = resp.json()
+        assert "parent_task_id" in data
+        assert "epic_status" in data
+        assert data["parent_task_id"] is None
+        assert data["epic_status"] is None

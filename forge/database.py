@@ -123,6 +123,18 @@ def migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    try:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id)"
+        )
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        conn.execute("ALTER TABLE tasks ADD COLUMN epic_status TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # Enable pause_after_completion for Forge's own project
     conn.execute("UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'")
     conn.commit()
@@ -267,6 +279,8 @@ def insert_task_no_commit(
     skill_overrides: list[str] | None = None,
     max_retries: int = 3,
     flow: str = "standard",
+    parent_task_id: str | None = None,
+    epic_status: str | None = None,
 ) -> str:
     """Insert a new task with status='backlog' without committing. Returns the task id."""
     from forge.config import VALID_FLOWS
@@ -279,8 +293,8 @@ def insert_task_no_commit(
     now = _now()
     conn.execute(
         """INSERT INTO tasks
-           (id, project_id, title, description, priority, status, skill_overrides, max_retries, flow, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'backlog', ?, ?, ?, ?, ?)""",
+           (id, project_id, title, description, priority, status, skill_overrides, max_retries, flow, parent_task_id, epic_status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'backlog', ?, ?, ?, ?, ?, ?, ?)""",
         (
             task_id,
             project_id,
@@ -290,6 +304,8 @@ def insert_task_no_commit(
             _json_encode(skill_overrides),
             max_retries,
             flow,
+            parent_task_id,
+            epic_status,
             now,
             now,
         ),
@@ -307,6 +323,8 @@ def insert_task(
     skill_overrides: list[str] | None = None,
     max_retries: int = 3,
     flow: str = "standard",
+    parent_task_id: str | None = None,
+    epic_status: str | None = None,
 ) -> str:
     """Insert a new task with status='backlog'. Returns the task id."""
     task_id = insert_task_no_commit(
@@ -318,6 +336,8 @@ def insert_task(
         skill_overrides=skill_overrides,
         max_retries=max_retries,
         flow=flow,
+        parent_task_id=parent_task_id,
+        epic_status=epic_status,
     )
     conn.commit()
     return task_id
@@ -373,6 +393,7 @@ def update_task(
     completed_at: str | None = None,
     flow: str | None = None,
     escalated_from_quick: int | None = None,
+    epic_status: str | None = None,
 ) -> bool:
     """Update only the provided fields. Always sets updated_at. Returns True if modified."""
     fields: list[str] = ["updated_at = ?"]
@@ -391,6 +412,7 @@ def update_task(
         ("completed_at", completed_at, None),
         ("flow", flow, None),
         ("escalated_from_quick", escalated_from_quick, None),
+        ("epic_status", epic_status, None),
     ]:
         if val is not None:
             fields.append(f"{col} = ?")
@@ -424,6 +446,52 @@ def get_next_queued_task(conn: sqlite3.Connection) -> sqlite3.Row | None:
            LIMIT 1""",
     )
     return cur.fetchone()
+
+
+# ---------------------------------------------------------------------------
+# Parent-child (epic) queries
+# ---------------------------------------------------------------------------
+
+
+def get_child_tasks(
+    conn: sqlite3.Connection, parent_task_id: str
+) -> list[sqlite3.Row]:
+    """Return all child tasks for a given parent, ordered by priority DESC, created_at ASC."""
+    cur = conn.execute(
+        "SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY priority DESC, created_at ASC",
+        (parent_task_id,),
+    )
+    return cur.fetchall()
+
+
+def get_parent_task(
+    conn: sqlite3.Connection, task_id: str
+) -> sqlite3.Row | None:
+    """Return the parent task for a given child task, or None."""
+    cur = conn.execute(
+        """SELECT parent.* FROM tasks child
+           JOIN tasks parent ON child.parent_task_id = parent.id
+           WHERE child.id = ?""",
+        (task_id,),
+    )
+    return cur.fetchone()
+
+
+def all_children_complete(conn: sqlite3.Connection, parent_task_id: str) -> bool:
+    """Return True when all children of a parent exist and have status='complete'."""
+    cur = conn.execute(
+        "SELECT COUNT(*) FROM tasks WHERE parent_task_id = ?",
+        (parent_task_id,),
+    )
+    total = cur.fetchone()[0]
+    if total == 0:
+        return False
+    cur = conn.execute(
+        "SELECT COUNT(*) FROM tasks WHERE parent_task_id = ? AND status != 'complete'",
+        (parent_task_id,),
+    )
+    incomplete = cur.fetchone()[0]
+    return incomplete == 0
 
 
 # ---------------------------------------------------------------------------

@@ -52,7 +52,9 @@ class TaskCreate(BaseModel):
     priority: int = 0
     skill_overrides: list[str] | None = None
     max_retries: int | None = None
-    flow: Literal["standard", "quick"] = "standard"
+    flow: Literal["standard", "quick", "epic"] = "standard"
+    parent_task_id: str | None = None
+    epic_status: str | None = None
 
 
 class TaskCreateWithDeps(TaskCreate):
@@ -74,7 +76,8 @@ class TaskUpdate(BaseModel):
     plan_path: str | None = None
     review_path: str | None = None
     skill_overrides: list[str] | None = None
-    flow: Literal["standard", "quick"] | None = None
+    flow: Literal["standard", "quick", "epic"] | None = None
+    epic_status: str | None = None
 
 
 class TaskResponse(BaseModel):
@@ -91,8 +94,10 @@ class TaskResponse(BaseModel):
     review_path: str | None = None
     skill_overrides: list[str] | None = None
     max_retries: int
-    flow: Literal["standard", "quick"] = "standard"
+    flow: Literal["standard", "quick", "epic"] = "standard"
     escalated_from_quick: bool = False
+    parent_task_id: str | None = None
+    epic_status: str | None = None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None

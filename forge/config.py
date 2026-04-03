@@ -20,10 +20,14 @@ STAGES: list[str] = ["spec", "plan", "implement", "review"]
 FLOW_STAGES: dict[str, list[str]] = {
     "standard": ["spec", "plan", "implement", "review"],
     "quick": ["implement", "review"],
+    "epic": ["spec", "plan", "implement", "review"],
 }
 
 # Valid flow values
 VALID_FLOWS: tuple[str, ...] = tuple(FLOW_STAGES.keys())
+
+# Valid epic_status values
+VALID_EPIC_STATUSES: tuple[str, ...] = ("pending", "decomposed", "reviewing", "complete")
 
 # Valid task statuses
 TASK_STATUSES: list[str] = [

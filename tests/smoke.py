@@ -277,6 +277,7 @@ def run_smoke_tests() -> list[SmokeResult]:
 
                 # Parameterized GET endpoints
                 _check(client, "GET", f"/api/tasks/{first_task_id}", 200, results, exercised, route_patterns)
+                _check(client, "GET", f"/api/tasks/{first_task_id}/children", 200, results, exercised, route_patterns)
                 _check(client, "GET", f"/api/projects/{project_id}", 200, results, exercised, route_patterns)
 
                 # Stage run GET - find a stage run ID from the active task
