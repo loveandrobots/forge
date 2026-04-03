@@ -754,6 +754,79 @@ class TestFlowField:
 
 
 # ---------------------------------------------------------------------------
+# update_task flow validation
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateTaskFlowValidation:
+    def test_update_task_rejects_invalid_flow(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="T")
+        with pytest.raises(ValueError, match="Invalid flow"):
+            db.update_task(conn, tid, flow="nonexistent")
+        row = db.get_task(conn, tid)
+        assert row["flow"] == "standard"
+
+    def test_update_task_rejects_stage_outside_flow(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="T", flow="quick")
+        with pytest.raises(ValueError, match="not a valid stage"):
+            db.update_task(conn, tid, current_stage="plan")
+        row = db.get_task(conn, tid)
+        assert row["current_stage"] is None
+
+    def test_update_task_validates_stage_against_new_flow(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="T", flow="standard")
+        db.update_task(conn, tid, current_stage="plan")
+        with pytest.raises(ValueError):
+            db.update_task(conn, tid, flow="quick", current_stage="plan")
+
+    def test_update_task_allows_valid_flow_change(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="T")
+        db.update_task(conn, tid, flow="quick")
+        row = db.get_task(conn, tid)
+        assert row["flow"] == "quick"
+
+    def test_update_task_allows_valid_stage_for_flow(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="T", flow="quick")
+        db.update_task(conn, tid, current_stage="implement")
+        row = db.get_task(conn, tid)
+        assert row["current_stage"] == "implement"
+
+    def test_update_task_allows_both_flow_and_stage_when_compatible(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="T")
+        db.update_task(conn, tid, flow="quick", current_stage="implement")
+        row = db.get_task(conn, tid)
+        assert row["flow"] == "quick"
+        assert row["current_stage"] == "implement"
+
+    def test_update_task_stage_validated_against_stored_flow(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="T", flow="epic")
+        with pytest.raises(ValueError):
+            db.update_task(conn, tid, current_stage="implement")
+
+    def test_update_task_no_validation_when_stage_not_provided(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        tid = db.insert_task(conn, project_id=project_id, title="T", flow="quick")
+        db.update_task(conn, tid, title="New title")
+        row = db.get_task(conn, tid)
+        assert row["title"] == "New title"
+
+
+# ---------------------------------------------------------------------------
 # Escalated from quick field
 # ---------------------------------------------------------------------------
 

@@ -396,6 +396,30 @@ def update_task(
     epic_status: str | None = None,
 ) -> bool:
     """Update only the provided fields. Always sets updated_at. Returns True if modified."""
+    from forge.config import FLOW_STAGES, STAGES, VALID_FLOWS
+
+    # Validate flow if provided
+    if flow is not None and flow not in VALID_FLOWS:
+        raise ValueError(
+            f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}"
+        )
+
+    # Validate current_stage against the effective flow
+    if current_stage is not None and current_stage != "":
+        if flow is not None:
+            effective_flow = flow
+        else:
+            row = conn.execute(
+                "SELECT flow FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            effective_flow = (row["flow"] if row and row["flow"] else "standard") if row else "standard"
+        valid_stages = FLOW_STAGES.get(effective_flow, STAGES)
+        if current_stage not in valid_stages:
+            raise ValueError(
+                f"Stage {current_stage!r} is not a valid stage for flow {effective_flow!r}. "
+                f"Valid stages: {valid_stages}"
+            )
+
     fields: list[str] = ["updated_at = ?"]
     values: list = [_now()]
     for col, val, encoder in [
