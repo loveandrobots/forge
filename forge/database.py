@@ -412,7 +412,7 @@ def update_task(
             row = conn.execute(
                 "SELECT flow FROM tasks WHERE id = ?", (task_id,)
             ).fetchone()
-            effective_flow = (row["flow"] if row and row["flow"] else "standard") if row else "standard"
+            effective_flow = row["flow"] if row and row["flow"] else "standard"
         valid_stages = FLOW_STAGES.get(effective_flow, STAGES)
         if current_stage not in valid_stages:
             raise ValueError(

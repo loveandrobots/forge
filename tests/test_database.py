@@ -825,6 +825,15 @@ class TestUpdateTaskFlowValidation:
         row = db.get_task(conn, tid)
         assert row["title"] == "New title"
 
+    def test_update_task_empty_string_stage_skips_validation(
+        self, conn: sqlite3.Connection, project_id: str
+    ) -> None:
+        """Empty-string current_stage bypasses flow validation (used to clear stage)."""
+        tid = db.insert_task(conn, project_id=project_id, title="T", flow="epic")
+        db.update_task(conn, tid, current_stage="")
+        row = db.get_task(conn, tid)
+        assert row["current_stage"] == ""
+
 
 # ---------------------------------------------------------------------------
 # Escalated from quick field
