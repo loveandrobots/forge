@@ -10,7 +10,7 @@ from collections import deque
 from mcp.server.fastmcp import FastMCP
 
 from forge import config, database
-from forge.config import FLOW_STAGES, STAGES, VALID_EPIC_STATUSES
+from forge.config import FLOW_STAGES, STAGES, VALID_EPIC_STATUSES, VALID_FLOWS
 
 mcp = FastMCP("forge")
 
@@ -389,8 +389,8 @@ def update_task(
         if priority is not None:
             updates["priority"] = priority
         if flow is not None:
-            if flow not in config.VALID_FLOWS:
-                return {"error": f"Invalid flow: {flow!r}. Must be one of {config.VALID_FLOWS}"}
+            if flow not in VALID_FLOWS:
+                return {"error": f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}"}
             updates["flow"] = flow
         if epic_status is not None:
             updates["epic_status"] = epic_status
