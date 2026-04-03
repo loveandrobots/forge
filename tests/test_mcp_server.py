@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from mcp.server.fastmcp import FastMCP
 
 from forge import database
 from forge.mcp_server import (
+    create_task,
+    create_task_batch,
     get_completed_tasks,
     get_project_backlog,
     get_task_detail,
@@ -43,53 +47,89 @@ def populated_db(project_id):
 
         # Backlog tasks with different priorities
         ids["backlog_p5"] = database.insert_task(
-            conn, project_id=project_id, title="High priority", priority=5,
+            conn,
+            project_id=project_id,
+            title="High priority",
+            priority=5,
         )
         ids["backlog_p3"] = database.insert_task(
-            conn, project_id=project_id, title="Medium priority", priority=3,
+            conn,
+            project_id=project_id,
+            title="Medium priority",
+            priority=3,
         )
 
         # Active task with priority 1
         ids["active_p1"] = database.insert_task(
-            conn, project_id=project_id, title="Active task", priority=1,
+            conn,
+            project_id=project_id,
+            title="Active task",
+            priority=1,
         )
-        database.update_task(conn, ids["active_p1"], status="active", current_stage="implement")
+        database.update_task(
+            conn, ids["active_p1"], status="active", current_stage="implement"
+        )
 
         # Done task
         ids["done"] = database.insert_task(
-            conn, project_id=project_id, title="Done task", priority=2,
+            conn,
+            project_id=project_id,
+            title="Done task",
+            priority=2,
         )
-        database.update_task(conn, ids["done"], status="done", completed_at="2026-01-15T10:00:00Z")
+        database.update_task(
+            conn, ids["done"], status="done", completed_at="2026-01-15T10:00:00Z"
+        )
 
         # Cancelled task
         ids["cancelled"] = database.insert_task(
-            conn, project_id=project_id, title="Cancelled task", priority=2,
+            conn,
+            project_id=project_id,
+            title="Cancelled task",
+            priority=2,
         )
         database.update_task(conn, ids["cancelled"], status="cancelled")
 
         # Failed task
         ids["failed"] = database.insert_task(
-            conn, project_id=project_id, title="Failed task", priority=2,
+            conn,
+            project_id=project_id,
+            title="Failed task",
+            priority=2,
         )
         database.update_task(conn, ids["failed"], status="failed")
 
         # Epic task with children
         ids["epic"] = database.insert_task(
-            conn, project_id=project_id, title="Epic task", priority=4,
-            flow="epic", epic_status="decomposed",
+            conn,
+            project_id=project_id,
+            title="Epic task",
+            priority=4,
+            flow="epic",
+            epic_status="decomposed",
         )
         ids["child1"] = database.insert_task(
-            conn, project_id=project_id, title="Child 1", priority=2,
+            conn,
+            project_id=project_id,
+            title="Child 1",
+            priority=2,
             parent_task_id=ids["epic"],
         )
         ids["child2"] = database.insert_task(
-            conn, project_id=project_id, title="Child 2", priority=1,
+            conn,
+            project_id=project_id,
+            title="Child 2",
+            priority=1,
             parent_task_id=ids["epic"],
         )
 
         # Stage run for the active task
         ids["stage_run"] = database.insert_stage_run(
-            conn, task_id=ids["active_p1"], stage="implement", attempt=1, status="running",
+            conn,
+            task_id=ids["active_p1"],
+            stage="implement",
+            attempt=1,
+            status="running",
         )
 
         return ids
@@ -102,7 +142,10 @@ class TestListProjects:
         conn = database.get_connection()
         try:
             database.insert_project(
-                conn, name="SecondProject", repo_path="/tmp/second", default_branch="develop",
+                conn,
+                name="SecondProject",
+                repo_path="/tmp/second",
+                default_branch="develop",
             )
         finally:
             conn.close()
@@ -186,9 +229,21 @@ class TestGetTaskDetail:
     def test_returns_full_task_record(self, populated_db):
         result = get_task_detail(populated_db["backlog_p5"])
         assert result is not None
-        for field in ("id", "title", "description", "priority", "status",
-                      "current_stage", "flow", "branch_name", "spec_path",
-                      "plan_path", "review_path", "created_at", "updated_at"):
+        for field in (
+            "id",
+            "title",
+            "description",
+            "priority",
+            "status",
+            "current_stage",
+            "flow",
+            "branch_name",
+            "spec_path",
+            "plan_path",
+            "review_path",
+            "created_at",
+            "updated_at",
+        ):
             assert field in result
 
     def test_includes_stage_runs(self, populated_db):
@@ -225,10 +280,15 @@ class TestGetCompletedTasks:
         try:
             for i in range(5):
                 tid = database.insert_task(
-                    conn, project_id=project_id, title=f"Done task {i}", priority=0,
+                    conn,
+                    project_id=project_id,
+                    title=f"Done task {i}",
+                    priority=0,
                 )
                 database.update_task(
-                    conn, tid, status="done",
+                    conn,
+                    tid,
+                    status="done",
                     completed_at=f"2026-01-{10 + i:02d}T00:00:00Z",
                 )
         finally:
@@ -242,10 +302,15 @@ class TestGetCompletedTasks:
         try:
             for i in range(25):
                 tid = database.insert_task(
-                    conn, project_id=project_id, title=f"Done task {i}", priority=0,
+                    conn,
+                    project_id=project_id,
+                    title=f"Done task {i}",
+                    priority=0,
                 )
                 database.update_task(
-                    conn, tid, status="done",
+                    conn,
+                    tid,
+                    status="done",
                     completed_at=f"2026-02-{(i % 28) + 1:02d}T00:00:00Z",
                 )
         finally:
@@ -257,9 +322,14 @@ class TestGetCompletedTasks:
     def test_ordered_by_completed_at_descending(self, project_id):
         conn = database.get_connection()
         try:
-            for i, date in enumerate(["2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z", "2026-02-01T00:00:00Z"]):
+            for i, date in enumerate(
+                ["2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z", "2026-02-01T00:00:00Z"]
+            ):
                 tid = database.insert_task(
-                    conn, project_id=project_id, title=f"Done task {i}", priority=0,
+                    conn,
+                    project_id=project_id,
+                    title=f"Done task {i}",
+                    priority=0,
                 )
                 database.update_task(conn, tid, status="done", completed_at=date)
         finally:
@@ -277,9 +347,309 @@ class TestServerInit:
 
     @pytest.mark.asyncio
     async def test_tools_registered(self):
-        # The server should have our four tools registered
         tool_names = {tool.name for tool in await mcp.list_tools()}
         assert "list_projects" in tool_names
         assert "get_project_backlog" in tool_names
         assert "get_task_detail" in tool_names
         assert "get_completed_tasks" in tool_names
+        assert "create_task" in tool_names
+        assert "create_task_batch" in tool_names
+
+
+class TestCreateTask:
+    def test_create_task_all_fields(self, project_id):
+        result = create_task(
+            project_id=project_id,
+            title="My Task",
+            description="A description",
+            priority=5,
+            flow="quick",
+        )
+        assert "id" in result
+        assert result["title"] == "My Task"
+        assert result["description"] == "A description"
+        assert result["priority"] == 5
+        assert result["flow"] == "quick"
+        # Verify in DB
+        conn = database.get_connection()
+        try:
+            row = database.get_task(conn, result["id"])
+            assert row is not None
+            assert row["title"] == "My Task"
+        finally:
+            conn.close()
+
+    def test_create_task_defaults(self, project_id):
+        result = create_task(project_id=project_id, title="Minimal Task")
+        assert result["description"] == ""
+        assert result["priority"] == 0
+        assert result["flow"] == "standard"
+
+    def test_create_task_invalid_project(self):
+        result = create_task(project_id="nonexistent-id", title="Task")
+        assert "error" in result
+        assert "project" in result["error"].lower()
+
+    def test_create_task_invalid_flow(self, project_id):
+        result = create_task(project_id=project_id, title="Task", flow="invalid")
+        assert "error" in result
+        assert "flow" in result["error"].lower()
+
+    def test_create_task_with_depends_on(self, project_id):
+        t1 = create_task(project_id=project_id, title="Dep 1")
+        t2 = create_task(project_id=project_id, title="Dep 2")
+        t3 = create_task(
+            project_id=project_id,
+            title="Blocked Task",
+            depends_on=[t1["id"], t2["id"]],
+        )
+        assert "id" in t3
+        conn = database.get_connection()
+        try:
+            links = database.get_task_links(conn, t3["id"])
+            blocking = [
+                lnk
+                for lnk in links
+                if lnk["link_type"] == "blocks" and lnk["target_task_id"] == t3["id"]
+            ]
+            source_ids = {lnk["source_task_id"] for lnk in blocking}
+            assert source_ids == {t1["id"], t2["id"]}
+        finally:
+            conn.close()
+
+    def test_create_task_depends_on_nonexistent(self, project_id):
+        result = create_task(
+            project_id=project_id,
+            title="Task",
+            depends_on=["00000000-0000-0000-0000-000000000000"],
+        )
+        assert "error" in result
+        # Task should NOT have been created
+        conn = database.get_connection()
+        try:
+            rows = database.list_tasks(conn, project_id=project_id)
+            assert all(r["title"] != "Task" for r in rows)
+        finally:
+            conn.close()
+
+    def test_create_task_depends_on_wrong_project(self, project_id):
+        # Create a second project and a task in it
+        conn = database.get_connection()
+        try:
+            pid2 = database.insert_project(
+                conn,
+                name="OtherProject",
+                repo_path="/tmp/other",
+                default_branch="main",
+            )
+            other_task_id = database.insert_task(
+                conn,
+                project_id=pid2,
+                title="Other Task",
+            )
+        finally:
+            conn.close()
+
+        result = create_task(
+            project_id=project_id,
+            title="Task",
+            depends_on=[other_task_id],
+        )
+        assert "error" in result
+        assert "different project" in result["error"].lower()
+
+
+class TestCreateTaskBatch:
+    def test_batch_basic(self, project_id):
+        tasks_json = json.dumps(
+            [
+                {"title": "Task A"},
+                {"title": "Task B", "priority": 3},
+                {"title": "Task C", "flow": "quick", "description": "desc"},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert result[0]["title"] == "Task A"
+        assert result[1]["priority"] == 3
+        assert result[2]["flow"] == "quick"
+
+    def test_batch_title_dependency(self, project_id):
+        tasks_json = json.dumps(
+            [
+                {"title": "Foundation"},
+                {"title": "Walls", "depends_on": ["Foundation"]},
+                {"title": "Roof", "depends_on": ["Walls"]},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, list)
+        assert len(result) == 3
+
+        # Verify links
+        conn = database.get_connection()
+        try:
+            roof_id = result[2]["id"]
+            walls_id = result[1]["id"]
+            foundation_id = result[0]["id"]
+
+            # Walls blocked by Foundation
+            links = database.get_task_links(conn, walls_id)
+            blocking = [
+                lnk
+                for lnk in links
+                if lnk["link_type"] == "blocks" and lnk["target_task_id"] == walls_id
+            ]
+            assert len(blocking) == 1
+            assert blocking[0]["source_task_id"] == foundation_id
+
+            # Roof blocked by Walls
+            links = database.get_task_links(conn, roof_id)
+            blocking = [
+                lnk
+                for lnk in links
+                if lnk["link_type"] == "blocks" and lnk["target_task_id"] == roof_id
+            ]
+            assert len(blocking) == 1
+            assert blocking[0]["source_task_id"] == walls_id
+        finally:
+            conn.close()
+
+    def test_batch_atomic_rollback(self, project_id):
+        tasks_json = json.dumps(
+            [
+                {"title": "Good Task 1"},
+                {"title": "Good Task 2"},
+                {"title": "Bad Task", "flow": "invalid"},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+
+        # None of the tasks should exist
+        conn = database.get_connection()
+        try:
+            rows = database.list_tasks(conn, project_id=project_id)
+            titles = {r["title"] for r in rows}
+            assert "Good Task 1" not in titles
+            assert "Good Task 2" not in titles
+            assert "Bad Task" not in titles
+        finally:
+            conn.close()
+
+    def test_batch_circular_dependency(self, project_id):
+        tasks_json = json.dumps(
+            [
+                {"title": "A", "depends_on": ["B"]},
+                {"title": "B", "depends_on": ["A"]},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "circular" in result["error"].lower()
+
+    def test_batch_duplicate_titles(self, project_id):
+        tasks_json = json.dumps(
+            [
+                {"title": "Same Title"},
+                {"title": "Same Title"},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "duplicate" in result["error"].lower()
+
+    def test_batch_mixed_dependencies(self, project_id):
+        # Create an existing task
+        existing = create_task(project_id=project_id, title="Existing Task")
+        assert "id" in existing
+
+        tasks_json = json.dumps(
+            [
+                {"title": "Batch Task 1"},
+                {"title": "Batch Task 2", "depends_on": [existing["id"]]},
+                {"title": "Batch Task 3", "depends_on": ["Batch Task 1"]},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, list)
+        assert len(result) == 3
+
+        conn = database.get_connection()
+        try:
+            # Batch Task 2 blocked by existing task (UUID ref)
+            links = database.get_task_links(conn, result[1]["id"])
+            blocking = [
+                lnk
+                for lnk in links
+                if lnk["link_type"] == "blocks"
+                and lnk["target_task_id"] == result[1]["id"]
+            ]
+            assert len(blocking) == 1
+            assert blocking[0]["source_task_id"] == existing["id"]
+
+            # Batch Task 3 blocked by Batch Task 1 (title ref)
+            links = database.get_task_links(conn, result[2]["id"])
+            blocking = [
+                lnk
+                for lnk in links
+                if lnk["link_type"] == "blocks"
+                and lnk["target_task_id"] == result[2]["id"]
+            ]
+            assert len(blocking) == 1
+            assert blocking[0]["source_task_id"] == result[0]["id"]
+        finally:
+            conn.close()
+
+    def test_batch_invalid_project(self):
+        tasks_json = json.dumps([{"title": "Task"}])
+        result = create_task_batch(project_id="nonexistent", tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "project" in result["error"].lower()
+
+    def test_batch_depends_on_nonexistent_uuid(self, project_id):
+        tasks_json = json.dumps(
+            [
+                {
+                    "title": "Task",
+                    "depends_on": ["00000000-0000-0000-0000-000000000000"],
+                },
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+
+        # No tasks created
+        conn = database.get_connection()
+        try:
+            rows = database.list_tasks(conn, project_id=project_id)
+            assert all(r["title"] != "Task" for r in rows)
+        finally:
+            conn.close()
+
+    def test_batch_depends_on_nonexistent_title(self, project_id):
+        tasks_json = json.dumps(
+            [
+                {"title": "Task", "depends_on": ["No Such Title"]},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+
+    def test_batch_self_dependency_by_title(self, project_id):
+        tasks_json = json.dumps(
+            [
+                {"title": "Self", "depends_on": ["Self"]},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "circular" in result["error"].lower()
