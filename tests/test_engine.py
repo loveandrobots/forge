@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from forge import database as db
-from forge.config import Settings
+from forge.config import EngineSettings, Settings
 from forge.dispatcher import DispatchResult, GitResult
 from forge.engine import (
     PipelineEngine,
@@ -2028,6 +2028,146 @@ class TestProcessFollowUps:
         assert by_title["Quick one"]["flow"] == "quick"
         assert by_title["Standard one"]["flow"] == "standard"
         assert by_title["Default one"]["flow"] == "quick"
+
+
+class TestFollowUpMaxRetries:
+    """Follow-up tasks should inherit max_retries from configured default_max_retries."""
+
+    async def test_follow_up_tasks_use_configured_max_retries(
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Follow-up tasks created by _process_follow_ups use the configured default_max_retries."""
+        import json
+
+        custom_retries = 8
+        custom_settings = Settings(engine=EngineSettings(default_max_retries=custom_retries))
+        engine = PipelineEngine(custom_settings, ":memory:")
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [{"title": "Follow-up task", "description": "Do something"}]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Follow-up task"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["max_retries"] == custom_retries
+
+    async def test_follow_up_tasks_default_max_retries_without_config(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Without custom config, follow-up tasks get the built-in default (3)."""
+        import json
+
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [{"title": "Default retries task", "description": "Check default"}]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Default retries task"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["max_retries"] == 3
+
+
+class TestEpicDecompositionMaxRetries:
+    """Epic child tasks should inherit max_retries from configured default_max_retries."""
+
+    async def test_epic_children_use_configured_max_retries(
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Child tasks from epic decomposition use the configured default_max_retries."""
+        import json
+        import os
+
+        custom_retries = 10
+        custom_settings = Settings(engine=EngineSettings(default_max_retries=custom_retries))
+
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump([{"title": "Child task", "description": "A child"}], f)
+
+        engine = PipelineEngine(custom_settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        children = db.get_child_tasks(conn, task_id)
+        assert len(children) == 1
+        assert children[0]["max_retries"] == custom_retries
+
+    async def test_epic_children_default_max_retries_without_config(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Without custom config, epic children get the built-in default (3)."""
+        import json
+        import os
+
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump([{"title": "Default child", "description": "Check default"}], f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        children = db.get_child_tasks(conn, task_id)
+        assert len(children) == 1
+        assert children[0]["max_retries"] == 3
 
 
 class TestTaskPriority:

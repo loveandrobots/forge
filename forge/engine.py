@@ -1069,6 +1069,7 @@ class PipelineEngine:
                 priority=priority,
                 flow=flow,
                 parent_task_id=task_id,
+                max_retries=self.settings.engine.default_max_retries,
             )
             database.insert_task_link(
                 conn,
@@ -1182,6 +1183,7 @@ class PipelineEngine:
                     description=description,
                     flow=flow,
                     parent_task_id=parent_task_id,
+                    max_retries=self.settings.engine.default_max_retries,
                 )
                 database.insert_task_link(
                     conn,
