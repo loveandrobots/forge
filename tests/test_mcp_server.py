@@ -17,7 +17,7 @@ from forge.mcp_server import (
 
 
 @pytest.fixture()
-def project_id(tmp_path):
+def project_id():
     """Insert a test project and return its ID."""
     conn = database.get_connection()
     try:
@@ -66,6 +66,12 @@ def populated_db(project_id):
             conn, project_id=project_id, title="Cancelled task", priority=2,
         )
         database.update_task(conn, ids["cancelled"], status="cancelled")
+
+        # Failed task
+        ids["failed"] = database.insert_task(
+            conn, project_id=project_id, title="Failed task", priority=2,
+        )
+        database.update_task(conn, ids["failed"], status="failed")
 
         # Epic task with children
         ids["epic"] = database.insert_task(
@@ -121,11 +127,12 @@ class TestListProjects:
 
 
 class TestGetProjectBacklog:
-    def test_excludes_done_and_cancelled(self, populated_db):
+    def test_excludes_done_cancelled_and_failed(self, populated_db):
         result = get_project_backlog(populated_db["project_id"])
         ids_returned = {t["id"] for t in result}
         assert populated_db["done"] not in ids_returned
         assert populated_db["cancelled"] not in ids_returned
+        assert populated_db["failed"] not in ids_returned
         assert populated_db["backlog_p5"] in ids_returned
         assert populated_db["active_p1"] in ids_returned
 
@@ -146,6 +153,29 @@ class TestGetProjectBacklog:
             assert "current_stage" in task
             assert "parent_task_id" in task
             assert "epic_status" in task
+            assert "depends_on" in task
+
+    def test_depends_on_includes_blocking_links(self, populated_db):
+        conn = database.get_connection()
+        try:
+            # backlog_p3 blocks backlog_p5 → backlog_p5's depends_on should list this link
+            database.insert_task_link(
+                conn,
+                source_task_id=populated_db["backlog_p3"],
+                target_task_id=populated_db["backlog_p5"],
+                link_type="blocks",
+            )
+        finally:
+            conn.close()
+
+        result = get_project_backlog(populated_db["project_id"])
+        by_id = {t["id"]: t for t in result}
+        blocked = by_id[populated_db["backlog_p5"]]
+        assert len(blocked["depends_on"]) == 1
+        assert blocked["depends_on"][0]["source_task_id"] == populated_db["backlog_p3"]
+        # The blocker itself should have no depends_on entries
+        blocker = by_id[populated_db["backlog_p3"]]
+        assert blocker["depends_on"] == []
 
     def test_nonexistent_project_returns_empty(self):
         result = get_project_backlog("nonexistent-project-id")
@@ -245,9 +275,10 @@ class TestServerInit:
     def test_server_instance_created(self):
         assert isinstance(mcp, FastMCP)
 
-    def test_tools_registered(self):
+    @pytest.mark.asyncio
+    async def test_tools_registered(self):
         # The server should have our four tools registered
-        tool_names = {tool.name for tool in mcp._tool_manager.list_tools()}
+        tool_names = {tool.name for tool in await mcp.list_tools()}
         assert "list_projects" in tool_names
         assert "get_project_backlog" in tool_names
         assert "get_task_detail" in tool_names
