@@ -33,7 +33,7 @@
         </thead>
         <tbody>
             {% for log in logs %}
-            <tr class="log-row log-{{ log.level }}">
+            <tr class="log-row log-{{ log.level }}" data-log-id="{{ log.id }}">
                 <td class="log-time">{{ log.timestamp }}</td>
                 <td><span class="badge badge-{{ log.level }}">{{ log.level }}</span></td>
                 <td>{{ log.message }}</td>
@@ -57,26 +57,64 @@
     var url = "/api/logs/stream" + (level ? "?level=" + encodeURIComponent(level) : "");
     var es = new EventSource(url);
 
+    var maxRenderedId = 0;
+    document.querySelectorAll('tr[data-log-id]').forEach(function(row) {
+        var rid = parseInt(row.getAttribute('data-log-id'), 10);
+        if (rid > maxRenderedId) maxRenderedId = rid;
+    });
+
     es.onmessage = function(e) {
         var log = JSON.parse(e.data);
+        if (log.id <= maxRenderedId) return;
         var tbody = document.querySelector('.log-table tbody');
         if (!tbody) {
             var feed = document.getElementById('log-feed');
-            feed.innerHTML = '<table class="log-table"><thead><tr><th>Time</th><th>Level</th><th>Message</th><th>Task</th></tr></thead><tbody></tbody></table>';
-            tbody = feed.querySelector('tbody');
+            var empty = feed.querySelector('.empty-state');
+            if (empty) empty.remove();
+            var table = document.createElement('table');
+            table.className = 'log-table';
+            var thead = document.createElement('thead');
+            var headRow = document.createElement('tr');
+            ['Time', 'Level', 'Message', 'Task'].forEach(function(t) {
+                var th = document.createElement('th');
+                th.textContent = t;
+                headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+            table.appendChild(document.createElement('tbody'));
+            feed.appendChild(table);
+            tbody = table.querySelector('tbody');
         }
         var tr = document.createElement('tr');
         tr.className = 'log-row log-' + log.level;
-        var taskCell = '';
+        tr.setAttribute('data-log-id', log.id);
+
+        var timeTd = document.createElement('td');
+        timeTd.className = 'log-time';
+        timeTd.textContent = log.timestamp;
+        tr.appendChild(timeTd);
+
+        var levelTd = document.createElement('td');
+        var badge = document.createElement('span');
+        badge.className = 'badge badge-' + log.level;
+        badge.textContent = log.level;
+        levelTd.appendChild(badge);
+        tr.appendChild(levelTd);
+
+        var msgTd = document.createElement('td');
+        msgTd.textContent = log.message;
+        tr.appendChild(msgTd);
+
+        var taskTd = document.createElement('td');
         if (log.task_id) {
-            taskCell = '<a href="/tasks/' + log.task_id + '">' + log.task_id.substring(0, 8) + '</a>';
+            var a = document.createElement('a');
+            a.href = '/tasks/' + log.task_id;
+            a.textContent = log.task_id.substring(0, 8);
+            taskTd.appendChild(a);
         }
-        tr.innerHTML =
-            '<td class="log-time">' + log.timestamp + '</td>' +
-            '<td><span class="badge badge-' + log.level + '">' + log.level + '</span></td>' +
-            '<td></td>' +
-            '<td>' + taskCell + '</td>';
-        tr.children[2].textContent = log.message;
+        tr.appendChild(taskTd);
+
         tbody.insertBefore(tr, tbody.firstChild);
     };
 })();

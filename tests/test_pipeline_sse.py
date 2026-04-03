@@ -235,6 +235,28 @@ class TestTemplatePrepend:
         assert "insertBefore" in content
         assert "tbody.firstChild" in content
 
+    def test_template_skips_duplicate_entries(self) -> None:
+        """SSE handler skips entries already rendered server-side (Issue 1)."""
+        import pathlib
+
+        template = pathlib.Path(__file__).parent.parent / "templates" / "logs.html"
+        content = template.read_text()
+        assert "data-log-id" in content
+        assert "maxRenderedId" in content
+        assert "log.id <= maxRenderedId" in content
+
+    def test_template_no_innerhtml_for_log_fields(self) -> None:
+        """Log fields use DOM APIs, not innerHTML, to prevent XSS (Issues 2 & 3)."""
+        import pathlib
+
+        template = pathlib.Path(__file__).parent.parent / "templates" / "logs.html"
+        content = template.read_text()
+        # The onmessage handler should use textContent/createElement, not innerHTML
+        script_section = content.split("es.onmessage")[1]
+        assert "innerHTML" not in script_section
+        assert "createElement" in script_section
+        assert "textContent" in script_section
+
 
 # ---------------------------------------------------------------------------
 # AC 10: Auto-reconnect via built-in EventSource behavior
