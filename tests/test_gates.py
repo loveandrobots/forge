@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import textwrap
@@ -572,7 +573,6 @@ class TestPostEpicSpec:
     SCRIPT = "post-epic-spec.sh"
 
     def _write_decomposition(self, repo: str, data: object) -> None:
-        import json
         _write_file(
             os.path.join(repo, "_forge/epic-decompositions/test-task-42.json"),
             json.dumps(data),
@@ -805,6 +805,26 @@ class TestPostEpicSpec:
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "depends_on must be an array" in result.stderr
+
+    def test_fails_with_negative_depends_on_index(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, [
+            _valid_child("Task A", depends_on=[-1]),
+            _valid_child("Task B"),
+        ])
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "dangling" in result.stderr.lower()
+
+    def test_fails_with_depends_on_boolean_entry(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, [
+            _valid_child("Task A", depends_on=[True]),
+            _valid_child("Task B"),
+        ])
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "integer index or string title" in result.stderr
 
     def test_fails_with_depends_on_invalid_entry_type(self, tmp_path: Path) -> None:
         repo = str(tmp_path)

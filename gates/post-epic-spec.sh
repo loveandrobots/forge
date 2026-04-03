@@ -99,7 +99,9 @@ for i, entry in enumerate(data):
             errors.append(\"Child %d ('%s'): depends_on must be an array\" % (i, title_label))
         else:
             for dep in deps:
-                if isinstance(dep, int):
+                if isinstance(dep, bool):
+                    errors.append(\"Child %d ('%s'): depends_on entry must be an integer index or string title\" % (i, title_label))
+                elif isinstance(dep, int):
                     if dep == i:
                         errors.append(\"Child %d ('%s'): depends_on references itself\" % (i, title_label))
                     elif dep < 0 or dep >= len(data):
