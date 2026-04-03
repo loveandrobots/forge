@@ -160,7 +160,7 @@ async def _log_event_stream(level: str | None) -> AsyncGenerator[str, None]:
         last_id = 0
         for row in rows:
             entry = _row_to_log(row)
-            last_id = entry["id"]
+            last_id = max(last_id, entry["id"])
             yield f"data: {json.dumps(entry)}\n\n"
         # Poll for new entries every 2 seconds
         while True:
@@ -170,7 +170,7 @@ async def _log_event_stream(level: str | None) -> AsyncGenerator[str, None]:
             )
             for row in new_rows:
                 entry = _row_to_log(row)
-                last_id = entry["id"]
+                last_id = max(last_id, entry["id"])
                 yield f"data: {json.dumps(entry)}\n\n"
     finally:
         conn.close()

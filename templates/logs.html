@@ -53,7 +53,7 @@
 
 <script>
 (function() {
-    var level = "{{ selected_level or '' }}";
+    var level = {{ (selected_level or '') | tojson }};
     var url = "/api/logs/stream" + (level ? "?level=" + encodeURIComponent(level) : "");
     var es = new EventSource(url);
 

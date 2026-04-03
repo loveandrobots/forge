@@ -108,6 +108,27 @@ class TestSSEInitialBurst:
         assert event_ids[0] == ids[5]
         assert event_ids[-1] == ids[24]
 
+    @pytest.mark.asyncio
+    async def test_last_id_tracks_max_to_avoid_duplicates(self, tmp_path) -> None:
+        """Verify that last_id uses max(id) so polling never re-sends entries."""
+        _insert_logs(tmp_path, 3)
+
+        async def _insert_later():
+            await asyncio.sleep(1)
+            _insert_logs(tmp_path, 2, prefix="new")
+
+        task = asyncio.create_task(_insert_later())
+        gen = _log_event_stream(None)
+        events = await asyncio.wait_for(
+            _collect_events_from_generator(gen, 5), timeout=15,
+        )
+        await task
+        # All event ids must be unique — no duplicates from bad last_id tracking
+        event_ids = [e["id"] for e in events]
+        assert len(event_ids) == len(set(event_ids)), (
+            f"Duplicate event ids detected: {event_ids}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # AC 4: Polling sends new entries after initial burst
@@ -212,6 +233,14 @@ class TestTemplateEventSource:
         content = template.read_text()
         assert "new EventSource" in content
         assert "/api/logs/stream" in content
+
+    def test_template_level_uses_tojson_filter(self) -> None:
+        """Level variable uses |tojson for safe JS interpolation (Issue 2)."""
+        import pathlib
+
+        template = pathlib.Path(__file__).parent.parent / "templates" / "logs.html"
+        content = template.read_text()
+        assert "| tojson" in content or "|tojson" in content
 
     def test_template_no_htmx_polling_for_logs(self) -> None:
         import pathlib
