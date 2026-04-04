@@ -4792,6 +4792,39 @@ class TestFollowUpsFromStructuredOutput:
         assert not os.path.exists(str(follow_ups_file))
 
 
+    async def test_empty_follow_ups_does_not_fallback_to_file(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 7: Explicit empty follow_ups array prevents filesystem fallback."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+
+        # Create a stale follow-ups JSON on filesystem
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [{"title": "Stale follow-up", "description": "Should be ignored"}]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        # Structured output with explicit empty follow_ups
+        structured = {"verdict": "PASS", "issues": [], "follow_ups": []}
+
+        engine._process_follow_ups(conn, task_id, project, structured_output=structured)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Stale follow-up"]
+        assert len(new_tasks) == 0
+        # Stale file should remain untouched (not read or cleaned up)
+        assert os.path.exists(str(follow_ups_file))
+
+
 class TestDatabaseMigrationStructuredOutput:
     """Test that the schema migration adds structured_output column."""
 

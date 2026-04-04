@@ -157,7 +157,7 @@ When you are finished, emit a fenced JSON block with your review results. This b
 
 - `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
 - `issues`: Array of issue description strings. Empty array if verdict is PASS.
-- `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
+- `follow_ups`: Array of follow-up task objects for pre-existing issues. Empty array if none."""
 
 QUICK_IMPLEMENT_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -241,7 +241,7 @@ When you are finished, emit a fenced JSON block with your review results. This b
 
 - `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
 - `issues`: Array of issue description strings. Empty array if verdict is PASS.
-- `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
+- `follow_ups`: Array of follow-up task objects for pre-existing issues. Empty array if none."""
 
 EPIC_SPEC_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -340,7 +340,7 @@ When you are finished, emit a fenced JSON block with your review results. This b
 
 - `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
 - `issues`: Array of issue description strings. Empty array if verdict is PASS.
-- `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
+- `follow_ups`: Array of follow-up task objects for pre-existing issues. Empty array if none."""
 
 EPIC_STAGE_TEMPLATES: dict[str, str] = {
     "spec": EPIC_SPEC_TEMPLATE,

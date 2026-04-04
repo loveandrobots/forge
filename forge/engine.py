@@ -1199,7 +1199,7 @@ class PipelineEngine:
             entries = structured_output["follow_ups"]
 
         # Fall back to filesystem JSON
-        if not entries:
+        if entries is None:
             if not repo_path:
                 return
             path = os.path.join(repo_path, f"_forge/follow-ups/{task_id}.json")
