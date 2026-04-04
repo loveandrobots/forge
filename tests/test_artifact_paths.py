@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from unittest.mock import patch
 
@@ -13,7 +12,6 @@ from forge.config import Settings
 from forge.engine import (
     PipelineEngine,
     _artifact_path_for_stage,
-    _STAGE_TO_PATH_FIELD,
 )
 
 # Save real methods before conftest's autouse fixture replaces them.
