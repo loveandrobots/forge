@@ -152,10 +152,10 @@ Load the following skills:
 When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
 
 ```forge-output
-{{"verdict": "PASS or ISSUES", "review_path": "_forge/reviews/{task_id}.md", "issues": ["issue 1 description", "issue 2 description"], "follow_ups": [{{"title": "Follow-up title", "description": "Follow-up description", "flow": "quick"}}]}}
+{{"verdict": "PASS", "review_path": "_forge/reviews/{task_id}.md", "issues": [], "follow_ups": []}}
 ```
 
-- `verdict`: Must be exactly "PASS" or "ISSUES".
+- `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
 - `issues`: Array of issue description strings. Empty array if verdict is PASS.
 - `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
 
@@ -236,10 +236,10 @@ Load the following skills:
 When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
 
 ```forge-output
-{{"verdict": "PASS or ISSUES", "review_path": "_forge/reviews/{task_id}.md", "issues": ["issue 1 description", "issue 2 description"], "follow_ups": [{{"title": "Follow-up title", "description": "Follow-up description", "flow": "quick"}}]}}
+{{"verdict": "PASS", "review_path": "_forge/reviews/{task_id}.md", "issues": [], "follow_ups": []}}
 ```
 
-- `verdict`: Must be exactly "PASS" or "ISSUES".
+- `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
 - `issues`: Array of issue description strings. Empty array if verdict is PASS.
 - `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
 
@@ -335,10 +335,10 @@ Load the following skills for context:
 When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
 
 ```forge-output
-{{"verdict": "PASS or ISSUES", "review_path": "_forge/reviews/{task_id}.md", "issues": ["issue 1 description", "issue 2 description"], "follow_ups": [{{"title": "Follow-up title", "description": "Follow-up description", "flow": "quick"}}]}}
+{{"verdict": "PASS", "review_path": "_forge/reviews/{task_id}.md", "issues": [], "follow_ups": []}}
 ```
 
-- `verdict`: Must be exactly "PASS" or "ISSUES".
+- `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
 - `issues`: Array of issue description strings. Empty array if verdict is PASS.
 - `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
 

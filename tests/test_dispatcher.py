@@ -192,6 +192,20 @@ class TestParseForgeOutput:
         assert result["verdict"] == "ISSUES"
         assert len(result["issues"]) == 2
 
+    def test_multiline_json(self):
+        """AC 1: Correctly parses multi-line / pretty-printed JSON."""
+        text = (
+            "```forge-output\n"
+            '{\n'
+            '  "verdict": "PASS",\n'
+            '  "review_path": "_forge/reviews/t1.md",\n'
+            '  "issues": []\n'
+            '}\n'
+            "```"
+        )
+        result = parse_forge_output(text)
+        assert result == {"verdict": "PASS", "review_path": "_forge/reviews/t1.md", "issues": []}
+
     def test_review_output_with_follow_ups(self):
         """AC 7: Parses review structured output with follow_ups array."""
         text = (

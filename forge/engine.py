@@ -414,6 +414,9 @@ class PipelineEngine:
                     )
 
                 # Step 5: Run gate
+                # Re-fetch task_row so gate env reflects any artifact paths
+                # written by structured output extraction above.
+                task_row = database.get_task(conn, task_id)
                 gate_env = build_gate_env(
                     task_row,
                     stage_runs[0],
