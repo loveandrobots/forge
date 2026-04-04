@@ -698,8 +698,9 @@ class PipelineEngine:
         task_row = database.get_task(conn, task_id)
         flow = task_row["flow"] if task_row else "standard"
 
-        # Record the artifact path for the completed stage (if not already set
-        # by structured output extraction earlier in the pipeline)
+        # Build artifact path kwargs for the completed stage (merged into the
+        # next update_task call to avoid extra DB writes).
+        artifact_kwargs: dict[str, str] = {}
         if project is not None:
             path_field = _STAGE_TO_PATH_FIELD.get(current_stage)
             if path_field and not (task_row and task_row[path_field]):
@@ -707,7 +708,7 @@ class PipelineEngine:
                     project.get("repo_path", ""), task_id, current_stage, flow=flow,
                 )
                 if art_path:
-                    database.update_task(conn, task_id, **{path_field: art_path})
+                    artifact_kwargs[path_field] = art_path
 
         # Epic flow: after spec passes, decompose into child tasks
         if flow == "epic" and current_stage == "spec":
@@ -715,6 +716,8 @@ class PipelineEngine:
                 database.update_task(conn, task_id, status="needs_human")
                 self._log("error", "Cannot decompose epic without project context", task_id=task_id)
                 return
+            if artifact_kwargs:
+                database.update_task(conn, task_id, **artifact_kwargs)
             self._process_epic_decomposition(conn, task_id, project)
             return
 
@@ -736,6 +739,7 @@ class PipelineEngine:
                     current_stage=current_stage,
                     completed_at=_now(),
                     epic_status="complete",
+                    **artifact_kwargs,
                 )
                 self._log("info", f"Epic {task_id} review passed — completed", task_id=task_id)
                 if project is not None:
@@ -758,6 +762,7 @@ class PipelineEngine:
                 status="done",
                 current_stage=current_stage,
                 completed_at=_now(),
+                **artifact_kwargs,
             )
             self._log("info", f"Task {task_id} completed", task_id=task_id)
 
@@ -768,7 +773,7 @@ class PipelineEngine:
             if project is not None:
                 await self._maybe_auto_pause(conn, task_id, project)
         else:
-            database.update_task(conn, task_id, current_stage=next_stage)
+            database.update_task(conn, task_id, current_stage=next_stage, **artifact_kwargs)
             database.insert_stage_run(
                 conn,
                 task_id=task_id,
