@@ -537,6 +537,7 @@ class PipelineEngine:
                 task_id=task_id,
                 metadata=_git_metadata(rebase_result),
             )
+            await self._restore_default_branch(repo_path, default_branch, task_id)
             return False
 
         # Step 3: Re-run post-implement gate

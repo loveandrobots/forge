@@ -122,6 +122,92 @@ class TestRebaseConflict:
 
 
 # ---------------------------------------------------------------------------
+# Test 2b: Rebase failure in _auto_merge restores default branch
+# ---------------------------------------------------------------------------
+
+
+class TestRebaseFailureRestoresDefaultBranch:
+    async def test_rebase_failure_restores_default_branch(self, git_repo):
+        """When rebase fails at step 2, _auto_merge should restore the default branch."""
+        from forge.engine import PipelineEngine
+        from forge.config import Settings
+
+        # Create a feature branch that will conflict with main
+        _run(git_repo, "git", "checkout", "-b", "forge/conflict")
+        with open(os.path.join(git_repo, "README.md"), "w") as f:
+            f.write("feature version")
+        _run(git_repo, "git", "add", ".")
+        _run(git_repo, "git", "commit", "-m", "feature change")
+        _run(git_repo, "git", "checkout", "main")
+
+        # Create a conflicting commit on main
+        with open(os.path.join(git_repo, "README.md"), "w") as f:
+            f.write("main conflicting version")
+        _run(git_repo, "git", "add", ".")
+        _run(git_repo, "git", "commit", "-m", "main conflict")
+
+        task = {
+            "id": "task-456",
+            "branch_name": "forge/conflict",
+            "project_id": "proj-1",
+        }
+        project = {
+            "id": "proj-1",
+            "name": "Test",
+            "repo_path": git_repo,
+            "default_branch": "main",
+            "gate_dir": "gates",
+        }
+
+        settings = Settings()
+        engine = PipelineEngine(settings, ":memory:")
+        mock_conn = MagicMock()
+
+        with patch("forge.engine.database") as mock_db, \
+             patch.object(engine, "_log"):
+            result = await engine._auto_merge(mock_conn, task, project)
+
+        assert result is False
+        mock_db.update_task.assert_called_once_with(
+            mock_conn, "task-456", status="needs_human"
+        )
+
+        # The repo should be back on the default branch, not the feature branch
+        branch_result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=git_repo, capture_output=True, text=True,
+        )
+        assert branch_result.stdout.strip() == "main"
+
+    async def test_rebase_failure_without_fix_would_leave_feature_branch(self, git_repo):
+        """Verify rebase_branch itself leaves repo on feature branch after conflict."""
+        # Create conflicting branches
+        _run(git_repo, "git", "checkout", "-b", "forge/feat2")
+        with open(os.path.join(git_repo, "README.md"), "w") as f:
+            f.write("feature text")
+        _run(git_repo, "git", "add", ".")
+        _run(git_repo, "git", "commit", "-m", "feature")
+        _run(git_repo, "git", "checkout", "main")
+
+        with open(os.path.join(git_repo, "README.md"), "w") as f:
+            f.write("main text")
+        _run(git_repo, "git", "add", ".")
+        _run(git_repo, "git", "commit", "-m", "main change")
+
+        # Raw rebase_branch leaves repo on the feature branch after failure
+        result = await rebase_branch(git_repo, "forge/feat2", "main")
+        assert result.success is False
+
+        branch_result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=git_repo, capture_output=True, text=True,
+        )
+        # rebase_branch checks out the feature branch first, so after failure
+        # the repo is left on the feature branch (this is the problem _auto_merge must handle)
+        assert branch_result.stdout.strip() == "forge/feat2"
+
+
+# ---------------------------------------------------------------------------
 # Test 3: Post-rebase gate failure triggers needs_human (AC 4, 5)
 # ---------------------------------------------------------------------------
 
