@@ -3,7 +3,7 @@ engine:
   max_concurrent_tasks: 1
   stage_timeout_seconds: 600
   stage_timeouts:
-    implement: 900
+    implement: 1200
   default_max_retries: 6
 claude:
   default_model: "opus"
