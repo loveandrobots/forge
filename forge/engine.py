@@ -754,6 +754,8 @@ class PipelineEngine:
                         conn, _row_to_dict(task_row), project
                     )
                     if not merge_ok:
+                        if artifact_kwargs:
+                            database.update_task(conn, task_id, **artifact_kwargs)
                         return  # Task set to needs_human by _auto_merge
             # All stages complete
             database.update_task(

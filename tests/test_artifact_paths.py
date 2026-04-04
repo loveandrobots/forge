@@ -168,6 +168,30 @@ class TestAdvanceTaskSetsArtifactPaths:
         task = db.get_task(conn, task_id)
         assert task["spec_path"] == decomp_path
 
+    async def test_review_pass_sets_review_path_when_auto_merge_fails(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """review_path is persisted even when _auto_merge fails and returns early."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn, task_id,
+            status="active", current_stage="review",
+            branch_name="feature/test-branch",
+        )
+        project = dict(db.get_project(conn, project_id))
+
+        with patch.object(engine, "_auto_merge", return_value=False):
+            await engine.advance_task(conn, task_id, "review", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["review_path"] == f"/tmp/repo/_forge/reviews/{task_id}.md"
+        # Task should NOT be "done" since merge failed
+        assert task["status"] != "done"
+
     async def test_no_project_does_not_set_artifact_path(
         self,
         conn: sqlite3.Connection,
