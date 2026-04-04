@@ -33,7 +33,14 @@ Read the project's existing documentation before writing the spec to ensure alig
 Load the following skills for context:
 {skill_references}
 
-{retry_context}"""
+{retry_context}
+
+## Output protocol
+When you are finished, emit a fenced JSON block with the artifact paths you produced. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
+
+```forge-output
+{{"spec_path": "_forge/specs/{task_id}.md"}}
+```"""
 
 PLAN_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -58,7 +65,14 @@ Read the existing codebase before planning to understand current patterns and co
 Load the following skills for context:
 {skill_references}
 
-{retry_context}"""
+{retry_context}
+
+## Output protocol
+When you are finished, emit a fenced JSON block with the artifact paths you produced. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
+
+```forge-output
+{{"plan_path": "_forge/plans/{task_id}.md"}}
+```"""
 
 IMPLEMENT_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -84,7 +98,14 @@ Load the following skills:
 {skill_references}
 
 {retry_context}
-{review_feedback}"""
+{review_feedback}
+
+## Output protocol
+When you are finished, emit a fenced JSON block summarizing the work you did. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
+
+```forge-output
+{{"files_modified": ["path/to/file1.py", "path/to/file2.py"]}}
+```"""
 
 REVIEW_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -125,7 +146,18 @@ Only task-related issues determine your verdict. Pre-existing issues must not ca
 Load the following skills:
 {skill_references}
 
-{retry_context}"""
+{retry_context}
+
+## Output protocol
+When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
+
+```forge-output
+{{"verdict": "PASS or ISSUES", "review_path": "_forge/reviews/{task_id}.md", "issues": ["issue 1 description", "issue 2 description"], "follow_ups": [{{"title": "Follow-up title", "description": "Follow-up description", "flow": "quick"}}]}}
+```
+
+- `verdict`: Must be exactly "PASS" or "ISSUES".
+- `issues`: Array of issue description strings. Empty array if verdict is PASS.
+- `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
 
 QUICK_IMPLEMENT_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -149,7 +181,14 @@ Load the following skills:
 {skill_references}
 
 {retry_context}
-{review_feedback}"""
+{review_feedback}
+
+## Output protocol
+When you are finished, emit a fenced JSON block summarizing the work you did. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
+
+```forge-output
+{{"files_modified": ["path/to/file1.py", "path/to/file2.py"]}}
+```"""
 
 QUICK_REVIEW_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -191,7 +230,18 @@ Only task-related issues determine your verdict. Pre-existing issues must not ca
 Load the following skills:
 {skill_references}
 
-{retry_context}"""
+{retry_context}
+
+## Output protocol
+When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
+
+```forge-output
+{{"verdict": "PASS or ISSUES", "review_path": "_forge/reviews/{task_id}.md", "issues": ["issue 1 description", "issue 2 description"], "follow_ups": [{{"title": "Follow-up title", "description": "Follow-up description", "flow": "quick"}}]}}
+```
+
+- `verdict`: Must be exactly "PASS" or "ISSUES".
+- `issues`: Array of issue description strings. Empty array if verdict is PASS.
+- `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
 
 EPIC_SPEC_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -226,7 +276,14 @@ Example output:
 Load the following skills for context:
 {skill_references}
 
-{retry_context}"""
+{retry_context}
+
+## Output protocol
+When you are finished, emit a fenced JSON block with the artifact paths you produced. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
+
+```forge-output
+{{"spec_path": "_forge/epic-decompositions/{task_id}.json"}}
+```"""
 
 STAGE_TEMPLATES: dict[str, str] = {
     "spec": SPEC_TEMPLATE,
@@ -272,7 +329,18 @@ If verdict is ISSUES, also write follow-up tasks to `_forge/follow-ups/{task_id}
 Load the following skills for context:
 {skill_references}
 
-{retry_context}"""
+{retry_context}
+
+## Output protocol
+When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
+
+```forge-output
+{{"verdict": "PASS or ISSUES", "review_path": "_forge/reviews/{task_id}.md", "issues": ["issue 1 description", "issue 2 description"], "follow_ups": [{{"title": "Follow-up title", "description": "Follow-up description", "flow": "quick"}}]}}
+```
+
+- `verdict`: Must be exactly "PASS" or "ISSUES".
+- `issues`: Array of issue description strings. Empty array if verdict is PASS.
+- `follow_ups`: Optional array of follow-up task objects for pre-existing issues. Omit if none."""
 
 EPIC_STAGE_TEMPLATES: dict[str, str] = {
     "spec": EPIC_SPEC_TEMPLATE,

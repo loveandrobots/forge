@@ -18,6 +18,7 @@ from forge.dispatcher import (
     delete_branch,
     dispatch_claude,
     ff_merge,
+    parse_forge_output,
     parse_stream_json,
     rebase_branch,
 )
@@ -99,6 +100,110 @@ class TestParseStreamJson:
         text, tokens = parse_stream_json(data)
         assert text == "done"
         assert tokens is None
+
+
+# ---------------------------------------------------------------------------
+# parse_forge_output tests
+# ---------------------------------------------------------------------------
+
+
+class TestParseForgeOutput:
+    def test_valid_json(self):
+        """AC 1: Correctly extracts and parses JSON from a forge-output block."""
+        text = (
+            "I wrote the spec file.\n\n"
+            "```forge-output\n"
+            '{"spec_path": "_forge/specs/abc.md"}\n'
+            "```"
+        )
+        result = parse_forge_output(text)
+        assert result == {"spec_path": "_forge/specs/abc.md"}
+
+    def test_no_block(self):
+        """AC 1, 5: Returns None when no forge-output block exists."""
+        text = "Just some regular output with no structured block."
+        result = parse_forge_output(text)
+        assert result is None
+
+    def test_invalid_json(self):
+        """AC 1, 5: Returns None when the block contains invalid JSON."""
+        text = (
+            "Some output\n\n"
+            "```forge-output\n"
+            "not valid json {{\n"
+            "```"
+        )
+        result = parse_forge_output(text)
+        assert result is None
+
+    def test_multiple_blocks_uses_last(self):
+        """AC 1: Uses the last forge-output block when multiple are present."""
+        text = (
+            "First attempt:\n"
+            "```forge-output\n"
+            '{"spec_path": "wrong.md"}\n'
+            "```\n\n"
+            "Actually, the correct output:\n"
+            "```forge-output\n"
+            '{"spec_path": "correct.md"}\n'
+            "```"
+        )
+        result = parse_forge_output(text)
+        assert result == {"spec_path": "correct.md"}
+
+    def test_block_with_surrounding_text(self):
+        """Extracts the block even when surrounded by lots of text."""
+        text = (
+            "I did a lot of work.\n"
+            "Here are my changes:\n"
+            "- Modified file A\n"
+            "- Modified file B\n\n"
+            "```forge-output\n"
+            '{"plan_path": "_forge/plans/xyz.md", "extra": true}\n'
+            "```\n"
+        )
+        result = parse_forge_output(text)
+        assert result == {"plan_path": "_forge/plans/xyz.md", "extra": True}
+
+    def test_non_dict_json_returns_none(self):
+        """Returns None when the JSON is valid but not an object."""
+        text = (
+            "```forge-output\n"
+            '["not", "a", "dict"]\n'
+            "```"
+        )
+        result = parse_forge_output(text)
+        assert result is None
+
+    def test_empty_string(self):
+        """Returns None for empty input."""
+        assert parse_forge_output("") is None
+
+    def test_review_output_with_verdict(self):
+        """AC 6: Parses review structured output with verdict and issues."""
+        text = (
+            "Review complete.\n\n"
+            "```forge-output\n"
+            '{"verdict": "ISSUES", "review_path": "_forge/reviews/t1.md", '
+            '"issues": ["Missing test for edge case", "Unused import"]}\n'
+            "```"
+        )
+        result = parse_forge_output(text)
+        assert result["verdict"] == "ISSUES"
+        assert len(result["issues"]) == 2
+
+    def test_review_output_with_follow_ups(self):
+        """AC 7: Parses review structured output with follow_ups array."""
+        text = (
+            "```forge-output\n"
+            '{"verdict": "PASS", "review_path": "_forge/reviews/t1.md", '
+            '"issues": [], "follow_ups": [{"title": "Fix typo", "description": "Typo in README", "flow": "quick"}]}\n'
+            "```"
+        )
+        result = parse_forge_output(text)
+        assert result["verdict"] == "PASS"
+        assert len(result["follow_ups"]) == 1
+        assert result["follow_ups"][0]["title"] == "Fix typo"
 
 
 # ---------------------------------------------------------------------------

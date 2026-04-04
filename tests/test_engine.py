@@ -4460,3 +4460,363 @@ class TestEngineStatusNullStage:
         html = template.render(status=_Status())
         assert "None" not in html
         assert "()" not in html
+
+
+# ---------------------------------------------------------------------------
+# Structured output extraction tests
+# ---------------------------------------------------------------------------
+
+
+class TestStructuredOutputExtraction:
+    """Tests for structured output parsing and task record updates."""
+
+    async def _run_one_iteration(self, engine: PipelineEngine) -> None:
+        engine.running = True
+        loop_task = asyncio.create_task(engine.run_loop())
+        await asyncio.sleep(0.5)
+        engine.running = False
+        try:
+            await asyncio.wait_for(loop_task, timeout=3.0)
+        except asyncio.TimeoutError:
+            loop_task.cancel()
+
+    async def test_engine_extracts_spec_path(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        active_task_with_queued_run: tuple[str, str],
+    ) -> None:
+        """AC 3: After spec dispatch with structured output, engine updates task spec_path."""
+        task_id, sr_id = active_task_with_queued_run
+        db.update_task(conn, task_id, branch_name="forge/test-branch")
+
+        output_text = (
+            "I wrote the spec.\n\n"
+            "```forge-output\n"
+            '{"spec_path": "_forge/specs/abc.md"}\n'
+            "```"
+        )
+        dispatch_result = DispatchResult(
+            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+        )
+        gate_result = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-spec.sh", duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        task = db.get_task(conn, task_id)
+        assert task["spec_path"] == "_forge/specs/abc.md"
+
+    async def test_engine_extracts_plan_path(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 3: After plan dispatch with structured output, engine updates task plan_path."""
+        task_id = db.insert_task(conn, project_id=project_id, title="Test", priority=10)
+        db.update_task(conn, task_id, status="active", current_stage="plan", branch_name="forge/test-branch")
+        db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1, status="queued")
+
+        output_text = (
+            "Plan written.\n\n"
+            "```forge-output\n"
+            '{"plan_path": "_forge/plans/xyz.md"}\n'
+            "```"
+        )
+        dispatch_result = DispatchResult(
+            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+        )
+        gate_result = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-plan.sh", duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        task = db.get_task(conn, task_id)
+        assert task["plan_path"] == "_forge/plans/xyz.md"
+
+    async def test_engine_extracts_review_path(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 3: After review dispatch with structured output, engine updates task review_path."""
+        task_id = db.insert_task(conn, project_id=project_id, title="Test", priority=10)
+        db.update_task(conn, task_id, status="active", current_stage="review", branch_name="forge/test-branch")
+        db.insert_stage_run(conn, task_id=task_id, stage="review", attempt=1, status="queued")
+
+        # Update project repo_path so auto-merge doesn't fail
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+
+        output_text = (
+            "Review done.\n\n"
+            "```forge-output\n"
+            '{"verdict": "PASS", "review_path": "_forge/reviews/t1.md", "issues": []}\n'
+            "```"
+        )
+        dispatch_result = DispatchResult(
+            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+        )
+        gate_result = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+            patch.object(engine, "_auto_merge", new_callable=AsyncMock, return_value=True),
+        ):
+            await self._run_one_iteration(engine)
+
+        task = db.get_task(conn, task_id)
+        assert task["review_path"] == "_forge/reviews/t1.md"
+
+    async def test_engine_stores_structured_output(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        active_task_with_queued_run: tuple[str, str],
+    ) -> None:
+        """AC 4: Structured output JSON is stored in the stage_run record."""
+        task_id, sr_id = active_task_with_queued_run
+        db.update_task(conn, task_id, branch_name="forge/test-branch")
+
+        output_text = (
+            "Done.\n\n"
+            "```forge-output\n"
+            '{"spec_path": "_forge/specs/abc.md"}\n'
+            "```"
+        )
+        dispatch_result = DispatchResult(
+            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+        )
+        gate_result = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-spec.sh", duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["structured_output"] is not None
+        parsed = json.loads(sr["structured_output"])
+        assert parsed["spec_path"] == "_forge/specs/abc.md"
+
+    async def test_engine_graceful_on_missing_output(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        active_task_with_queued_run: tuple[str, str],
+    ) -> None:
+        """AC 5: No forge-output block logs warning but proceeds normally."""
+        task_id, sr_id = active_task_with_queued_run
+        db.update_task(conn, task_id, branch_name="forge/test-branch")
+
+        dispatch_result = DispatchResult(
+            output="Just some text, no structured output block.",
+            exit_code=0, duration_seconds=5.0, tokens_used=100,
+        )
+        gate_result = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-spec.sh", duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        # Stage should still pass and advance
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "passed"
+        task = db.get_task(conn, task_id)
+        assert task["current_stage"] == "plan"
+        # No structured_output stored
+        assert sr["structured_output"] is None
+
+    async def test_engine_review_verdict_from_structured(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        active_task_with_queued_run: tuple[str, str],
+    ) -> None:
+        """AC 6: When review structured output has verdict, FORGE_VERDICT is passed to gate."""
+        task_id, sr_id = active_task_with_queued_run
+        db.update_task(conn, task_id, status="active", current_stage="review", branch_name="forge/test-branch")
+        # Update the stage run to be review
+        db.update_stage_run(conn, sr_id, status="passed")
+        db.insert_stage_run(conn, task_id=task_id, stage="review", attempt=1, status="queued")
+
+        output_text = (
+            "```forge-output\n"
+            '{"verdict": "PASS", "review_path": "_forge/reviews/t1.md", "issues": []}\n'
+            "```"
+        )
+        dispatch_result = DispatchResult(
+            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+        )
+        gate_result = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-review.sh", duration_seconds=1.0,
+        )
+
+        captured_gate_env: dict = {}
+
+        async def capture_run_gate(gate_dir, stage, env_vars):
+            captured_gate_env.update(env_vars)
+            return gate_result
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch("forge.engine.run_gate", side_effect=capture_run_gate),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+            patch.object(engine, "_auto_merge", new_callable=AsyncMock, return_value=True),
+        ):
+            await self._run_one_iteration(engine)
+
+        assert captured_gate_env.get("FORGE_VERDICT") == "PASS"
+
+
+class TestFollowUpsFromStructuredOutput:
+    """Tests for follow-up task creation from structured output."""
+
+    async def test_follow_ups_from_structured(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC 7: When structured output has follow_ups, tasks are created without filesystem JSON."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+
+        project = dict(db.get_project(conn, project_id))
+        structured = {
+            "verdict": "PASS",
+            "follow_ups": [
+                {"title": "Fix typo", "description": "Typo in README", "flow": "quick"},
+                {"title": "Add logging", "description": "Module needs logging", "flow": "standard"},
+            ],
+        }
+
+        engine._process_follow_ups(conn, task_id, project, structured_output=structured)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] in ("Fix typo", "Add logging")]
+        assert len(new_tasks) == 2
+
+        typo_task = next(t for t in new_tasks if t["title"] == "Fix typo")
+        assert typo_task["flow"] == "quick"
+        logging_task = next(t for t in new_tasks if t["title"] == "Add logging")
+        assert logging_task["flow"] == "standard"
+
+    async def test_follow_ups_fallback_to_file(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """AC 7: When structured output has no follow_ups, falls back to filesystem JSON."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+
+        # Create follow-ups JSON on filesystem
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [{"title": "File-based follow-up", "description": "From file"}]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        # Structured output without follow_ups
+        structured = {"verdict": "PASS", "issues": []}
+
+        engine._process_follow_ups(conn, task_id, project, structured_output=structured)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "File-based follow-up"]
+        assert len(new_tasks) == 1
+        # File should be cleaned up
+        assert not os.path.exists(str(follow_ups_file))
+
+
+class TestDatabaseMigrationStructuredOutput:
+    """Test that the schema migration adds structured_output column."""
+
+    def test_migration_adds_structured_output_column(self) -> None:
+        """AC 4: Migration adds structured_output column to stage_runs."""
+        c = db.get_connection(":memory:")
+        db.migrate(c)
+
+        # Create a project and task first (foreign key constraints)
+        pid = db.insert_project(c, name="P", repo_path="/tmp")
+        tid = db.insert_task(c, project_id=pid, title="T")
+
+        # Insert a stage run and verify structured_output column works
+        sr_id = db.insert_stage_run(
+            c, task_id=tid, stage="spec", attempt=1, status="queued"
+        )
+        # This would fail if the column doesn't exist
+        db.update_stage_run(c, sr_id, structured_output='{"spec_path": "test.md"}')
+        sr = db.get_stage_run(c, sr_id)
+        assert sr["structured_output"] == '{"spec_path": "test.md"}'
+        c.close()
+
+    def test_migration_idempotent(self) -> None:
+        """Running migrate twice doesn't fail."""
+        c = db.get_connection(":memory:")
+        db.migrate(c)
+        db.migrate(c)  # Should not raise
+        c.close()

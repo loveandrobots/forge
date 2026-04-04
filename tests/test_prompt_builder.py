@@ -276,6 +276,8 @@ class TestBuildPrompt:
         sample_project: dict,
         sample_stage_run: dict,
     ) -> None:
+        import re
+
         artifacts = {
             "spec_content": "spec body",
             "plan_content": "plan body",
@@ -285,8 +287,10 @@ class TestBuildPrompt:
             prompt = build_prompt(
                 stage, sample_task, sample_project, sample_stage_run, artifacts
             )
-            # No remaining {placeholder} tokens
-            assert "{" not in prompt, f"Unfilled placeholder in {stage} prompt"
+            # Check for unfilled Python format placeholders like {variable_name}
+            # but allow JSON content (e.g. {"key": "value"}) in forge-output blocks
+            unfilled = re.findall(r"\{[a-z_]+\}", prompt)
+            assert not unfilled, f"Unfilled placeholder in {stage} prompt: {unfilled}"
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +630,9 @@ class TestBuildPromptQuickFlow:
         prompt = build_prompt(
             "implement", quick_task, sample_project, sample_stage_run, artifacts
         )
-        assert "{" not in prompt, "Unfilled placeholder in quick implement prompt"
+        import re
+        unfilled = re.findall(r"\{[a-z_]+\}", prompt)
+        assert not unfilled, f"Unfilled placeholder in quick implement prompt: {unfilled}"
 
     def test_quick_review_no_unfilled_placeholders(
         self,
@@ -642,7 +648,9 @@ class TestBuildPromptQuickFlow:
         prompt = build_prompt(
             "review", quick_task, sample_project, sample_stage_run, artifacts
         )
-        assert "{" not in prompt, "Unfilled placeholder in quick review prompt"
+        import re
+        unfilled = re.findall(r"\{[a-z_]+\}", prompt)
+        assert not unfilled, f"Unfilled placeholder in quick review prompt: {unfilled}"
 
     def test_quick_implement_includes_retry_context(
         self,
@@ -833,3 +841,150 @@ class TestBuildPromptEpicFlow:
         assert f"_forge/reviews/{epic_task['id']}.md" in prompt
         # Contains follow-ups file instruction
         assert f"_forge/follow-ups/{epic_task['id']}.json" in prompt
+
+
+# ---------------------------------------------------------------------------
+# build_prompt — output protocol sections
+# ---------------------------------------------------------------------------
+
+
+class TestOutputProtocol:
+    def test_spec_template_includes_output_protocol(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """AC 2: Spec prompt includes forge-output instructions with spec_path."""
+        prompt = build_prompt(
+            "spec", sample_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "forge-output" in prompt
+        assert "spec_path" in prompt
+
+    def test_plan_template_includes_output_protocol(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """AC 2: Plan prompt includes forge-output instructions with plan_path."""
+        prompt = build_prompt(
+            "plan", sample_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "forge-output" in prompt
+        assert "plan_path" in prompt
+
+    def test_implement_template_includes_output_protocol(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """AC 2: Implement prompt includes forge-output instructions with files_modified."""
+        prompt = build_prompt(
+            "implement", sample_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "forge-output" in prompt
+        assert "files_modified" in prompt
+
+    def test_review_template_includes_output_protocol(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        """AC 2, 6: Review prompt includes forge-output with verdict, issues, follow_ups."""
+        artifacts = {"spec_content": "Spec.", "git_diff": "diff"}
+        prompt = build_prompt(
+            "review", sample_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "forge-output" in prompt
+        assert "verdict" in prompt
+        assert "issues" in prompt
+        assert "follow_ups" in prompt
+
+    def test_quick_implement_template_includes_output_protocol(
+        self,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        task = {
+            "id": "qf-001",
+            "title": "Fix thing",
+            "description": "Fix it.",
+            "branch_name": "forge/qf-001-fix",
+            "skill_overrides": None,
+            "flow": "quick",
+        }
+        prompt = build_prompt(
+            "implement", task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "forge-output" in prompt
+        assert "files_modified" in prompt
+
+    def test_quick_review_template_includes_output_protocol(
+        self,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        task = {
+            "id": "qf-001",
+            "title": "Fix thing",
+            "description": "Fix it.",
+            "branch_name": "forge/qf-001-fix",
+            "skill_overrides": None,
+            "flow": "quick",
+        }
+        artifacts = {"git_diff": "diff"}
+        prompt = build_prompt(
+            "review", task, sample_project, sample_stage_run, artifacts
+        )
+        assert "forge-output" in prompt
+        assert "verdict" in prompt
+        assert "follow_ups" in prompt
+
+    def test_epic_spec_template_includes_output_protocol(
+        self,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        task = {
+            "id": "epic-001",
+            "title": "Big feature",
+            "description": "Do it all.",
+            "branch_name": "",
+            "skill_overrides": None,
+            "flow": "epic",
+        }
+        prompt = build_prompt(
+            "spec", task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "forge-output" in prompt
+        assert "spec_path" in prompt
+
+    def test_epic_review_template_includes_output_protocol(
+        self,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        task = {
+            "id": "epic-001",
+            "title": "Big feature",
+            "description": "Do it all.",
+            "branch_name": "",
+            "skill_overrides": None,
+            "flow": "epic",
+        }
+        artifacts = {"spec_content": "decomp", "git_diff": ""}
+        prompt = build_prompt(
+            "review", task, sample_project, sample_stage_run, artifacts
+        )
+        assert "forge-output" in prompt
+        assert "verdict" in prompt
+        assert "follow_ups" in prompt

@@ -74,7 +74,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             gate_stdout TEXT,
             gate_stderr TEXT,
             tokens_used INTEGER,
-            error_message TEXT
+            error_message TEXT,
+            structured_output TEXT
         );
 
         CREATE TABLE IF NOT EXISTS task_links (
@@ -134,6 +135,11 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     try:
         conn.execute("ALTER TABLE tasks ADD COLUMN epic_status TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        conn.execute("ALTER TABLE stage_runs ADD COLUMN structured_output TEXT")
     except sqlite3.OperationalError:
         pass  # Column already exists
 
@@ -632,6 +638,7 @@ def update_stage_run(
     gate_stderr: str | None = None,
     tokens_used: int | None = None,
     error_message: str | None = None,
+    structured_output: str | None = None,
 ) -> bool:
     """Update only the provided fields. Returns True if modified."""
     fields: list[str] = []
@@ -650,6 +657,7 @@ def update_stage_run(
         ("gate_stderr", gate_stderr, None),
         ("tokens_used", tokens_used, None),
         ("error_message", error_message, None),
+        ("structured_output", structured_output, None),
     ]:
         if val is not None:
             fields.append(f"{col} = ?")

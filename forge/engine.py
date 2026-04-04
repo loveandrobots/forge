@@ -26,6 +26,7 @@ from forge.dispatcher import (
     delete_branch,
     dispatch_claude,
     ff_merge,
+    parse_forge_output,
     rebase_branch,
 )
 from forge.gate_runner import GateResult, build_gate_env, run_gate
@@ -382,12 +383,45 @@ class PipelineEngine:
                     self.current_task_id = None
                     continue
 
+                # Step 4b: Extract structured output
+                structured = parse_forge_output(result.output)
+                structured_json: str | None = None
+                if structured is not None:
+                    structured_json = json.dumps(structured)
+                    # Update task record with artifact paths
+                    update_kwargs: dict = {}
+                    if structured.get("spec_path"):
+                        update_kwargs["spec_path"] = structured["spec_path"]
+                    if structured.get("plan_path"):
+                        update_kwargs["plan_path"] = structured["plan_path"]
+                    if structured.get("review_path"):
+                        update_kwargs["review_path"] = structured["review_path"]
+                    if update_kwargs:
+                        database.update_task(conn, task_id, **update_kwargs)
+                        task.update(update_kwargs)
+                    # Store on stage_run
+                    database.update_stage_run(
+                        conn,
+                        stage_run_id,
+                        structured_output=structured_json,
+                    )
+                else:
+                    self._log(
+                        "warn",
+                        f"No forge-output block found in {stage} output for task {task_id}",
+                        task_id=task_id,
+                        stage_run_id=stage_run_id,
+                    )
+
                 # Step 5: Run gate
                 gate_env = build_gate_env(
                     task_row,
                     stage_runs[0],
                     project_row,
                 )
+                # Pass verdict from structured output to gate env
+                if structured and structured.get("verdict"):
+                    gate_env["FORGE_VERDICT"] = str(structured["verdict"])
                 gate_dir = project["gate_dir"]
                 # Resolve relative gate_dir against repo_path
                 import os
@@ -436,7 +470,11 @@ class PipelineEngine:
                         task_id=task_id,
                         stage_run_id=stage_run_id,
                     )
-                    await self.advance_task(conn, task_id, stage, project=project)
+                    await self.advance_task(
+                        conn, task_id, stage,
+                        project=project,
+                        structured_output=structured,
+                    )
                 else:
                     # Gate failed — bounce
                     database.update_stage_run(
@@ -627,6 +665,7 @@ class PipelineEngine:
         task_id: str,
         current_stage: str,
         project: dict | None = None,
+        structured_output: dict | None = None,
     ) -> None:
         """Create the next stage_run or mark the task done."""
         task_row = database.get_task(conn, task_id)
@@ -645,7 +684,10 @@ class PipelineEngine:
         if next_stage is None:
             # Process follow-ups from review before completing
             if current_stage == "review" and project is not None:
-                self._process_follow_ups(conn, task_id, project)
+                self._process_follow_ups(
+                    conn, task_id, project,
+                    structured_output=structured_output,
+                )
 
             # Epic review pass: complete the epic
             if flow == "epic" and current_stage == "review":
@@ -1142,65 +1184,82 @@ class PipelineEngine:
         task_id: str,
         project: dict,
         parent_task_id: str | None = None,
+        structured_output: dict | None = None,
     ) -> None:
-        """Create backlog tasks from follow-ups JSON written by the reviewer."""
+        """Create backlog tasks from follow-ups in structured output or filesystem JSON."""
         repo_path = project.get("repo_path", "")
-        if not repo_path:
-            return
-        path = os.path.join(repo_path, f"_forge/follow-ups/{task_id}.json")
-        if not os.path.exists(path):
-            return
-        try:
-            with open(path, encoding="utf-8") as f:
-                entries = json.load(f)
-            if not isinstance(entries, list) or not entries:
-                os.remove(path)
+        from_file = False
+
+        # Try structured output first
+        entries: list | None = None
+        if structured_output and isinstance(structured_output.get("follow_ups"), list):
+            entries = structured_output["follow_ups"]
+
+        # Fall back to filesystem JSON
+        if not entries:
+            if not repo_path:
                 return
-            created = 0
-            for entry in entries:
-                if isinstance(entry, dict):
-                    title = entry.get("title", "Follow-up")
-                    description = entry.get("description", "")
-                    flow = entry.get("flow", "quick")
-                    if flow not in VALID_FLOWS:
-                        flow = "quick"
-                elif isinstance(entry, str):
-                    if ": " in entry:
-                        title, description = entry.split(": ", 1)
-                    else:
-                        title = entry
-                        description = ""
+            path = os.path.join(repo_path, f"_forge/follow-ups/{task_id}.json")
+            if not os.path.exists(path):
+                return
+            try:
+                with open(path, encoding="utf-8") as f:
+                    entries = json.load(f)
+                from_file = True
+            except (json.JSONDecodeError, OSError):
+                logger.warning("Failed to process follow-ups for task %s", task_id)
+                return
+
+        if not isinstance(entries, list) or not entries:
+            if from_file:
+                os.remove(path)
+            return
+
+        created = 0
+        for entry in entries:
+            if isinstance(entry, dict):
+                title = entry.get("title", "Follow-up")
+                description = entry.get("description", "")
+                flow = entry.get("flow", "quick")
+                if flow not in VALID_FLOWS:
                     flow = "quick"
+            elif isinstance(entry, str):
+                if ": " in entry:
+                    title, description = entry.split(": ", 1)
                 else:
-                    logger.warning(
-                        "Skipping invalid follow-up entry for task %s: %r",
-                        task_id, entry,
-                    )
-                    continue
-                new_task_id = database.insert_task(
-                    conn,
-                    project_id=project["id"],
-                    title=title,
-                    description=description,
-                    flow=flow,
-                    parent_task_id=parent_task_id,
-                    max_retries=self.settings.engine.default_max_retries,
+                    title = entry
+                    description = ""
+                flow = "quick"
+            else:
+                logger.warning(
+                    "Skipping invalid follow-up entry for task %s: %r",
+                    task_id, entry,
                 )
-                database.insert_task_link(
-                    conn,
-                    source_task_id=new_task_id,
-                    target_task_id=task_id,
-                    link_type="created_by",
-                )
-                created += 1
-            os.remove(path)
-            self._log(
-                "info",
-                f"Created {created} follow-up task(s) from review of task {task_id}",
-                task_id=task_id,
+                continue
+            new_task_id = database.insert_task(
+                conn,
+                project_id=project["id"],
+                title=title,
+                description=description,
+                flow=flow,
+                parent_task_id=parent_task_id,
+                max_retries=self.settings.engine.default_max_retries,
             )
-        except (json.JSONDecodeError, OSError):
-            logger.warning("Failed to process follow-ups for task %s", task_id)
+            database.insert_task_link(
+                conn,
+                source_task_id=new_task_id,
+                target_task_id=task_id,
+                link_type="created_by",
+            )
+            created += 1
+
+        if from_file:
+            os.remove(path)
+        self._log(
+            "info",
+            f"Created {created} follow-up task(s) from review of task {task_id}",
+            task_id=task_id,
+        )
 
     def _load_artifacts(
         self,

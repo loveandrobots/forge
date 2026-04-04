@@ -7,9 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import re
 import shlex
 import time
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -31,6 +35,33 @@ class DispatchResult:
     duration_seconds: float
     tokens_used: int | None = None
     error: str | None = None
+
+
+_FORGE_OUTPUT_RE = re.compile(
+    r"```forge-output\s*\n(.*?)\n\s*```",
+    re.DOTALL,
+)
+
+
+def parse_forge_output(text: str) -> dict | None:
+    """Extract a JSON object from the last ```forge-output``` fenced block.
+
+    Returns the parsed dict, or None if no valid block is found.
+    """
+    matches = _FORGE_OUTPUT_RE.findall(text)
+    if not matches:
+        return None
+    # Use the last match (agent may emit partial blocks during reasoning)
+    raw_json = matches[-1].strip()
+    try:
+        result = json.loads(raw_json)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("Failed to parse forge-output JSON block")
+        return None
+    if not isinstance(result, dict):
+        logger.warning("forge-output block is not a JSON object")
+        return None
+    return result
 
 
 def parse_stream_json(raw: str) -> tuple[str, int | None]:
