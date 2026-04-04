@@ -626,7 +626,7 @@ class TestBuildPromptQuickFlow:
         prompt = build_prompt(
             "implement", quick_task, sample_project, sample_stage_run, artifacts
         )
-        assert "{" not in prompt, f"Unfilled placeholder in quick implement prompt"
+        assert "{" not in prompt, "Unfilled placeholder in quick implement prompt"
 
     def test_quick_review_no_unfilled_placeholders(
         self,
@@ -642,7 +642,7 @@ class TestBuildPromptQuickFlow:
         prompt = build_prompt(
             "review", quick_task, sample_project, sample_stage_run, artifacts
         )
-        assert "{" not in prompt, f"Unfilled placeholder in quick review prompt"
+        assert "{" not in prompt, "Unfilled placeholder in quick review prompt"
 
     def test_quick_implement_includes_retry_context(
         self,
@@ -833,3 +833,18 @@ class TestBuildPromptEpicFlow:
         assert f"_forge/reviews/{epic_task['id']}.md" in prompt
         # Contains follow-ups file instruction
         assert f"_forge/follow-ups/{epic_task['id']}.json" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Lint: no f-strings without placeholders (F541)
+# ---------------------------------------------------------------------------
+
+
+def test_no_f_strings_without_placeholders() -> None:
+    """Ruff F541 must not flag any f-strings missing placeholders."""
+    result = subprocess.run(
+        ["python3", "-m", "ruff", "check", "--select", "F541", str(Path(__file__))],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout
