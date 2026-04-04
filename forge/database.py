@@ -907,6 +907,7 @@ def get_logs_since(
 # ---------------------------------------------------------------------------
 
 TERMINAL_STATUSES = frozenset({"done", "cancelled", "failed"})
+CANCELLABLE_STATUSES = frozenset({"backlog", "active", "paused", "needs_human"})
 
 
 def cancel_single_task(

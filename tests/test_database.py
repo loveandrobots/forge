@@ -1004,3 +1004,25 @@ class TestGetChildCountsBatch:
         result = db.get_child_counts_batch(conn, [p1, p2])
         assert result[p1] == {"total": 1, "done": 0}
         assert result[p2] == {"total": 1, "done": 1}
+
+
+# ---------------------------------------------------------------------------
+# Shared status constants
+# ---------------------------------------------------------------------------
+
+
+class TestStatusConstants:
+    """Verify shared status constants are consistent and correctly typed."""
+
+    def test_cancellable_statuses_is_frozenset(self) -> None:
+        assert isinstance(db.CANCELLABLE_STATUSES, frozenset)
+
+    def test_terminal_statuses_is_frozenset(self) -> None:
+        assert isinstance(db.TERMINAL_STATUSES, frozenset)
+
+    def test_cancellable_statuses_contents(self) -> None:
+        assert db.CANCELLABLE_STATUSES == {"backlog", "active", "paused", "needs_human"}
+
+    def test_cancellable_and_terminal_are_disjoint(self) -> None:
+        overlap = db.CANCELLABLE_STATUSES & db.TERMINAL_STATUSES
+        assert overlap == set(), f"Overlap between cancellable and terminal: {overlap}"

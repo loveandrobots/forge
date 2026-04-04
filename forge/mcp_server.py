@@ -645,9 +645,7 @@ def reset_task(task_id: str, from_stage: str | None = None) -> dict:
         conn.close()
 
 
-_CANCELLABLE_STATUSES = {"backlog", "active", "paused", "needs_human"}
-
-
+_CANCELLABLE_STATUSES = database.CANCELLABLE_STATUSES
 _TERMINAL_STATUSES = database.TERMINAL_STATUSES
 
 
