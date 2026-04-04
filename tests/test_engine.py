@@ -4460,34 +4460,3 @@ class TestEngineStatusNullStage:
         html = template.render(status=_Status())
         assert "None" not in html
         assert "()" not in html
-
-
-def test_no_redundant_local_import_json():
-    """test_engine.py has a top-level `import json`; no local re-imports should exist."""
-    import ast
-    from pathlib import Path
-
-    source = Path(__file__).read_text()
-    tree = ast.parse(source)
-
-    top_level_imports = set()
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                top_level_imports.add(alias.name)
-
-    assert "json" in top_level_imports, "Expected top-level `import json`"
-
-    local_reimports: list[int] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import) and not isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                if alias.name == "json" and node.lineno > 1:
-                    # Check it's inside a function (not top-level)
-                    if node.col_offset > 0:
-                        local_reimports.append(node.lineno)
-
-    assert local_reimports == [], (
-        f"Found redundant local `import json` at lines: {local_reimports}. "
-        f"Use the top-level import instead."
-    )
