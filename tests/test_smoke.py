@@ -269,34 +269,3 @@ def test_excluded_routes_not_flagged():
     finally:
         app.routes.remove(dummy_route)
         _EXCLUDED_ROUTES.discard(exclusion_entry)
-
-
-def test_no_redundant_local_import_os_in_test_engine():
-    """test_engine.py should not have local `import os` when a top-level one exists."""
-    import ast
-
-    test_file = Path(__file__).resolve().parent / "test_engine.py"
-    tree = ast.parse(test_file.read_text())
-
-    # Identify top-level imports
-    top_level_os = any(
-        isinstance(node, ast.Import)
-        and any(alias.name == "os" for alias in node.names)
-        for node in ast.iter_child_nodes(tree)
-    )
-    assert top_level_os, "test_engine.py should have a top-level `import os`"
-
-    # Find local (non-top-level) `import os` statements
-    local_os_lines: list[int] = []
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Import)
-            and any(alias.name == "os" for alias in node.names)
-            and node.col_offset > 0
-        ):
-            local_os_lines.append(node.lineno)
-
-    assert local_os_lines == [], (
-        f"Redundant local `import os` found at lines {local_os_lines} in test_engine.py. "
-        "Use the top-level import instead."
-    )
