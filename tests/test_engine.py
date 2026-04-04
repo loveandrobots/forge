@@ -1667,7 +1667,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """AC 10, 11, 12, 19: Follow-up JSON entries produce backlog tasks with created_by links."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1737,7 +1736,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """Plain string entries in follow-up JSON are ingested as backlog tasks."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1785,7 +1783,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """Arrays with both dict and string entries are fully processed."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1830,7 +1827,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """Invalid entries (null, numbers) are skipped; valid entries still processed."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1868,7 +1864,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """Follow-up entries with flow: quick create quick-flow tasks."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1901,7 +1896,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """Follow-up entries without a flow field default to quick."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1934,7 +1928,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """Follow-up entries with invalid flow values fall back to quick."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1967,7 +1960,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """Plain string follow-up entries default to quick flow."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1998,7 +1990,6 @@ class TestProcessFollowUps:
         tmp_path,
     ) -> None:
         """Multiple follow-up entries with different flows are handled correctly."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -2282,7 +2273,6 @@ class TestGitResultErrorContext:
         assert sr["error_message"].startswith("Rebase failed")
 
         # Check run_log has metadata with git details
-        import json
 
         logs = db.get_logs(conn, task_id=task_id)
         meta_logs = [
@@ -2299,7 +2289,6 @@ class TestGitResultErrorContext:
         settings: Settings,
     ) -> None:
         """AC #6: _log passes metadata through to database.insert_log."""
-        import json
 
         engine = PipelineEngine(settings, ":memory:")
         safe_conn = _UnclosableConnection(conn)
@@ -3212,7 +3201,6 @@ class TestEpicDecomposition:
         # Write decomposition JSON
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
-        import json
         decomp = [
             {"title": "Child A", "description": "Do A", "flow": "standard", "priority": 2},
             {"title": "Child B", "description": "Do B", "flow": "quick", "priority": 1},
@@ -3271,7 +3259,6 @@ class TestEpicDecomposition:
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
-        import json
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3462,7 +3449,6 @@ class TestEpicDecomposition:
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
-        import json
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3495,7 +3481,6 @@ class TestEpicDecomposition:
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
-        import json
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3528,7 +3513,6 @@ class TestEpicDecomposition:
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
-        import json
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3561,7 +3545,6 @@ class TestEpicDecomposition:
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
-        import json
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3617,7 +3600,6 @@ class TestEpicDecompositionEdgeCases:
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
-        import json
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -4478,3 +4460,34 @@ class TestEngineStatusNullStage:
         html = template.render(status=_Status())
         assert "None" not in html
         assert "()" not in html
+
+
+def test_no_redundant_local_import_json():
+    """test_engine.py has a top-level `import json`; no local re-imports should exist."""
+    import ast
+    from pathlib import Path
+
+    source = Path(__file__).read_text()
+    tree = ast.parse(source)
+
+    top_level_imports = set()
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top_level_imports.add(alias.name)
+
+    assert "json" in top_level_imports, "Expected top-level `import json`"
+
+    local_reimports: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and not isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "json" and node.lineno > 1:
+                    # Check it's inside a function (not top-level)
+                    if node.col_offset > 0:
+                        local_reimports.append(node.lineno)
+
+    assert local_reimports == [], (
+        f"Found redundant local `import json` at lines: {local_reimports}. "
+        f"Use the top-level import instead."
+    )
