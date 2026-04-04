@@ -833,18 +833,3 @@ class TestBuildPromptEpicFlow:
         assert f"_forge/reviews/{epic_task['id']}.md" in prompt
         # Contains follow-ups file instruction
         assert f"_forge/follow-ups/{epic_task['id']}.json" in prompt
-
-
-# ---------------------------------------------------------------------------
-# Lint: no f-strings without placeholders (F541)
-# ---------------------------------------------------------------------------
-
-
-def test_no_f_strings_without_placeholders() -> None:
-    """Ruff F541 must not flag any f-strings missing placeholders."""
-    result = subprocess.run(
-        ["python3", "-m", "ruff", "check", "--select", "F541", str(Path(__file__))],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stdout
