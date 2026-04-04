@@ -1668,7 +1668,6 @@ class TestProcessFollowUps:
     ) -> None:
         """AC 10, 11, 12, 19: Follow-up JSON entries produce backlog tasks with created_by links."""
         import json
-        import os
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1739,7 +1738,6 @@ class TestProcessFollowUps:
     ) -> None:
         """Plain string entries in follow-up JSON are ingested as backlog tasks."""
         import json
-        import os
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1788,7 +1786,6 @@ class TestProcessFollowUps:
     ) -> None:
         """Arrays with both dict and string entries are fully processed."""
         import json
-        import os
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -1834,7 +1831,6 @@ class TestProcessFollowUps:
     ) -> None:
         """Invalid entries (null, numbers) are skipped; valid entries still processed."""
         import json
-        import os
 
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
@@ -3214,7 +3210,6 @@ class TestEpicDecomposition:
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         # Write decomposition JSON
-        import os
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         import json
@@ -3277,7 +3272,6 @@ class TestEpicDecomposition:
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         import json
-        import os
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3437,7 +3431,6 @@ class TestEpicDecomposition:
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
-        import os
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3470,7 +3463,6 @@ class TestEpicDecomposition:
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         import json
-        import os
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3504,7 +3496,6 @@ class TestEpicDecomposition:
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         import json
-        import os
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3538,7 +3529,6 @@ class TestEpicDecomposition:
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         import json
-        import os
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3572,7 +3562,6 @@ class TestEpicDecomposition:
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         import json
-        import os
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
@@ -3629,7 +3618,6 @@ class TestEpicDecompositionEdgeCases:
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
         import json
-        import os
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
