@@ -58,6 +58,30 @@ def _next_stage(current_stage: str, flow: str = "standard") -> str | None:
     return None
 
 
+def _artifact_path_for_stage(
+    repo_path: str, task_id: str, stage: str, flow: str = "standard",
+) -> str | None:
+    """Return the conventional artifact path for a completed stage, or None."""
+    if stage == "spec" and flow == "epic":
+        return os.path.join(repo_path, f"_forge/epic-decompositions/{task_id}.json")
+    mapping = {
+        "spec": f"_forge/specs/{task_id}.md",
+        "plan": f"_forge/plans/{task_id}.md",
+        "review": f"_forge/reviews/{task_id}.md",
+    }
+    rel = mapping.get(stage)
+    if rel is None:
+        return None
+    return os.path.join(repo_path, rel)
+
+
+_STAGE_TO_PATH_FIELD: dict[str, str] = {
+    "spec": "spec_path",
+    "plan": "plan_path",
+    "review": "review_path",
+}
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict:
     """Convert a sqlite3.Row to a plain dict."""
     return dict(row)
@@ -674,6 +698,17 @@ class PipelineEngine:
         task_row = database.get_task(conn, task_id)
         flow = task_row["flow"] if task_row else "standard"
 
+        # Record the artifact path for the completed stage (if not already set
+        # by structured output extraction earlier in the pipeline)
+        if project is not None:
+            path_field = _STAGE_TO_PATH_FIELD.get(current_stage)
+            if path_field and not (task_row and task_row[path_field]):
+                art_path = _artifact_path_for_stage(
+                    project.get("repo_path", ""), task_id, current_stage, flow=flow,
+                )
+                if art_path:
+                    database.update_task(conn, task_id, **{path_field: art_path})
+
         # Epic flow: after spec passes, decompose into child tasks
         if flow == "epic" and current_stage == "spec":
             if project is None:
@@ -1287,11 +1322,18 @@ class PipelineEngine:
             # Epic has no feature branch — diff is empty (children merged to default)
             artifacts["git_diff"] = ""
         else:
-            if stage in ("plan", "implement", "review") and task.get("spec_path"):
-                artifacts["spec_content"] = load_artifact(task["spec_path"])
+            repo_path = project.get("repo_path", "")
+            if stage in ("plan", "implement", "review"):
+                spec_path = task.get("spec_path") or _artifact_path_for_stage(
+                    repo_path, task["id"], "spec", flow=flow,
+                )
+                artifacts["spec_content"] = load_artifact(spec_path or "")
 
-            if stage in ("implement",) and task.get("plan_path"):
-                artifacts["plan_content"] = load_artifact(task["plan_path"])
+            if stage in ("implement",):
+                plan_path = task.get("plan_path") or _artifact_path_for_stage(
+                    repo_path, task["id"], "plan", flow=flow,
+                )
+                artifacts["plan_content"] = load_artifact(plan_path or "")
 
             if stage == "review":
                 branch = task.get("branch_name", "")
