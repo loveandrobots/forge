@@ -59,7 +59,10 @@ def _next_stage(current_stage: str, flow: str = "standard") -> str | None:
 
 
 def _artifact_path_for_stage(
-    repo_path: str, task_id: str, stage: str, flow: str = "standard",
+    repo_path: str,
+    task_id: str,
+    stage: str,
+    flow: str = "standard",
 ) -> str | None:
     """Return the conventional artifact path for a completed stage, or None."""
     if stage == "spec" and flow == "epic":
@@ -99,9 +102,7 @@ async def reset_repo_state(repo_path: str, default_branch: str) -> dict:
     """
     log_lines: list[str] = []
 
-    async def _run(
-        *cmd: str, allow_failure: bool = False
-    ) -> bool:
+    async def _run(*cmd: str, allow_failure: bool = False) -> bool:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=repo_path,
@@ -267,7 +268,9 @@ class PipelineEngine:
                     )
                     if not branch_result.success:
                         error_detail = _truncate_stderr(branch_result.stderr)
-                        error_msg = f"Failed to create branch {branch_name}:\n{error_detail}"
+                        error_msg = (
+                            f"Failed to create branch {branch_name}:\n{error_detail}"
+                        )
                         self._log(
                             "error",
                             error_msg,
@@ -498,7 +501,9 @@ class PipelineEngine:
                         stage_run_id=stage_run_id,
                     )
                     await self.advance_task(
-                        conn, task_id, stage,
+                        conn,
+                        task_id,
+                        stage,
                         project=project,
                         structured_output=structured,
                     )
@@ -705,7 +710,10 @@ class PipelineEngine:
             path_field = _STAGE_TO_PATH_FIELD.get(current_stage)
             if path_field and not (task_row and task_row[path_field]):
                 art_path = _artifact_path_for_stage(
-                    project.get("repo_path", ""), task_id, current_stage, flow=flow,
+                    project.get("repo_path", ""),
+                    task_id,
+                    current_stage,
+                    flow=flow,
                 )
                 if art_path:
                     artifact_kwargs[path_field] = art_path
@@ -714,7 +722,11 @@ class PipelineEngine:
         if flow == "epic" and current_stage == "spec":
             if project is None:
                 database.update_task(conn, task_id, status="needs_human")
-                self._log("error", "Cannot decompose epic without project context", task_id=task_id)
+                self._log(
+                    "error",
+                    "Cannot decompose epic without project context",
+                    task_id=task_id,
+                )
                 return
             if artifact_kwargs:
                 database.update_task(conn, task_id, **artifact_kwargs)
@@ -726,7 +738,9 @@ class PipelineEngine:
             # Process follow-ups from review before completing
             if current_stage == "review" and project is not None:
                 self._process_follow_ups(
-                    conn, task_id, project,
+                    conn,
+                    task_id,
+                    project,
                     structured_output=structured_output,
                 )
 
@@ -741,7 +755,9 @@ class PipelineEngine:
                     epic_status="complete",
                     **artifact_kwargs,
                 )
-                self._log("info", f"Epic {task_id} review passed — completed", task_id=task_id)
+                self._log(
+                    "info", f"Epic {task_id} review passed — completed", task_id=task_id
+                )
                 if project is not None:
                     await self._maybe_auto_pause(conn, task_id, project)
                 return
@@ -775,7 +791,9 @@ class PipelineEngine:
             if project is not None:
                 await self._maybe_auto_pause(conn, task_id, project)
         else:
-            database.update_task(conn, task_id, current_stage=next_stage, **artifact_kwargs)
+            database.update_task(
+                conn, task_id, current_stage=next_stage, **artifact_kwargs
+            )
             database.insert_stage_run(
                 conn,
                 task_id=task_id,
@@ -868,7 +886,9 @@ class PipelineEngine:
                         await self._maybe_auto_pause(conn, task_id, project)
             else:
                 # Bounce back to implement stage
-                new_attempt = database.get_stage_run_count(conn, task_id, "implement") + 1
+                new_attempt = (
+                    database.get_stage_run_count(conn, task_id, "implement") + 1
+                )
                 database.update_task(conn, task_id, current_stage="implement")
                 database.insert_stage_run(
                     conn,
@@ -950,7 +970,9 @@ class PipelineEngine:
                     task_id,
                 )
             if reset_ok:
-                await self._handle_error_retry(conn, _row_to_dict(task_row), stage, sr_id, project=project)
+                await self._handle_error_retry(
+                    conn, _row_to_dict(task_row), stage, sr_id, project=project
+                )
 
     async def _check_timeouts(
         self,
@@ -1278,7 +1300,8 @@ class PipelineEngine:
             else:
                 logger.warning(
                     "Skipping invalid follow-up entry for task %s: %r",
-                    task_id, entry,
+                    task_id,
+                    entry,
                 )
                 continue
             new_task_id = database.insert_task(
@@ -1325,6 +1348,11 @@ class PipelineEngine:
             decomp_path = os.path.join(
                 repo_path, f"_forge/epic-decompositions/{task['id']}.json"
             )
+            if not os.path.exists(decomp_path):
+                raise RuntimeError(
+                    f"Epic decomposition file not found: {decomp_path}"
+                    " — task may need to be reset to spec stage"
+                )
             artifacts["spec_content"] = load_artifact(decomp_path)
             # Epic has no feature branch — diff is empty (children merged to default)
             artifacts["git_diff"] = ""
@@ -1332,15 +1360,31 @@ class PipelineEngine:
             repo_path = project.get("repo_path", "")
             if stage in ("plan", "implement", "review"):
                 spec_path = task.get("spec_path") or _artifact_path_for_stage(
-                    repo_path, task["id"], "spec", flow=flow,
+                    repo_path,
+                    task["id"],
+                    "spec",
+                    flow=flow,
                 )
-                artifacts["spec_content"] = load_artifact(spec_path or "")
+                if not spec_path or not os.path.exists(spec_path):
+                    raise RuntimeError(
+                        f"Spec file not found: {spec_path}"
+                        " — task may need to be reset to spec stage"
+                    )
+                artifacts["spec_content"] = load_artifact(spec_path)
 
             if stage in ("implement",):
                 plan_path = task.get("plan_path") or _artifact_path_for_stage(
-                    repo_path, task["id"], "plan", flow=flow,
+                    repo_path,
+                    task["id"],
+                    "plan",
+                    flow=flow,
                 )
-                artifacts["plan_content"] = load_artifact(plan_path or "")
+                if not plan_path or not os.path.exists(plan_path):
+                    raise RuntimeError(
+                        f"Plan file not found: {plan_path}"
+                        " — task may need to be reset to plan stage"
+                    )
+                artifacts["plan_content"] = load_artifact(plan_path)
 
             if stage == "review":
                 branch = task.get("branch_name", "")

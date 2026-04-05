@@ -184,20 +184,31 @@ class TestFullPipelineFlow:
             patch("forge.engine.dispatch_claude", side_effect=mock_dispatch),
             patch("forge.engine.run_gate", side_effect=mock_gate),
             patch("forge.engine.build_prompt", return_value="test prompt"),
+            patch("forge.engine.os.path.exists", return_value=True),
             patch(
-                "forge.engine.create_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.create_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
             patch(
-                "forge.engine.rebase_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
             patch(
-                "forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.checkout_and_pull",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
             patch(
-                "forge.engine.ff_merge", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.ff_merge",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
             patch(
-                "forge.engine.delete_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.delete_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
         ):
             await _run_engine_iterations(engine, max_seconds=8.0)
@@ -260,11 +271,16 @@ class TestFullPipelineFlow:
             patch("forge.engine.dispatch_claude", side_effect=tracking_dispatch),
             patch("forge.engine.run_gate", side_effect=mock_gate),
             patch("forge.engine.build_prompt", return_value="prompt"),
+            patch("forge.engine.os.path.exists", return_value=True),
             patch(
-                "forge.engine.create_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.create_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
             patch(
-                "forge.engine.rebase_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
         ):
             await _run_engine_iterations(engine, max_seconds=8.0)
@@ -325,10 +341,14 @@ class TestBounceFlow:
             patch("forge.engine.run_gate", side_effect=mock_gate),
             patch("forge.engine.build_prompt", return_value="prompt"),
             patch(
-                "forge.engine.create_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.create_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
             patch(
-                "forge.engine.rebase_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
         ):
             await _run_engine_iterations(engine, max_seconds=3.0)
@@ -402,7 +422,9 @@ class TestNeedsHumanFlow:
             patch("forge.engine.run_gate", side_effect=always_fail_gate),
             patch("forge.engine.build_prompt", return_value="prompt"),
             patch(
-                "forge.engine.create_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.create_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
         ):
             await _run_engine_iterations(engine, max_seconds=4.0)

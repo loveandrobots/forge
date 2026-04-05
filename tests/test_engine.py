@@ -321,8 +321,12 @@ class TestBounceTask:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="issues",
-            gate_name="post-plan.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="issues",
+            gate_name="post-plan.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "plan", gate_result)
@@ -354,8 +358,12 @@ class TestBounceTask:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="issues",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="issues",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "spec", gate_result)
@@ -401,29 +409,49 @@ class TestBounceTask:
         # Exercise "spec" bounce path (non-review branch)
         db.update_task(conn, task_id, status="active", current_stage="spec")
         db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="bounced",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="bounced",
         )
         task = dict(db.get_task(conn, task_id))
         await engine.bounce_task(conn, task, "spec", gate_result)
 
         # Verify bounce_task created a queued stage_run for spec
-        spec_queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
-        assert len(spec_queued) >= 1, "bounce_task should insert a queued spec stage_run"
+        spec_queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
+        assert len(spec_queued) >= 1, (
+            "bounce_task should insert a queued spec stage_run"
+        )
 
         # Exercise "review" bounce path
         db.update_task(conn, task_id, current_stage="review")
         db.insert_stage_run(
-            conn, task_id=task_id, stage="implement", attempt=1, status="done",
+            conn,
+            task_id=task_id,
+            stage="implement",
+            attempt=1,
+            status="done",
         )
         db.insert_stage_run(
-            conn, task_id=task_id, stage="review", attempt=1, status="bounced",
+            conn,
+            task_id=task_id,
+            stage="review",
+            attempt=1,
+            status="bounced",
         )
         task = dict(db.get_task(conn, task_id))
         await engine.bounce_task(conn, task, "review", gate_result)
 
         # Verify bounce_task created a queued stage_run for implement (review bounces back)
-        impl_queued = db.list_stage_runs(conn, task_id=task_id, stage="implement", status="queued")
-        assert len(impl_queued) >= 1, "bounce_task should insert a queued implement stage_run on review bounce"
+        impl_queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(impl_queued) >= 1, (
+            "bounce_task should insert a queued implement stage_run on review bounce"
+        )
 
         assert logged_messages, "Expected at least one log message from bounce_task"
         for msg in logged_messages:
@@ -1015,7 +1043,9 @@ class TestActivateBacklogTasks:
             ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
             patch(
-                "forge.engine.create_branch", new_callable=AsyncMock, return_value=GitResult(success=True)
+                "forge.engine.create_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
             ),
         ):
             engine.running = True
@@ -1059,7 +1089,9 @@ class TestActivateBacklogTasks:
         task = db.get_task(conn, task_id)
         assert task["status"] == "active"
         assert task["current_stage"] == "implement"
-        runs = db.list_stage_runs(conn, task_id=task_id, stage="implement", status="queued")
+        runs = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
         assert len(runs) == 1
         # No spec or plan stage_runs should exist
         spec_runs = db.list_stage_runs(conn, task_id=task_id, stage="spec")
@@ -1127,7 +1159,9 @@ class TestAdvanceTaskFlow:
 
         task = db.get_task(conn, task_id)
         assert task["current_stage"] == "review"
-        runs = db.list_stage_runs(conn, task_id=task_id, stage="review", status="queued")
+        runs = db.list_stage_runs(
+            conn, task_id=task_id, stage="review", status="queued"
+        )
         assert len(runs) == 1
 
     async def test_quick_flow_review_to_done(
@@ -1377,8 +1411,12 @@ class TestReviewBounceToImplement:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="ISSUES found",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="ISSUES found",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "review", gate_result)
@@ -1422,8 +1460,12 @@ class TestReviewBounceToImplement:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="ISSUES",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="ISSUES",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "review", gate_result)
@@ -1444,13 +1486,21 @@ class TestReviewBounceToImplement:
         """AC 4, 21: Non-review bounces stay on the same stage."""
         engine = PipelineEngine(settings, ":memory:")
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="fail",
-            gate_name="gate.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="fail",
+            gate_name="gate.sh",
+            duration_seconds=1.0,
         )
 
         for stage in ("spec", "plan", "implement"):
             task_id = db.insert_task(
-                conn, project_id=project_id, title=f"T-{stage}", priority=1, max_retries=3
+                conn,
+                project_id=project_id,
+                title=f"T-{stage}",
+                priority=1,
+                max_retries=3,
             )
             db.update_task(conn, task_id, status="active", current_stage=stage)
             db.insert_stage_run(
@@ -1473,9 +1523,7 @@ class TestReviewBounceToImplement:
     ) -> None:
         """AC 15, 18: Successful implement after review bounce advances to review with attempt=1."""
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(conn, task_id, status="active", current_stage="implement")
         # Prior bounced review exists
         db.insert_stage_run(
@@ -1514,8 +1562,12 @@ class TestReviewBounceToImplement:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="ISSUES",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="ISSUES",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "review", gate_result)
@@ -1535,8 +1587,12 @@ class TestReviewBounceToImplement:
             conn, project_id=project_id, title="T", priority=1, max_retries=10
         )
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="ISSUES",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="ISSUES",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         # --- Cycle 1: implement attempt=1 passes → review bounces ---
@@ -1669,9 +1725,7 @@ class TestProcessFollowUps:
         """AC 10, 11, 12, 19: Follow-up JSON entries produce backlog tasks with created_by links."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         # Create follow-ups JSON
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
@@ -1712,9 +1766,7 @@ class TestProcessFollowUps:
     ) -> None:
         """AC 13 (no follow-ups): Task completes normally without follow-ups file."""
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(conn, task_id, status="active", current_stage="review")
 
         project = dict(db.get_project(conn, project_id))
@@ -1727,7 +1779,6 @@ class TestProcessFollowUps:
         backlog = db.list_tasks(conn, status="backlog")
         assert len(backlog) == 0
 
-
     async def test_follow_ups_string_entries_create_backlog_tasks(
         self,
         conn: sqlite3.Connection,
@@ -1738,9 +1789,7 @@ class TestProcessFollowUps:
         """Plain string entries in follow-up JSON are ingested as backlog tasks."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
         follow_ups_dir.mkdir(parents=True)
@@ -1757,12 +1806,17 @@ class TestProcessFollowUps:
         engine._process_follow_ups(conn, task_id, project)
 
         backlog = db.list_tasks(conn, status="backlog")
-        new_tasks = [t for t in backlog if t["title"] in ("Fix timeout bug", "Update docs")]
+        new_tasks = [
+            t for t in backlog if t["title"] in ("Fix timeout bug", "Update docs")
+        ]
         assert len(new_tasks) == 2
 
         # Check title/description parsing
         by_title = {t["title"]: t for t in new_tasks}
-        assert by_title["Fix timeout bug"]["description"] == "handle_timeout needs project arg"
+        assert (
+            by_title["Fix timeout bug"]["description"]
+            == "handle_timeout needs project arg"
+        )
         assert by_title["Update docs"]["description"] == ""
 
         # Each should be linked to the source task
@@ -1785,9 +1839,7 @@ class TestProcessFollowUps:
         """Arrays with both dict and string entries are fully processed."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
         follow_ups_dir.mkdir(parents=True)
@@ -1829,9 +1881,7 @@ class TestProcessFollowUps:
         """Invalid entries (null, numbers) are skipped; valid entries still processed."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
         follow_ups_dir.mkdir(parents=True)
@@ -1866,9 +1916,7 @@ class TestProcessFollowUps:
         """Follow-up entries with flow: quick create quick-flow tasks."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
         follow_ups_dir.mkdir(parents=True)
@@ -1898,9 +1946,7 @@ class TestProcessFollowUps:
         """Follow-up entries without a flow field default to quick."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
         follow_ups_dir.mkdir(parents=True)
@@ -1930,9 +1976,7 @@ class TestProcessFollowUps:
         """Follow-up entries with invalid flow values fall back to quick."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
         follow_ups_dir.mkdir(parents=True)
@@ -1962,9 +2006,7 @@ class TestProcessFollowUps:
         """Plain string follow-up entries default to quick flow."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
         follow_ups_dir.mkdir(parents=True)
@@ -1992,9 +2034,7 @@ class TestProcessFollowUps:
         """Multiple follow-up entries with different flows are handled correctly."""
 
         engine = PipelineEngine(settings, ":memory:")
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
 
         follow_ups_dir = tmp_path / "_forge" / "follow-ups"
         follow_ups_dir.mkdir(parents=True)
@@ -2029,7 +2069,9 @@ class TestFollowUpMaxRetries:
     ) -> None:
         """Follow-up tasks created by _process_follow_ups use the configured default_max_retries."""
         custom_retries = 8
-        custom_settings = Settings(engine=EngineSettings(default_max_retries=custom_retries))
+        custom_settings = Settings(
+            engine=EngineSettings(default_max_retries=custom_retries)
+        )
         engine = PipelineEngine(custom_settings, ":memory:")
 
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
@@ -2089,7 +2131,9 @@ class TestEpicDecompositionMaxRetries:
     ) -> None:
         """Child tasks from epic decomposition use the configured default_max_retries."""
         custom_retries = 10
-        custom_settings = Settings(engine=EngineSettings(default_max_retries=custom_retries))
+        custom_settings = Settings(
+            engine=EngineSettings(default_max_retries=custom_retries)
+        )
 
         db.update_project(conn, project_id, repo_path=str(tmp_path))
         project = dict(db.get_project(conn, project_id))
@@ -2275,9 +2319,7 @@ class TestGitResultErrorContext:
         # Check run_log has metadata with git details
 
         logs = db.get_logs(conn, task_id=task_id)
-        meta_logs = [
-            row for row in logs if row["metadata"] is not None
-        ]
+        meta_logs = [row for row in logs if row["metadata"] is not None]
         assert len(meta_logs) > 0
         meta = json.loads(meta_logs[0]["metadata"])
         assert meta["git_stderr"] == "CONFLICT in README.md"
@@ -2485,8 +2527,12 @@ class TestReviewErrorSharedBudget:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="ISSUES",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="ISSUES",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "review", gate_result)
@@ -2869,8 +2915,12 @@ class TestAutoEscalation:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="fail",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="fail",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "review", gate_result)
@@ -2882,7 +2932,9 @@ class TestAutoEscalation:
         assert task["status"] == "active"
 
         # A queued spec stage_run should exist
-        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
         assert len(queued) == 1
 
     async def test_bounce_task_escalated_task_goes_to_needs_human(
@@ -2902,8 +2954,11 @@ class TestAutoEscalation:
             flow="standard",
         )
         db.update_task(
-            conn, task_id,
-            status="active", current_stage="review", escalated_from_quick=1,
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            escalated_from_quick=1,
         )
         db.insert_stage_run(
             conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
@@ -2911,8 +2966,12 @@ class TestAutoEscalation:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="fail",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="fail",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "review", gate_result)
@@ -2949,7 +3008,9 @@ class TestAutoEscalation:
         assert task["current_stage"] == "spec"
         assert task["escalated_from_quick"] == 1
 
-        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
         assert len(queued) == 1
 
     async def test_error_retry_escalated_task_goes_to_needs_human(
@@ -2969,8 +3030,11 @@ class TestAutoEscalation:
             flow="standard",
         )
         db.update_task(
-            conn, task_id,
-            status="active", current_stage="implement", escalated_from_quick=1,
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            escalated_from_quick=1,
         )
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="implement", attempt=1, status="error"
@@ -3006,8 +3070,12 @@ class TestAutoEscalation:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="fail",
-            gate_name="post-implement.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="fail",
+            gate_name="post-implement.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "implement", gate_result)
@@ -3018,7 +3086,9 @@ class TestAutoEscalation:
         assert task["escalated_from_quick"] == 1
         assert task["status"] == "active"
 
-        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
         assert len(queued) == 1
 
     async def test_error_retry_review_escalates_quick_to_standard(
@@ -3054,7 +3124,9 @@ class TestAutoEscalation:
         assert task["current_stage"] == "spec"
         assert task["escalated_from_quick"] == 1
 
-        queued = db.list_stage_runs(conn, task_id=task_id, stage="spec", status="queued")
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
         assert len(queued) == 1
 
     async def test_standard_flow_not_affected_by_escalation(
@@ -3080,8 +3152,12 @@ class TestAutoEscalation:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="fail",
-            gate_name="post-implement.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="fail",
+            gate_name="post-implement.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "implement", gate_result)
@@ -3113,8 +3189,12 @@ class TestAutoEscalation:
 
         task = dict(db.get_task(conn, task_id))
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="fail",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="fail",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         await engine.bounce_task(conn, task, "review", gate_result)
@@ -3155,8 +3235,12 @@ class TestAutoEscalation:
 
             task = dict(db.get_task(conn, task_id))
             gate_result = GateResult(
-                passed=False, exit_code=1, stdout="", stderr="fail",
-                gate_name="post-review.sh", duration_seconds=1.0,
+                passed=False,
+                exit_code=1,
+                stdout="",
+                stderr="fail",
+                gate_name="post-review.sh",
+                duration_seconds=1.0,
             )
 
             await engine.bounce_task(conn, task, "review", gate_result)
@@ -3164,7 +3248,8 @@ class TestAutoEscalation:
         # Check run_log for escalation message
         logs = db.get_logs(conn, task_id=task_id)
         escalation_logs = [
-            log for log in logs
+            log
+            for log in logs
             if "escalat" in log["message"].lower() and log["level"] == "info"
         ]
         assert len(escalation_logs) >= 1
@@ -3202,7 +3287,12 @@ class TestEpicDecomposition:
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         decomp = [
-            {"title": "Child A", "description": "Do A", "flow": "standard", "priority": 2},
+            {
+                "title": "Child A",
+                "description": "Do A",
+                "flow": "standard",
+                "priority": 2,
+            },
             {"title": "Child B", "description": "Do B", "flow": "quick", "priority": 1},
             {"title": "Child C", "description": "Do C"},
         ]
@@ -3460,7 +3550,6 @@ class TestEpicDecomposition:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-
     async def test_process_epic_decomposition_invalid_flow_falls_back_to_standard(
         self,
         conn: sqlite3.Connection,
@@ -3603,11 +3692,14 @@ class TestEpicDecompositionEdgeCases:
         decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
-            json.dump([
-                {"title": "   ", "description": "Whitespace title"},
-                {"title": "", "description": "Empty title"},
-                {"title": "Valid child", "description": "This one is fine"},
-            ], f)
+            json.dump(
+                [
+                    {"title": "   ", "description": "Whitespace title"},
+                    {"title": "", "description": "Empty title"},
+                    {"title": "Valid child", "description": "This one is fine"},
+                ],
+                f,
+            )
 
         engine = PipelineEngine(settings, ":memory:")
         await engine.advance_task(conn, task_id, "spec", project=project)
@@ -3648,21 +3740,34 @@ class TestEpicGateNameOverride:
         async def mock_run_gate(gate_dir, stage, env_vars):
             captured_gate_stage.append(stage)
             return GateResult(
-                passed=True, exit_code=0, stdout="ok", stderr="",
-                gate_name=f"post-{stage}.sh", duration_seconds=0.1,
+                passed=True,
+                exit_code=0,
+                stdout="ok",
+                stderr="",
+                gate_name=f"post-{stage}.sh",
+                duration_seconds=0.1,
             )
 
         async def mock_dispatch(**kwargs):
             return DispatchResult(
-                output="done", exit_code=0, error=None, duration_seconds=1.0, tokens_used=10
+                output="done",
+                exit_code=0,
+                error=None,
+                duration_seconds=1.0,
+                tokens_used=10,
             )
 
         engine = PipelineEngine(settings, ":memory:")
         engine.running = True
 
-        with patch("forge.engine.run_gate", side_effect=mock_run_gate), \
-             patch("forge.engine.dispatch_claude", side_effect=mock_dispatch), \
-             patch("forge.engine.database.get_connection", return_value=_UnclosableConnection(conn)):
+        with (
+            patch("forge.engine.run_gate", side_effect=mock_run_gate),
+            patch("forge.engine.dispatch_claude", side_effect=mock_dispatch),
+            patch(
+                "forge.engine.database.get_connection",
+                return_value=_UnclosableConnection(conn),
+            ),
+        ):
             # Run one iteration of the loop
             engine._loop_task = asyncio.ensure_future(engine.run_loop())
             await asyncio.sleep(0.5)
@@ -3705,21 +3810,35 @@ class TestEpicGateNameOverride:
         async def mock_run_gate(gate_dir, stage, env_vars):
             captured_gate_stage.append(stage)
             return GateResult(
-                passed=True, exit_code=0, stdout="ok", stderr="",
-                gate_name=f"post-{stage}.sh", duration_seconds=0.1,
+                passed=True,
+                exit_code=0,
+                stdout="ok",
+                stderr="",
+                gate_name=f"post-{stage}.sh",
+                duration_seconds=0.1,
             )
 
         async def mock_dispatch(**kwargs):
             return DispatchResult(
-                output="done", exit_code=0, error=None, duration_seconds=1.0, tokens_used=10
+                output="done",
+                exit_code=0,
+                error=None,
+                duration_seconds=1.0,
+                tokens_used=10,
             )
 
         engine = PipelineEngine(settings, ":memory:")
         engine.running = True
 
-        with patch("forge.engine.run_gate", side_effect=mock_run_gate), \
-             patch("forge.engine.dispatch_claude", side_effect=mock_dispatch), \
-             patch("forge.engine.database.get_connection", return_value=_UnclosableConnection(conn)):
+        with (
+            patch("forge.engine.run_gate", side_effect=mock_run_gate),
+            patch("forge.engine.dispatch_claude", side_effect=mock_dispatch),
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch(
+                "forge.engine.database.get_connection",
+                return_value=_UnclosableConnection(conn),
+            ),
+        ):
             engine._loop_task = asyncio.ensure_future(engine.run_loop())
             await asyncio.sleep(0.5)
             engine.running = False
@@ -3757,10 +3876,18 @@ class TestEpicReview:
         db.update_task(conn, epic_id, status="paused")
 
         child1_id = db.insert_task(
-            conn, project_id=project_id, title="Child 1", flow="quick", parent_task_id=epic_id,
+            conn,
+            project_id=project_id,
+            title="Child 1",
+            flow="quick",
+            parent_task_id=epic_id,
         )
         db.insert_task(
-            conn, project_id=project_id, title="Child 2", flow="quick", parent_task_id=epic_id,
+            conn,
+            project_id=project_id,
+            title="Child 2",
+            flow="quick",
+            parent_task_id=epic_id,
         )
 
         # Complete only child 1
@@ -3794,10 +3921,18 @@ class TestEpicReview:
         db.update_task(conn, epic_id, status="paused")
 
         child1_id = db.insert_task(
-            conn, project_id=project_id, title="Child 1", flow="quick", parent_task_id=epic_id,
+            conn,
+            project_id=project_id,
+            title="Child 1",
+            flow="quick",
+            parent_task_id=epic_id,
         )
         child2_id = db.insert_task(
-            conn, project_id=project_id, title="Child 2", flow="quick", parent_task_id=epic_id,
+            conn,
+            project_id=project_id,
+            title="Child 2",
+            flow="quick",
+            parent_task_id=epic_id,
         )
         db.update_task(conn, child1_id, status="done")
         db.update_task(conn, child2_id, status="done")
@@ -3832,7 +3967,11 @@ class TestEpicReview:
         db.update_task(conn, epic_id, status="active", current_stage="review")
 
         child_id = db.insert_task(
-            conn, project_id=project_id, title="Child", flow="quick", parent_task_id=epic_id,
+            conn,
+            project_id=project_id,
+            title="Child",
+            flow="quick",
+            parent_task_id=epic_id,
         )
         db.update_task(conn, child_id, status="done")
 
@@ -3869,7 +4008,11 @@ class TestEpicReview:
         )
 
         child_id = db.insert_task(
-            conn, project_id=project_id, title="Follow-up child", flow="quick", parent_task_id=epic_id,
+            conn,
+            project_id=project_id,
+            title="Follow-up child",
+            flow="quick",
+            parent_task_id=epic_id,
         )
         db.update_task(conn, child_id, status="done")
 
@@ -3948,7 +4091,9 @@ class TestEpicReview:
             duration_seconds=0.1,
         )
         engine = PipelineEngine(settings, ":memory:")
-        await engine.bounce_task(conn, epic_task, "review", gate_result, project=project)
+        await engine.bounce_task(
+            conn, epic_task, "review", gate_result, project=project
+        )
 
         # Epic should be reset to decomposed/paused
         epic = db.get_task(conn, epic_id)
@@ -3995,16 +4140,20 @@ class TestEpicReview:
         (followups_dir / f"{epic_id}.json").write_text(json.dumps(followups))
 
         gate_result = GateResult(
-            gate_name="post-epic-review", exit_code=1, passed=False, stdout="", stderr="ISSUES",
+            gate_name="post-epic-review",
+            exit_code=1,
+            passed=False,
+            stdout="",
+            stderr="ISSUES",
             duration_seconds=0.1,
         )
         engine = PipelineEngine(settings, ":memory:")
-        await engine.bounce_task(conn, epic_task, "review", gate_result, project=project)
+        await engine.bounce_task(
+            conn, epic_task, "review", gate_result, project=project
+        )
 
         # The created follow-up should default to quick
-        tasks = conn.execute(
-            "SELECT flow FROM tasks WHERE title = 'Task A'"
-        ).fetchall()
+        tasks = conn.execute("SELECT flow FROM tasks WHERE title = 'Task A'").fetchall()
         assert len(tasks) == 1
         assert tasks[0]["flow"] == "quick"
 
@@ -4025,10 +4174,18 @@ class TestEpicReview:
         db.update_task(conn, epic_id, status="paused")
 
         child1_id = db.insert_task(
-            conn, project_id=project_id, title="Child A", flow="quick", parent_task_id=epic_id,
+            conn,
+            project_id=project_id,
+            title="Child A",
+            flow="quick",
+            parent_task_id=epic_id,
         )
         child2_id = db.insert_task(
-            conn, project_id=project_id, title="Child B", flow="quick", parent_task_id=epic_id,
+            conn,
+            project_id=project_id,
+            title="Child B",
+            flow="quick",
+            parent_task_id=epic_id,
         )
 
         engine = PipelineEngine(settings, ":memory:")
@@ -4096,7 +4253,10 @@ class TestAutoMergeErrorContext:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(
-            conn, task_id, status="active", current_stage="review",
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
             branch_name="forge/test-branch",
         )
 
@@ -4104,13 +4264,20 @@ class TestAutoMergeErrorContext:
         task = dict(db.get_task(conn, task_id))
 
         cop_fail = GitResult(
-            success=False, stdout="", stderr="fatal: not a git repo", returncode=128,
+            success=False,
+            stdout="",
+            stderr="fatal: not a git repo",
+            returncode=128,
         )
 
         safe_conn = _UnclosableConnection(conn)
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=cop_fail),
+            patch(
+                "forge.engine.checkout_and_pull",
+                new_callable=AsyncMock,
+                return_value=cop_fail,
+            ),
         ):
             result = await engine._auto_merge(conn, task, project)
 
@@ -4129,7 +4296,10 @@ class TestAutoMergeErrorContext:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(
-            conn, task_id, status="active", current_stage="review",
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
             branch_name="forge/test-branch",
         )
 
@@ -4138,14 +4308,25 @@ class TestAutoMergeErrorContext:
 
         cop_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
         rebase_fail = GitResult(
-            success=False, stdout="", stderr="CONFLICT: merge conflict in foo.py", returncode=1,
+            success=False,
+            stdout="",
+            stderr="CONFLICT: merge conflict in foo.py",
+            returncode=1,
         )
 
         safe_conn = _UnclosableConnection(conn)
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=cop_ok),
-            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=rebase_fail),
+            patch(
+                "forge.engine.checkout_and_pull",
+                new_callable=AsyncMock,
+                return_value=cop_ok,
+            ),
+            patch(
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=rebase_fail,
+            ),
         ):
             result = await engine._auto_merge(conn, task, project)
 
@@ -4164,12 +4345,19 @@ class TestAutoMergeErrorContext:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(
-            conn, task_id, status="active", current_stage="review",
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
             branch_name="forge/test-branch",
         )
         # Create an implement stage_run for the gate env
         db.insert_stage_run(
-            conn, task_id=task_id, stage="implement", attempt=1, status="passed",
+            conn,
+            task_id=task_id,
+            stage="implement",
+            attempt=1,
+            status="passed",
         )
 
         project = dict(db.get_project(conn, project_id))
@@ -4178,20 +4366,39 @@ class TestAutoMergeErrorContext:
         cop_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
         rebase_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
         gate_pass = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-implement.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-implement.sh",
+            duration_seconds=1.0,
         )
         merge_fail = GitResult(
-            success=False, stdout="", stderr="not possible to fast-forward", returncode=1,
+            success=False,
+            stdout="",
+            stderr="not possible to fast-forward",
+            returncode=1,
         )
 
         safe_conn = _UnclosableConnection(conn)
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=cop_ok),
-            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=rebase_ok),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_pass),
-            patch("forge.engine.ff_merge", new_callable=AsyncMock, return_value=merge_fail),
+            patch(
+                "forge.engine.checkout_and_pull",
+                new_callable=AsyncMock,
+                return_value=cop_ok,
+            ),
+            patch(
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=rebase_ok,
+            ),
+            patch(
+                "forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_pass
+            ),
+            patch(
+                "forge.engine.ff_merge", new_callable=AsyncMock, return_value=merge_fail
+            ),
         ):
             result = await engine._auto_merge(conn, task, project)
 
@@ -4217,22 +4424,38 @@ class TestMultiBounceAttemptNumbering:
         safe_conn = _UnclosableConnection(conn)
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1, max_retries=10,
+            conn,
+            project_id=project_id,
+            title="T",
+            priority=1,
+            max_retries=10,
         )
         db.update_task(conn, task_id, status="active", current_stage="implement")
 
         gate_result = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="ISSUES",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="ISSUES",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         # Implement attempt 1 passes
         db.insert_stage_run(
-            conn, task_id=task_id, stage="implement", attempt=1, status="passed",
+            conn,
+            task_id=task_id,
+            stage="implement",
+            attempt=1,
+            status="passed",
         )
         # Review attempt 1 bounces
         db.insert_stage_run(
-            conn, task_id=task_id, stage="review", attempt=1, status="bounced",
+            conn,
+            task_id=task_id,
+            stage="review",
+            attempt=1,
+            status="bounced",
         )
 
         with patch("forge.engine.database.get_connection", return_value=safe_conn):
@@ -4240,7 +4463,9 @@ class TestMultiBounceAttemptNumbering:
             await engine.bounce_task(conn, task, "review", gate_result)
 
             # Should create implement attempt 2
-            queued = db.list_stage_runs(conn, task_id=task_id, stage="implement", status="queued")
+            queued = db.list_stage_runs(
+                conn, task_id=task_id, stage="implement", status="queued"
+            )
             assert len(queued) == 1
             assert queued[0]["attempt"] == 2
 
@@ -4249,14 +4474,20 @@ class TestMultiBounceAttemptNumbering:
 
             # Review attempt 2 bounces
             db.insert_stage_run(
-                conn, task_id=task_id, stage="review", attempt=2, status="bounced",
+                conn,
+                task_id=task_id,
+                stage="review",
+                attempt=2,
+                status="bounced",
             )
 
             task = dict(db.get_task(conn, task_id))
             await engine.bounce_task(conn, task, "review", gate_result)
 
             # Should create implement attempt 3
-            queued2 = db.list_stage_runs(conn, task_id=task_id, stage="implement", status="queued")
+            queued2 = db.list_stage_runs(
+                conn, task_id=task_id, stage="implement", status="queued"
+            )
             assert len(queued2) == 1
             assert queued2[0]["attempt"] == 3
 
@@ -4326,7 +4557,11 @@ class TestAutoPauseOnTimeout:
         # Create a running stage_run that started long ago
         old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
         sr_id = db.insert_stage_run(
-            conn, task_id=task_id, stage="spec", attempt=1, status="running",
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="running",
         )
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
@@ -4357,11 +4592,18 @@ class TestAutoMergeRestoresDefaultBranch:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(
-            conn, task_id, status="active", current_stage="review",
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
             branch_name="forge/test-branch",
         )
         db.insert_stage_run(
-            conn, task_id=task_id, stage="implement", attempt=1, status="passed",
+            conn,
+            task_id=task_id,
+            stage="implement",
+            attempt=1,
+            status="passed",
         )
 
         project = dict(db.get_project(conn, project_id))
@@ -4370,8 +4612,12 @@ class TestAutoMergeRestoresDefaultBranch:
         cop_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
         rebase_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
         gate_fail = GateResult(
-            passed=False, exit_code=1, stdout="", stderr="gate failed",
-            gate_name="post-implement.sh", duration_seconds=1.0,
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="gate failed",
+            gate_name="post-implement.sh",
+            duration_seconds=1.0,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -4379,8 +4625,14 @@ class TestAutoMergeRestoresDefaultBranch:
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
             patch("forge.engine.checkout_and_pull", checkout_mock),
-            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=rebase_ok),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_fail),
+            patch(
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=rebase_ok,
+            ),
+            patch(
+                "forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_fail
+            ),
         ):
             result = await engine._auto_merge(conn, task, project)
 
@@ -4400,11 +4652,18 @@ class TestAutoMergeRestoresDefaultBranch:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(
-            conn, task_id, status="active", current_stage="review",
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
             branch_name="forge/test-branch",
         )
         db.insert_stage_run(
-            conn, task_id=task_id, stage="implement", attempt=1, status="passed",
+            conn,
+            task_id=task_id,
+            stage="implement",
+            attempt=1,
+            status="passed",
         )
 
         project = dict(db.get_project(conn, project_id))
@@ -4413,11 +4672,18 @@ class TestAutoMergeRestoresDefaultBranch:
         cop_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
         rebase_ok = GitResult(success=True, stdout="", stderr="", returncode=0)
         gate_pass = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-implement.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-implement.sh",
+            duration_seconds=1.0,
         )
         merge_fail = GitResult(
-            success=False, stdout="", stderr="ff failed", returncode=1,
+            success=False,
+            stdout="",
+            stderr="ff failed",
+            returncode=1,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -4425,9 +4691,17 @@ class TestAutoMergeRestoresDefaultBranch:
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
             patch("forge.engine.checkout_and_pull", checkout_mock),
-            patch("forge.engine.rebase_branch", new_callable=AsyncMock, return_value=rebase_ok),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_pass),
-            patch("forge.engine.ff_merge", new_callable=AsyncMock, return_value=merge_fail),
+            patch(
+                "forge.engine.rebase_branch",
+                new_callable=AsyncMock,
+                return_value=rebase_ok,
+            ),
+            patch(
+                "forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_pass
+            ),
+            patch(
+                "forge.engine.ff_merge", new_callable=AsyncMock, return_value=merge_fail
+            ),
         ):
             result = await engine._auto_merge(conn, task, project)
 
@@ -4497,11 +4771,18 @@ class TestStructuredOutputExtraction:
             "```"
         )
         dispatch_result = DispatchResult(
-            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+            output=output_text,
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -4509,8 +4790,16 @@ class TestStructuredOutputExtraction:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
         ):
             await self._run_one_iteration(engine)
@@ -4526,8 +4815,16 @@ class TestStructuredOutputExtraction:
     ) -> None:
         """AC 3: After plan dispatch with structured output, engine updates task plan_path."""
         task_id = db.insert_task(conn, project_id=project_id, title="Test", priority=10)
-        db.update_task(conn, task_id, status="active", current_stage="plan", branch_name="forge/test-branch")
-        db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1, status="queued")
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
+            branch_name="forge/test-branch",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="plan", attempt=1, status="queued"
+        )
 
         output_text = (
             "Plan written.\n\n"
@@ -4536,11 +4833,18 @@ class TestStructuredOutputExtraction:
             "```"
         )
         dispatch_result = DispatchResult(
-            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+            output=output_text,
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-plan.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-plan.sh",
+            duration_seconds=1.0,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -4548,9 +4852,18 @@ class TestStructuredOutputExtraction:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
+            patch("forge.engine.os.path.exists", return_value=True),
         ):
             await self._run_one_iteration(engine)
 
@@ -4566,8 +4879,16 @@ class TestStructuredOutputExtraction:
     ) -> None:
         """AC 3: After review dispatch with structured output, engine updates task review_path."""
         task_id = db.insert_task(conn, project_id=project_id, title="Test", priority=10)
-        db.update_task(conn, task_id, status="active", current_stage="review", branch_name="forge/test-branch")
-        db.insert_stage_run(conn, task_id=task_id, stage="review", attempt=1, status="queued")
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="queued"
+        )
 
         # Update project repo_path so auto-merge doesn't fail
         db.update_project(conn, project_id, repo_path=str(tmp_path))
@@ -4579,11 +4900,18 @@ class TestStructuredOutputExtraction:
             "```"
         )
         dispatch_result = DispatchResult(
-            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+            output=output_text,
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -4591,10 +4919,21 @@ class TestStructuredOutputExtraction:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
-            patch.object(engine, "_auto_merge", new_callable=AsyncMock, return_value=True),
+            patch.object(
+                engine, "_auto_merge", new_callable=AsyncMock, return_value=True
+            ),
+            patch("forge.engine.os.path.exists", return_value=True),
         ):
             await self._run_one_iteration(engine)
 
@@ -4612,17 +4951,21 @@ class TestStructuredOutputExtraction:
         db.update_task(conn, task_id, branch_name="forge/test-branch")
 
         output_text = (
-            "Done.\n\n"
-            "```forge-output\n"
-            '{"spec_path": "_forge/specs/abc.md"}\n'
-            "```"
+            'Done.\n\n```forge-output\n{"spec_path": "_forge/specs/abc.md"}\n```'
         )
         dispatch_result = DispatchResult(
-            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+            output=output_text,
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -4630,8 +4973,16 @@ class TestStructuredOutputExtraction:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
         ):
             await self._run_one_iteration(engine)
@@ -4653,11 +5004,17 @@ class TestStructuredOutputExtraction:
 
         dispatch_result = DispatchResult(
             output="Just some text, no structured output block.",
-            exit_code=0, duration_seconds=5.0, tokens_used=100,
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -4665,8 +5022,16 @@ class TestStructuredOutputExtraction:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
         ):
             await self._run_one_iteration(engine)
@@ -4687,10 +5052,18 @@ class TestStructuredOutputExtraction:
     ) -> None:
         """AC 6: When review structured output has verdict, FORGE_VERDICT is passed to gate."""
         task_id, sr_id = active_task_with_queued_run
-        db.update_task(conn, task_id, status="active", current_stage="review", branch_name="forge/test-branch")
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="forge/test-branch",
+        )
         # Update the stage run to be review
         db.update_stage_run(conn, sr_id, status="passed")
-        db.insert_stage_run(conn, task_id=task_id, stage="review", attempt=1, status="queued")
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="queued"
+        )
 
         output_text = (
             "```forge-output\n"
@@ -4698,11 +5071,18 @@ class TestStructuredOutputExtraction:
             "```"
         )
         dispatch_result = DispatchResult(
-            output=output_text, exit_code=0, duration_seconds=5.0, tokens_used=100,
+            output=output_text,
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-review.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
         )
 
         captured_gate_env: dict = {}
@@ -4716,10 +5096,17 @@ class TestStructuredOutputExtraction:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
             patch("forge.engine.run_gate", side_effect=capture_run_gate),
             patch("forge.engine.build_prompt", return_value="test prompt"),
-            patch.object(engine, "_auto_merge", new_callable=AsyncMock, return_value=True),
+            patch.object(
+                engine, "_auto_merge", new_callable=AsyncMock, return_value=True
+            ),
+            patch("forge.engine.os.path.exists", return_value=True),
         ):
             await self._run_one_iteration(engine)
 
@@ -4744,7 +5131,11 @@ class TestFollowUpsFromStructuredOutput:
             "verdict": "PASS",
             "follow_ups": [
                 {"title": "Fix typo", "description": "Typo in README", "flow": "quick"},
-                {"title": "Add logging", "description": "Module needs logging", "flow": "standard"},
+                {
+                    "title": "Add logging",
+                    "description": "Module needs logging",
+                    "flow": "standard",
+                },
             ],
         }
 
@@ -4790,7 +5181,6 @@ class TestFollowUpsFromStructuredOutput:
         assert len(new_tasks) == 1
         # File should be cleaned up
         assert not os.path.exists(str(follow_ups_file))
-
 
     async def test_empty_follow_ups_does_not_fallback_to_file(
         self,

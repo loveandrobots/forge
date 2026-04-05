@@ -152,15 +152,21 @@ class TestAdvanceTaskSetsArtifactPaths:
     ) -> None:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
-            conn, project_id=project_id, title="Epic", priority=1,
-            flow="epic", epic_status="pending",
+            conn,
+            project_id=project_id,
+            title="Epic",
+            priority=1,
+            flow="epic",
+            epic_status="pending",
         )
         db.update_task(conn, task_id, status="active", current_stage="spec")
         project = dict(db.get_project(conn, project_id))
 
         # Epic decomposition reads _forge/epic-decompositions/{task_id}.json
         decomp_path = f"/tmp/repo/_forge/epic-decompositions/{task_id}.json"
-        decomp_content = '{"tasks": [{"title": "Sub", "description": "d", "priority": 1}]}'
+        decomp_content = (
+            '{"tasks": [{"title": "Sub", "description": "d", "priority": 1}]}'
+        )
 
         with patch("forge.engine.load_artifact", return_value=decomp_content):
             await engine.advance_task(conn, task_id, "spec", project=project)
@@ -178,8 +184,10 @@ class TestAdvanceTaskSetsArtifactPaths:
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(
-            conn, task_id,
-            status="active", current_stage="review",
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
             branch_name="feature/test-branch",
         )
         project = dict(db.get_project(conn, project_id))
@@ -257,7 +265,12 @@ class TestLoadArtifactsFallback:
         assert task["spec_path"] is None
 
         expected_path = f"/tmp/repo/_forge/specs/{task_id}.md"
-        with patch("forge.engine.load_artifact", return_value="spec content") as mock_load:
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch(
+                "forge.engine.load_artifact", return_value="spec content"
+            ) as mock_load,
+        ):
             artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
 
         # Should have called load_artifact with the conventional fallback path
@@ -293,8 +306,13 @@ class TestLoadArtifactsFallback:
                 return "plan content"
             return ""
 
-        with patch("forge.engine.load_artifact", side_effect=fake_load):
-            artifacts = engine._load_artifacts(task, project, "implement", stage_run, conn)
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch("forge.engine.load_artifact", side_effect=fake_load),
+        ):
+            artifacts = engine._load_artifacts(
+                task, project, "implement", stage_run, conn
+            )
 
         assert artifacts["spec_content"] == "spec content"
         assert artifacts["plan_content"] == "plan content"
@@ -310,8 +328,10 @@ class TestLoadArtifactsFallback:
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         explicit_spec = "/custom/path/spec.md"
         db.update_task(
-            conn, task_id,
-            status="active", current_stage="plan",
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
             spec_path=explicit_spec,
         )
         sr_id = db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1)
@@ -320,7 +340,12 @@ class TestLoadArtifactsFallback:
         project = dict(db.get_project(conn, project_id))
         stage_run = dict(db.get_stage_run(conn, sr_id))
 
-        with patch("forge.engine.load_artifact", return_value="custom spec") as mock_load:
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch(
+                "forge.engine.load_artifact", return_value="custom spec"
+            ) as mock_load,
+        ):
             artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
 
         mock_load.assert_any_call(explicit_spec)
@@ -344,9 +369,41 @@ class TestLoadArtifactsFallback:
 
         expected_spec = f"/tmp/repo/_forge/specs/{task_id}.md"
 
-        with patch("forge.engine.load_artifact", return_value="spec content") as mock_load:
-            with patch("forge.engine.get_git_diff", return_value=""):
-                artifacts = engine._load_artifacts(task, project, "review", stage_run, conn)
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch(
+                "forge.engine.load_artifact", return_value="spec content"
+            ) as mock_load,
+            patch("forge.engine.get_git_diff", return_value=""),
+        ):
+            artifacts = engine._load_artifacts(task, project, "review", stage_run, conn)
 
         mock_load.assert_any_call(expected_spec)
         assert artifacts["spec_content"] == "spec content"
+
+    def test_raises_when_spec_file_missing(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """_load_artifacts raises RuntimeError when the spec file does not exist on disk."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        # Point spec_path at a path that genuinely does not exist
+        missing_spec = "/tmp/nonexistent_forge_test_dir/specs/no-such-file.md"
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
+            spec_path=missing_spec,
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1)
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        with pytest.raises(RuntimeError, match="Spec file not found"):
+            engine._load_artifacts(task, project, "plan", stage_run, conn)
