@@ -5561,3 +5561,441 @@ class TestLoadArtifactsRuntimeError:
 
         # AC5: dispatch was never called
         mock_dispatch.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Spec/Plan JSON artifact writing and _load_artifacts fallback
+# ---------------------------------------------------------------------------
+
+
+class TestSpecPlanArtifactWriting:
+    """Tests for engine writing .json artifacts for spec and plan stages."""
+
+    async def _run_one_iteration(self, engine: PipelineEngine) -> None:
+        engine.running = True
+        loop_task = asyncio.create_task(engine.run_loop())
+        await asyncio.sleep(0.5)
+        engine.running = False
+        try:
+            await asyncio.wait_for(loop_task, timeout=3.0)
+        except asyncio.TimeoutError:
+            loop_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_spec_stage_writes_json_artifact(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Engine writes _forge/specs/{task_id}.json after successful spec dispatch."""
+        conn.execute(
+            "UPDATE projects SET repo_path = ? WHERE id = ?",
+            (str(tmp_path), project_id),
+        )
+        conn.commit()
+
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="Test Task", priority=1
+        )
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="spec",
+            branch_name="forge/test-branch",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="queued"
+        )
+
+        spec_structured = {
+            "overview": "Adds widgets.",
+            "acceptance_criteria": [
+                {"id": 1, "text": "Widget renders"},
+                {"id": 2, "text": "Widget handles errors"},
+            ],
+            "out_of_scope": ["Performance"],
+            "dependencies": [],
+            "content": "Full spec content.",
+        }
+        dispatch_result = DispatchResult(
+            output="spec output",
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
+            structured_output=spec_structured,
+        )
+        gate_result = GateResult(
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        # Verify JSON artifact file was written
+        spec_json_path = tmp_path / "_forge" / "specs" / f"{task_id}.json"
+        assert spec_json_path.exists()
+        written = json.loads(spec_json_path.read_text())
+        assert written["overview"] == "Adds widgets."
+        assert len(written["acceptance_criteria"]) == 2
+
+        # Verify task record updated with spec_path
+        task = db.get_task(conn, task_id)
+        assert task["spec_path"] == str(spec_json_path)
+
+    @pytest.mark.asyncio
+    async def test_plan_stage_writes_json_artifact(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Engine writes _forge/plans/{task_id}.json after successful plan dispatch."""
+        conn.execute(
+            "UPDATE projects SET repo_path = ? WHERE id = ?",
+            (str(tmp_path), project_id),
+        )
+        conn.commit()
+
+        # Create spec artifact (needed for plan stage)
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="Test Task", priority=1
+        )
+        spec_data = {
+            "overview": "Test",
+            "acceptance_criteria": [{"id": 1, "text": "Works"}],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "Spec.",
+        }
+        spec_path = spec_dir / f"{task_id}.json"
+        spec_path.write_text(json.dumps(spec_data))
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
+            branch_name="forge/test-branch",
+            spec_path=str(spec_path),
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="plan", attempt=1, status="queued"
+        )
+
+        plan_structured = {
+            "approach": "Build it.",
+            "acceptance_criteria_mapping": [
+                {"criterion_id": 1, "criterion_text": "Works", "implementation": "Write code"},
+            ],
+            "files_to_modify": ["src/main.py"],
+            "test_plan": [{"criterion_id": 1, "description": "Test it"}],
+            "risks": [],
+        }
+        dispatch_result = DispatchResult(
+            output="plan output",
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
+            structured_output=plan_structured,
+        )
+        gate_result = GateResult(
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-plan.sh",
+            duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        # Verify JSON artifact file was written
+        plan_json_path = tmp_path / "_forge" / "plans" / f"{task_id}.json"
+        assert plan_json_path.exists()
+        written = json.loads(plan_json_path.read_text())
+        assert written["approach"] == "Build it."
+        assert len(written["acceptance_criteria_mapping"]) == 1
+
+        # Verify task record updated with plan_path
+        task = db.get_task(conn, task_id)
+        assert task["plan_path"] == str(plan_json_path)
+
+    @pytest.mark.asyncio
+    async def test_structured_output_stored_on_stage_run(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Structured output is stored on the stage_run record."""
+        conn.execute(
+            "UPDATE projects SET repo_path = ? WHERE id = ?",
+            (str(tmp_path), project_id),
+        )
+        conn.commit()
+
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="spec",
+            branch_name="forge/test-branch",
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="queued"
+        )
+
+        structured = {
+            "overview": "Test",
+            "acceptance_criteria": [{"id": 1, "text": "Works"}],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "Content.",
+        }
+        dispatch_result = DispatchResult(
+            output="output",
+            exit_code=0,
+            duration_seconds=1.0,
+            tokens_used=50,
+            structured_output=structured,
+        )
+        gate_result = GateResult(
+            passed=True, exit_code=0, stdout="ok", stderr="",
+            gate_name="post-spec.sh", duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["structured_output"] is not None
+        parsed = json.loads(sr["structured_output"])
+        assert parsed["overview"] == "Test"
+
+
+class TestLoadArtifactsFallback:
+    """Tests for _load_artifacts JSON/MD fallback for spec and plan."""
+
+    def test_load_artifacts_prefers_json_spec(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When both .json and .md spec exist, _load_artifacts loads .json."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        spec_data = {
+            "overview": "JSON spec",
+            "acceptance_criteria": [{"id": 1, "text": "Criterion"}],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "Content.",
+        }
+        (spec_dir / f"{task_id}.json").write_text(json.dumps(spec_data))
+        (spec_dir / f"{task_id}.md").write_text("# MD spec\n")
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
+            spec_path=str(spec_dir / f"{task_id}.json"),
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="plan", attempt=1, status="queued"
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        task = dict(db.get_task(conn, task_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        engine = PipelineEngine(settings, ":memory:")
+        artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
+
+        assert "JSON spec" in artifacts["spec_content"]
+
+    def test_load_artifacts_falls_back_to_md_spec(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When only .md spec exists, _load_artifacts falls back to it."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / f"{task_id}.md").write_text("# Markdown spec content\n")
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="plan", attempt=1, status="queued"
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        task = dict(db.get_task(conn, task_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        engine = PipelineEngine(settings, ":memory:")
+        artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
+
+        assert "Markdown spec content" in artifacts["spec_content"]
+
+    def test_load_artifacts_falls_back_to_md_plan(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When only .md plan exists, _load_artifacts falls back to it."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        # Create spec as .md
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / f"{task_id}.md").write_text("# Spec\n")
+        # Create plan as .md only
+        plan_dir = tmp_path / "_forge" / "plans"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / f"{task_id}.md").write_text("# Markdown plan content\n")
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            branch_name="forge/test",
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="queued"
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        task = dict(db.get_task(conn, task_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        engine = PipelineEngine(settings, ":memory:")
+        artifacts = engine._load_artifacts(task, project, "implement", stage_run, conn)
+
+        assert "Markdown plan content" in artifacts["plan_content"]
+
+    def test_load_artifacts_formats_spec_criteria_for_plan_stage(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When loading .json spec for plan stage, spec_criteria_list is populated."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        spec_data = {
+            "overview": "Test",
+            "acceptance_criteria": [
+                {"id": 1, "text": "First criterion"},
+                {"id": 2, "text": "Second criterion"},
+            ],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "Content.",
+        }
+        (spec_dir / f"{task_id}.json").write_text(json.dumps(spec_data))
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
+            spec_path=str(spec_dir / f"{task_id}.json"),
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="plan", attempt=1, status="queued"
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        task = dict(db.get_task(conn, task_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        engine = PipelineEngine(settings, ":memory:")
+        artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
+
+        assert "spec_criteria_list" in artifacts
+        assert "1. First criterion" in artifacts["spec_criteria_list"]
+        assert "2. Second criterion" in artifacts["spec_criteria_list"]
