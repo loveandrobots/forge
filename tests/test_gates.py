@@ -62,26 +62,23 @@ def _write_file(path: str, content: str) -> None:
 class TestPostSpec:
     SCRIPT = "post-spec.sh"
 
-    def test_passes_with_valid_spec(self, tmp_path: Path) -> None:
+    def _valid_spec(self) -> dict:
+        return {
+            "overview": "This task adds widget support to the project.",
+            "acceptance_criteria": [
+                {"id": 1, "text": "Widget renders correctly"},
+                {"id": 2, "text": "Widget handles edge cases"},
+            ],
+            "out_of_scope": ["Performance optimization"],
+            "dependencies": ["core.py"],
+            "content": "Full spec content here.",
+        }
+
+    def test_passes_with_valid_json_spec(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
-            os.path.join(repo, "_forge/specs/test-task-42.md"),
-            """\
-            # Spec: Widget feature
-
-            Some introductory context about the feature that is long enough
-            to pass the minimum character threshold for the gate check.
-
-            ## Acceptance criteria
-
-            - The widget renders correctly
-            - The widget handles edge cases
-
-            ## Out of scope
-
-            - Performance optimization
-            - Mobile support
-            """,
+            os.path.join(repo, "_forge/specs/test-task-42.json"),
+            json.dumps(self._valid_spec()),
         )
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 0
@@ -93,37 +90,39 @@ class TestPostSpec:
         assert result.returncode == 1
         assert "not found" in result.stderr
 
-    def test_fails_when_spec_too_short(self, tmp_path: Path) -> None:
+    def test_fails_with_invalid_json(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
-            os.path.join(repo, "_forge/specs/test-task-42.md"),
-            "# Short spec\nToo brief.",
+            os.path.join(repo, "_forge/specs/test-task-42.json"),
+            "NOT VALID JSON {{{",
         )
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
-        assert "too short" in result.stderr
+        assert "not valid JSON" in result.stderr
 
-    def test_fails_when_acceptance_criteria_missing(self, tmp_path: Path) -> None:
+    def test_fails_with_empty_overview(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        content = "x" * 250 + "\n## Out of scope\n- Nothing\n"
+        spec = self._valid_spec()
+        spec["overview"] = ""
         _write_file(
-            os.path.join(repo, "_forge/specs/test-task-42.md"),
-            content,
+            os.path.join(repo, "_forge/specs/test-task-42.json"),
+            json.dumps(spec),
         )
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
-        assert "Acceptance criteria" in result.stderr
+        assert "overview" in result.stderr.lower()
 
-    def test_fails_when_out_of_scope_missing(self, tmp_path: Path) -> None:
+    def test_fails_with_empty_acceptance_criteria(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        content = "x" * 250 + "\n## Acceptance criteria\n- Something\n"
+        spec = self._valid_spec()
+        spec["acceptance_criteria"] = []
         _write_file(
-            os.path.join(repo, "_forge/specs/test-task-42.md"),
-            content,
+            os.path.join(repo, "_forge/specs/test-task-42.json"),
+            json.dumps(spec),
         )
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
-        assert "Out of scope" in result.stderr
+        assert "acceptance_criteria" in result.stderr.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -134,26 +133,46 @@ class TestPostSpec:
 class TestPostPlan:
     SCRIPT = "post-plan.sh"
 
-    def test_passes_with_valid_plan(self, tmp_path: Path) -> None:
-        repo = str(tmp_path)
+    def _valid_spec(self) -> dict:
+        return {
+            "overview": "Widget feature spec.",
+            "acceptance_criteria": [
+                {"id": 1, "text": "Widget renders correctly"},
+                {"id": 2, "text": "Widget handles edge cases"},
+            ],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "Full spec.",
+        }
+
+    def _valid_plan(self) -> dict:
+        return {
+            "approach": "Implement the widget using the existing framework.",
+            "acceptance_criteria_mapping": [
+                {"criterion_id": 1, "criterion_text": "Widget renders correctly", "implementation": "Add render method"},
+                {"criterion_id": 2, "criterion_text": "Widget handles edge cases", "implementation": "Add validation"},
+            ],
+            "files_to_modify": ["src/widget.py", "tests/test_widget.py"],
+            "test_plan": [
+                {"criterion_id": 1, "description": "Test widget rendering"},
+                {"criterion_id": 2, "description": "Test edge cases"},
+            ],
+            "risks": ["None identified"],
+        }
+
+    def _write_spec_and_plan(self, repo: str, spec: dict | None = None, plan: dict | None = None) -> None:
         _write_file(
-            os.path.join(repo, "_forge/plans/test-task-42.md"),
-            """\
-            # Plan: Widget feature
-
-            This plan addresses the acceptance criteria from the spec.
-
-            ## Files to create
-
-            - src/widget.py
-            - tests/test_widget.py
-
-            ## Test plan
-
-            - test that the widget renders correctly
-            - test edge case handling
-            """,
+            os.path.join(repo, "_forge/specs/test-task-42.json"),
+            json.dumps(spec or self._valid_spec()),
         )
+        _write_file(
+            os.path.join(repo, "_forge/plans/test-task-42.json"),
+            json.dumps(plan or self._valid_plan()),
+        )
+
+    def test_passes_with_valid_json_plan(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_spec_and_plan(repo)
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "plan"}, repo)
         assert result.returncode == 0
         assert "passed" in result.stdout
@@ -164,48 +183,35 @@ class TestPostPlan:
         assert result.returncode == 1
         assert "not found" in result.stderr
 
-    def test_fails_when_plan_too_short(self, tmp_path: Path) -> None:
+    def test_fails_with_invalid_json(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         _write_file(
-            os.path.join(repo, "_forge/plans/test-task-42.md"),
-            "# Short plan\nNot enough.",
+            os.path.join(repo, "_forge/plans/test-task-42.json"),
+            "NOT VALID JSON",
         )
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "plan"}, repo)
         assert result.returncode == 1
-        assert "too short" in result.stderr
+        assert "not valid JSON" in result.stderr
 
-    def test_fails_without_acceptance_criteria_reference(
-        self, tmp_path: Path
-    ) -> None:
+    def test_fails_with_empty_mapping(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/plans/test-task-42.md"),
-            "x" * 250 + "\n## Files to create\n- foo.py\n## Tests\n- test something\n",
-        )
+        plan = self._valid_plan()
+        plan["acceptance_criteria_mapping"] = []
+        self._write_spec_and_plan(repo, plan=plan)
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "plan"}, repo)
         assert result.returncode == 1
-        assert "acceptance criteria" in result.stderr.lower()
+        assert "empty" in result.stderr.lower()
 
-    def test_fails_without_test_descriptions(self, tmp_path: Path) -> None:
+    def test_fails_with_missing_criterion_id(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/plans/test-task-42.md"),
-            "x" * 250
-            + "\nacceptance criteria reference\n## Files to create\n- foo.py\n",
+        plan = self._valid_plan()
+        plan["acceptance_criteria_mapping"].append(
+            {"criterion_id": 99, "criterion_text": "Nonexistent", "implementation": "N/A"}
         )
+        self._write_spec_and_plan(repo, plan=plan)
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "plan"}, repo)
         assert result.returncode == 1
-        assert "test" in result.stderr.lower()
-
-    def test_fails_without_files_to_create(self, tmp_path: Path) -> None:
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/plans/test-task-42.md"),
-            "x" * 250 + "\nacceptance criteria reference\ntest plan included\n",
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "plan"}, repo)
-        assert result.returncode == 1
-        assert "files" in result.stderr.lower()
+        assert "99" in result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +409,98 @@ class TestPostReview:
         )
         assert result.returncode == 0
         assert "passed" in result.stdout
+
+    def test_criteria_coverage_pass(self, tmp_path: Path) -> None:
+        """Review covers all spec criteria → passes."""
+        repo = str(tmp_path)
+        spec = {
+            "overview": "Test",
+            "acceptance_criteria": [
+                {"id": 1, "text": "First"},
+                {"id": 2, "text": "Second"},
+                {"id": 3, "text": "Third"},
+            ],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "",
+        }
+        _write_file(
+            os.path.join(repo, "_forge/specs/test-task-42.json"),
+            json.dumps(spec),
+        )
+        review = {
+            "verdict": "PASS",
+            "summary": "All good.",
+            "issues": [],
+            "criteria_check": [
+                {"criterion": "AC 1: First", "satisfied": True, "evidence": "Done"},
+                {"criterion": "AC 2: Second", "satisfied": True, "evidence": "Done"},
+                {"criterion": "AC 3: Third", "satisfied": True, "evidence": "Done"},
+            ],
+            "out_of_scope_changes": [],
+            "content": "",
+        }
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps(review))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
+        )
+        assert result.returncode == 0
+
+    def test_criteria_coverage_fail(self, tmp_path: Path) -> None:
+        """Review missing spec criteria → fails."""
+        repo = str(tmp_path)
+        spec = {
+            "overview": "Test",
+            "acceptance_criteria": [
+                {"id": 1, "text": "First"},
+                {"id": 2, "text": "Second"},
+                {"id": 3, "text": "Third"},
+            ],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "",
+        }
+        _write_file(
+            os.path.join(repo, "_forge/specs/test-task-42.json"),
+            json.dumps(spec),
+        )
+        review = {
+            "verdict": "PASS",
+            "summary": "Partial.",
+            "issues": [],
+            "criteria_check": [
+                {"criterion": "AC 1: First", "satisfied": True, "evidence": "Done"},
+                {"criterion": "AC 2: Second", "satisfied": True, "evidence": "Done"},
+            ],
+            "out_of_scope_changes": [],
+            "content": "",
+        }
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps(review))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
+        )
+        assert result.returncode == 1
+        assert "criterion ID 3" in result.stderr
+
+    def test_legacy_md_spec_skips_criteria_check(self, tmp_path: Path) -> None:
+        """No structured spec → criteria coverage check is skipped."""
+        repo = str(tmp_path)
+        # No _forge/specs/test-task-42.json — legacy .md only
+        review = {"verdict": "PASS", "summary": "OK", "issues": []}
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps(review))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
+        )
+        assert result.returncode == 0
 
 
 # ---------------------------------------------------------------------------

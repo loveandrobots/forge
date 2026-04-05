@@ -64,11 +64,11 @@ def project_id(conn: sqlite3.Connection) -> str:
 class TestArtifactPathForStage:
     def test_spec_standard(self) -> None:
         path = _artifact_path_for_stage("/tmp/repo", "task-123", "spec")
-        assert path == "/tmp/repo/_forge/specs/task-123.md"
+        assert path == "/tmp/repo/_forge/specs/task-123.json"
 
     def test_plan_standard(self) -> None:
         path = _artifact_path_for_stage("/tmp/repo", "task-123", "plan")
-        assert path == "/tmp/repo/_forge/plans/task-123.md"
+        assert path == "/tmp/repo/_forge/plans/task-123.json"
 
     def test_review_standard(self) -> None:
         path = _artifact_path_for_stage("/tmp/repo", "task-123", "review")
@@ -107,7 +107,7 @@ class TestAdvanceTaskSetsArtifactPaths:
         await engine.advance_task(conn, task_id, "spec", project=project)
 
         task = db.get_task(conn, task_id)
-        assert task["spec_path"] == f"/tmp/repo/_forge/specs/{task_id}.md"
+        assert task["spec_path"] == f"/tmp/repo/_forge/specs/{task_id}.json"
         assert task["current_stage"] == "plan"
 
     async def test_plan_pass_sets_plan_path(
@@ -124,7 +124,7 @@ class TestAdvanceTaskSetsArtifactPaths:
         await engine.advance_task(conn, task_id, "plan", project=project)
 
         task = db.get_task(conn, task_id)
-        assert task["plan_path"] == f"/tmp/repo/_forge/plans/{task_id}.md"
+        assert task["plan_path"] == f"/tmp/repo/_forge/plans/{task_id}.json"
         assert task["current_stage"] == "implement"
 
     async def test_review_pass_sets_review_path(
@@ -233,8 +233,8 @@ class TestAdvanceTaskSetsArtifactPaths:
         await engine.advance_task(conn, task_id, "review", project=project)
 
         task = db.get_task(conn, task_id)
-        assert task["spec_path"] == f"/tmp/repo/_forge/specs/{task_id}.md"
-        assert task["plan_path"] == f"/tmp/repo/_forge/plans/{task_id}.md"
+        assert task["spec_path"] == f"/tmp/repo/_forge/specs/{task_id}.json"
+        assert task["plan_path"] == f"/tmp/repo/_forge/plans/{task_id}.json"
         assert task["review_path"] == f"/tmp/repo/_forge/reviews/{task_id}.md"
         assert task["status"] == "done"
 
@@ -261,21 +261,26 @@ class TestLoadArtifactsFallback:
         project = dict(db.get_project(conn, project_id))
         stage_run = dict(db.get_stage_run(conn, sr_id))
 
-        # spec_path is None on the task — should fall back to conventional path
+        # spec_path is None on the task — should fall back to conventional .json path
         assert task["spec_path"] is None
 
-        expected_path = f"/tmp/repo/_forge/specs/{task_id}.md"
+        expected_json_path = f"/tmp/repo/_forge/specs/{task_id}.json"
+        structured_data = {
+            "overview": "Test",
+            "acceptance_criteria": [{"id": 1, "text": "AC1"}],
+        }
         with (
             patch("forge.engine.os.path.exists", return_value=True),
             patch(
-                "forge.engine.load_artifact", return_value="spec content"
-            ) as mock_load,
+                "forge.engine.load_structured_artifact",
+                return_value=structured_data,
+            ) as mock_structured,
         ):
             artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
 
-        # Should have called load_artifact with the conventional fallback path
-        mock_load.assert_any_call(expected_path)
-        assert artifacts["spec_content"] == "spec content"
+        mock_structured.assert_called_once_with(expected_json_path)
+        import json
+        assert artifacts["spec_content"] == json.dumps(structured_data, indent=2)
 
     def test_implement_stage_falls_back_to_conventional_paths(
         self,
@@ -283,7 +288,7 @@ class TestLoadArtifactsFallback:
         settings: Settings,
         project_id: str,
     ) -> None:
-        """When spec_path and plan_path are null, implement stage uses conventional paths."""
+        """When spec_path and plan_path are null, implement stage uses conventional .json paths."""
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(conn, task_id, status="active", current_stage="implement")
@@ -296,26 +301,30 @@ class TestLoadArtifactsFallback:
         assert task["spec_path"] is None
         assert task["plan_path"] is None
 
-        expected_spec = f"/tmp/repo/_forge/specs/{task_id}.md"
-        expected_plan = f"/tmp/repo/_forge/plans/{task_id}.md"
+        expected_spec = f"/tmp/repo/_forge/specs/{task_id}.json"
+        expected_plan = f"/tmp/repo/_forge/plans/{task_id}.json"
 
-        def fake_load(path: str) -> str:
+        spec_data = {"overview": "Test", "acceptance_criteria": [{"id": 1, "text": "AC1"}]}
+        plan_data = {"approach": "Do it", "files_to_modify": [], "test_plan": []}
+
+        def fake_structured(path: str) -> dict | None:
             if path == expected_spec:
-                return "spec content"
+                return spec_data
             if path == expected_plan:
-                return "plan content"
-            return ""
+                return plan_data
+            return None
 
         with (
             patch("forge.engine.os.path.exists", return_value=True),
-            patch("forge.engine.load_artifact", side_effect=fake_load),
+            patch("forge.engine.load_structured_artifact", side_effect=fake_structured),
         ):
             artifacts = engine._load_artifacts(
                 task, project, "implement", stage_run, conn
             )
 
-        assert artifacts["spec_content"] == "spec content"
-        assert artifacts["plan_content"] == "plan content"
+        import json
+        assert artifacts["spec_content"] == json.dumps(spec_data, indent=2)
+        assert artifacts["plan_content"] == json.dumps(plan_data, indent=2)
 
     def test_uses_explicit_path_when_set(
         self,
@@ -367,19 +376,22 @@ class TestLoadArtifactsFallback:
         project = dict(db.get_project(conn, project_id))
         stage_run = dict(db.get_stage_run(conn, sr_id))
 
-        expected_spec = f"/tmp/repo/_forge/specs/{task_id}.md"
+        expected_spec = f"/tmp/repo/_forge/specs/{task_id}.json"
+        structured_data = {"overview": "Test", "acceptance_criteria": []}
 
         with (
             patch("forge.engine.os.path.exists", return_value=True),
             patch(
-                "forge.engine.load_artifact", return_value="spec content"
-            ) as mock_load,
+                "forge.engine.load_structured_artifact",
+                return_value=structured_data,
+            ) as mock_structured,
             patch("forge.engine.get_git_diff", return_value=""),
         ):
             artifacts = engine._load_artifacts(task, project, "review", stage_run, conn)
 
-        mock_load.assert_any_call(expected_spec)
-        assert artifacts["spec_content"] == "spec content"
+        mock_structured.assert_called_once_with(expected_spec)
+        import json
+        assert artifacts["spec_content"] == json.dumps(structured_data, indent=2)
 
     def test_raises_when_spec_file_missing(
         self,
@@ -671,3 +683,142 @@ class TestLoadArtifactsFlowGating:
 
         with pytest.raises(RuntimeError, match="Spec file not found"):
             engine._load_artifacts(task, project, "review", stage_run, conn)
+
+
+# ---------------------------------------------------------------------------
+# _load_artifacts legacy .md fallback
+# ---------------------------------------------------------------------------
+
+
+class TestLoadArtifactsLegacyFallback:
+    """Verify _load_artifacts falls back from .json to .md for legacy artifacts."""
+
+    def test_load_artifacts_prefers_json_spec(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When both .json and .md exist, prefers .json."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        json_path = str(tmp_path / f"_forge/specs/{task_id}.json")
+        md_path = str(tmp_path / f"_forge/specs/{task_id}.md")
+        import json
+        import os
+        os.makedirs(os.path.dirname(json_path), exist_ok=True)
+        with open(json_path, "w") as f:
+            json.dump({"overview": "JSON spec", "acceptance_criteria": []}, f)
+        with open(md_path, "w") as f:
+            f.write("# Markdown spec")
+        db.update_task(
+            conn, task_id, status="active", current_stage="plan",
+            spec_path=json_path,
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1)
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
+        assert "JSON spec" in artifacts["spec_content"]
+
+    def test_load_artifacts_falls_back_to_md_spec(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When only .md exists (legacy), loads it successfully."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        md_path = str(tmp_path / f"_forge/specs/{task_id}.md")
+        import os
+        os.makedirs(os.path.dirname(md_path), exist_ok=True)
+        with open(md_path, "w") as f:
+            f.write("# Legacy spec\n## Acceptance criteria\n- AC1")
+        # Don't set spec_path — it will use conventional path which is .json,
+        # then fall back to .md
+        db.update_task(conn, task_id, status="active", current_stage="plan")
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1)
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
+        assert "Legacy spec" in artifacts["spec_content"]
+
+    def test_load_artifacts_falls_back_to_md_plan(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When only .md plan exists (legacy), loads it successfully."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        # Create spec as .md
+        spec_md = str(tmp_path / f"_forge/specs/{task_id}.md")
+        import os
+        os.makedirs(os.path.dirname(spec_md), exist_ok=True)
+        with open(spec_md, "w") as f:
+            f.write("# Spec content")
+        plan_md = str(tmp_path / f"_forge/plans/{task_id}.md")
+        os.makedirs(os.path.dirname(plan_md), exist_ok=True)
+        with open(plan_md, "w") as f:
+            f.write("# Legacy plan\n## Approach")
+        db.update_task(
+            conn, task_id, status="active", current_stage="implement",
+            spec_path=spec_md,
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="implement", attempt=1)
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        artifacts = engine._load_artifacts(task, project, "implement", stage_run, conn)
+        assert "Legacy plan" in artifacts["plan_content"]
+
+    def test_load_artifacts_formats_spec_criteria_for_plan_stage(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When .json spec is loaded for plan stage, spec_criteria_list is populated."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        import json as json_mod
+        import os
+        json_path = str(tmp_path / f"_forge/specs/{task_id}.json")
+        os.makedirs(os.path.dirname(json_path), exist_ok=True)
+        spec_data = {
+            "overview": "Test",
+            "acceptance_criteria": [
+                {"id": 1, "text": "First criterion"},
+                {"id": 2, "text": "Second criterion"},
+            ],
+        }
+        with open(json_path, "w") as f:
+            json_mod.dump(spec_data, f)
+        db.update_task(
+            conn, task_id, status="active", current_stage="plan",
+            spec_path=json_path,
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1)
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
+        assert "spec_criteria_list" in artifacts
+        assert "1. First criterion" in artifacts["spec_criteria_list"]
+        assert "2. Second criterion" in artifacts["spec_criteria_list"]

@@ -83,8 +83,8 @@ def _artifact_path_for_stage(
     if stage == "spec" and flow == "epic":
         return os.path.join(repo_path, f"_forge/epic-decompositions/{task_id}.json")
     mapping = {
-        "spec": f"_forge/specs/{task_id}.md",
-        "plan": f"_forge/plans/{task_id}.md",
+        "spec": f"_forge/specs/{task_id}.json",
+        "plan": f"_forge/plans/{task_id}.json",
         "review": f"_forge/reviews/{task_id}.md",
     }
     rel = mapping.get(stage)
@@ -407,11 +407,10 @@ class PipelineEngine:
                 )
                 # Resolve JSON schema for structured output dispatch
                 json_schema_str: str | None = None
-                if stage == "review":
-                    flow = task.get("flow", "standard")
-                    schema = get_schema("review", flow)
-                    if schema:
-                        json_schema_str = json.dumps(schema)
+                flow = task.get("flow", "standard")
+                schema = get_schema(stage, flow)
+                if schema:
+                    json_schema_str = json.dumps(schema)
                 result: DispatchResult = await dispatch_claude(
                     prompt=prompt,
                     repo_path=project["repo_path"],
@@ -478,7 +477,35 @@ class PipelineEngine:
                         structured_output=structured_json,
                     )
 
-                # Step 4c: Write review structured output as JSON artifact
+                # Step 4c: Write structured output as JSON artifact for spec/plan/review
+                if stage == "spec" and structured is not None:
+                    repo_path = project.get("repo_path", "")
+                    spec_dir = os.path.join(repo_path, "_forge", "specs")
+                    os.makedirs(spec_dir, exist_ok=True)
+                    spec_json_path = os.path.join(
+                        spec_dir, f"{task_id}.json"
+                    )
+                    with open(spec_json_path, "w", encoding="utf-8") as sf:
+                        json.dump(structured, sf, indent=2)
+                    database.update_task(
+                        conn, task_id, spec_path=spec_json_path
+                    )
+                    task["spec_path"] = spec_json_path
+
+                if stage == "plan" and structured is not None:
+                    repo_path = project.get("repo_path", "")
+                    plan_dir = os.path.join(repo_path, "_forge", "plans")
+                    os.makedirs(plan_dir, exist_ok=True)
+                    plan_json_path = os.path.join(
+                        plan_dir, f"{task_id}.json"
+                    )
+                    with open(plan_json_path, "w", encoding="utf-8") as pf:
+                        json.dump(structured, pf, indent=2)
+                    database.update_task(
+                        conn, task_id, plan_path=plan_json_path
+                    )
+                    task["plan_path"] = plan_json_path
+
                 if stage == "review" and structured is not None:
                     repo_path = project.get("repo_path", "")
                     review_dir = os.path.join(repo_path, "_forge", "reviews")
@@ -1447,6 +1474,7 @@ class PipelineEngine:
         else:
             repo_path = project.get("repo_path", "")
             flow_stages = FLOW_STAGES.get(flow, STAGES)
+            spec_structured = None
             if stage in ("plan", "implement", "review") and "spec" in flow_stages:
                 spec_path = task.get("spec_path") or _artifact_path_for_stage(
                     repo_path,
@@ -1454,19 +1482,31 @@ class PipelineEngine:
                     "spec",
                     flow=flow,
                 )
+                # Fallback: if .json path doesn't exist, try .md
+                if spec_path and not os.path.exists(spec_path) and spec_path.endswith(".json"):
+                    md_fallback = spec_path.rsplit(".json", 1)[0] + ".md"
+                    if os.path.exists(md_fallback):
+                        spec_path = md_fallback
                 if not spec_path or not os.path.exists(spec_path):
                     raise RuntimeError(
                         f"Spec file not found: {spec_path}"
                         " — task may need to be reset to spec stage"
                     )
+                spec_structured = None
                 if spec_path.endswith(".json"):
-                    structured = load_structured_artifact(spec_path)
+                    spec_structured = load_structured_artifact(spec_path)
                     artifacts["spec_content"] = (
-                        json.dumps(structured, indent=2) if structured else ""
+                        json.dumps(spec_structured, indent=2) if spec_structured else ""
                     )
                 else:
                     artifacts["spec_content"] = load_artifact(spec_path)
 
+                # For plan stage: inject spec criteria list
+                if stage == "plan" and spec_structured:
+                    from forge.prompt_builder import format_spec_criteria_list
+                    artifacts["spec_criteria_list"] = format_spec_criteria_list(spec_structured)
+
+            plan_structured = None
             if stage in ("implement",) and "plan" in flow_stages:
                 plan_path = task.get("plan_path") or _artifact_path_for_stage(
                     repo_path,
@@ -1474,18 +1514,29 @@ class PipelineEngine:
                     "plan",
                     flow=flow,
                 )
+                # Fallback: if .json path doesn't exist, try .md
+                if plan_path and not os.path.exists(plan_path) and plan_path.endswith(".json"):
+                    md_fallback = plan_path.rsplit(".json", 1)[0] + ".md"
+                    if os.path.exists(md_fallback):
+                        plan_path = md_fallback
                 if not plan_path or not os.path.exists(plan_path):
                     raise RuntimeError(
                         f"Plan file not found: {plan_path}"
                         " — task may need to be reset to plan stage"
                     )
                 if plan_path.endswith(".json"):
-                    structured = load_structured_artifact(plan_path)
+                    plan_structured = load_structured_artifact(plan_path)
                     artifacts["plan_content"] = (
-                        json.dumps(structured, indent=2) if structured else ""
+                        json.dumps(plan_structured, indent=2) if plan_structured else ""
                     )
                 else:
                     artifacts["plan_content"] = load_artifact(plan_path)
+
+            # For implement stage: format structured artifacts as organized context
+            if stage == "implement" and spec_structured and plan_structured:
+                from forge.prompt_builder import format_structured_implement_context
+                ctx = format_structured_implement_context(spec_structured, plan_structured)
+                artifacts.update(ctx)
 
             if stage == "review":
                 branch = task.get("branch_name", "")

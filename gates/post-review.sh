@@ -50,6 +50,39 @@ if [ -z "$VERDICT" ]; then
     exit 1
 fi
 
+# Criteria coverage check: if structured spec exists, verify all criterion IDs
+# appear in the review's criteria_check array.
+SPEC_FILE="${FORGE_REPO_PATH}/_forge/specs/${FORGE_TASK_ID}.json"
+if [ -f "$SPEC_FILE" ] && jq empty "$SPEC_FILE" 2>/dev/null; then
+    # Extract spec criterion IDs
+    SPEC_IDS=$(jq -r '.acceptance_criteria[]?.id // empty' "$SPEC_FILE" 2>/dev/null | sort -n)
+    if [ -n "$SPEC_IDS" ]; then
+        # Extract review criteria_check criterion IDs (from criterion field, try to match AC N pattern)
+        REVIEW_CRITERIA=$(jq -r '.criteria_check[]?.criterion // empty' "$REVIEW_FILE" 2>/dev/null)
+        MISSING=""
+        for SID in $SPEC_IDS; do
+            # Check if the review criteria_check mentions this criterion ID
+            FOUND=false
+            # First try: look for criterion_id field directly
+            if jq -e ".criteria_check[]? | select(.criterion_id == $SID)" "$REVIEW_FILE" >/dev/null 2>&1; then
+                FOUND=true
+            fi
+            # Second try: look for the ID in the criterion text (e.g. "AC 1:" or "1.")
+            if [ "$FOUND" = false ] && echo "$REVIEW_CRITERIA" | grep -qE "(^|[^0-9])${SID}([^0-9]|$)"; then
+                FOUND=true
+            fi
+            if [ "$FOUND" = false ]; then
+                MISSING="${MISSING}  - Spec criterion ID $SID not covered in review\n"
+            fi
+        done
+        if [ -n "$MISSING" ]; then
+            echo "FAIL: Review does not cover all spec acceptance criteria:" >&2
+            printf "%b" "$MISSING" >&2
+            exit 1
+        fi
+    fi
+fi
+
 if [ "$VERDICT" = "PASS" ]; then
     echo "post-review gate passed"
     exit 0

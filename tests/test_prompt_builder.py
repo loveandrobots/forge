@@ -193,7 +193,6 @@ class TestBuildPrompt:
         assert "TestProject" in prompt
         assert "Add widget support" in prompt
         assert "Implement the widget subsystem." in prompt
-        assert "abc-123" in prompt
         assert "CLAUDE.md" in prompt
         # No retry context on attempt 1
         assert "Previous attempt failed" not in prompt
@@ -209,7 +208,6 @@ class TestBuildPrompt:
             "plan", sample_task, sample_project, sample_stage_run, artifacts
         )
         assert "The spec says do X." in prompt
-        assert "_forge/plans/abc-123.md" in prompt
 
     def test_plan_prompt_contains_acceptance_criteria_phrase(
         self,
@@ -231,11 +229,11 @@ class TestBuildPrompt:
         sample_stage_run: dict,
         empty_artifacts: dict,
     ) -> None:
-        """Plan prompt must instruct the agent to produce an 'Acceptance criteria mapping' section."""
+        """Plan prompt must instruct the agent to produce an acceptance_criteria_mapping field."""
         prompt = build_prompt(
             "plan", sample_task, sample_project, sample_stage_run, empty_artifacts
         )
-        assert "Acceptance criteria mapping" in prompt
+        assert "acceptance_criteria_mapping" in prompt
 
     def test_implement_prompt_includes_plan_and_spec(
         self,
@@ -283,6 +281,8 @@ class TestBuildPrompt:
             "spec_content": "spec body",
             "plan_content": "plan body",
             "git_diff": "diff output",
+            "spec_criteria_list": "1. First criterion",
+            "structured_context": "",
         }
         for stage in STAGE_TEMPLATES:
             prompt = build_prompt(
@@ -791,8 +791,8 @@ class TestBuildPromptEpicFlow:
         prompt = build_prompt(
             "spec", sample_task, sample_project, sample_stage_run, empty_artifacts
         )
-        assert "Acceptance criteria" in prompt
-        assert "Out of scope" in prompt
+        assert "acceptance_criteria" in prompt
+        assert "out_of_scope" in prompt
         assert "decompose" not in prompt.lower()
 
     def test_epic_spec_no_unfilled_placeholders(
@@ -1082,3 +1082,139 @@ class TestBuildStructuredReviewFeedback:
         }
         result = build_structured_review_feedback(data)
         assert "[PASS] API works — curl returns 200" in result
+
+
+# ---------------------------------------------------------------------------
+# Structured context formatting helpers
+# ---------------------------------------------------------------------------
+
+
+class TestFormatSpecCriteriaList:
+    def test_formats_criteria_as_numbered_list(self) -> None:
+        from forge.prompt_builder import format_spec_criteria_list
+
+        spec = {
+            "acceptance_criteria": [
+                {"id": 1, "text": "Widget renders correctly"},
+                {"id": 2, "text": "Widget handles edge cases"},
+            ],
+        }
+        result = format_spec_criteria_list(spec)
+        assert "1. Widget renders correctly" in result
+        assert "2. Widget handles edge cases" in result
+
+    def test_empty_criteria(self) -> None:
+        from forge.prompt_builder import format_spec_criteria_list
+
+        result = format_spec_criteria_list({"acceptance_criteria": []})
+        assert "no acceptance criteria" in result.lower()
+
+    def test_missing_criteria_key(self) -> None:
+        from forge.prompt_builder import format_spec_criteria_list
+
+        result = format_spec_criteria_list({})
+        assert "no acceptance criteria" in result.lower()
+
+
+class TestFormatStructuredImplementContext:
+    def test_formats_all_sections(self) -> None:
+        from forge.prompt_builder import format_structured_implement_context
+
+        spec = {
+            "acceptance_criteria": [
+                {"id": 1, "text": "Widget renders"},
+                {"id": 2, "text": "Widget handles errors"},
+            ],
+        }
+        plan = {
+            "approach": "Build the widget using existing patterns.",
+            "files_to_modify": ["src/widget.py", "tests/test_widget.py"],
+            "test_plan": [
+                {"criterion_id": 1, "description": "Test rendering"},
+                {"criterion_id": 2, "description": "Test error handling"},
+            ],
+        }
+        ctx = format_structured_implement_context(spec, plan)
+        result = ctx["structured_context"]
+
+        assert "AC 1: Widget renders" in result
+        assert "AC 2: Widget handles errors" in result
+        assert "src/widget.py" in result
+        assert "tests/test_widget.py" in result
+        assert "Build the widget using existing patterns." in result
+        assert "Test rendering" in result
+        assert "Test error handling" in result
+
+    def test_returns_structured_context_key(self) -> None:
+        from forge.prompt_builder import format_structured_implement_context
+
+        ctx = format_structured_implement_context(
+            {"acceptance_criteria": []},
+            {"approach": "", "files_to_modify": [], "test_plan": []},
+        )
+        assert "structured_context" in ctx
+
+
+class TestBuildPromptWithStructuredArtifacts:
+    def test_plan_prompt_injects_spec_criteria_list(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {
+            "spec_content": "The spec JSON.",
+            "spec_criteria_list": "1. Widget renders\n2. Widget handles errors",
+        }
+        prompt = build_prompt(
+            "plan", sample_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "1. Widget renders" in prompt
+        assert "2. Widget handles errors" in prompt
+
+    def test_implement_prompt_with_structured_context(
+        self,
+        sample_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+    ) -> None:
+        artifacts = {
+            "spec_content": "Spec JSON.",
+            "plan_content": "Plan JSON.",
+            "structured_context": "## Acceptance criteria checklist\n- [ ] AC 1: Foo\n",
+        }
+        prompt = build_prompt(
+            "implement", sample_task, sample_project, sample_stage_run, artifacts
+        )
+        assert "## Acceptance criteria checklist" in prompt
+        assert "AC 1: Foo" in prompt
+
+
+class TestSpecPlanTemplatesCleanedUp:
+    """Verify spec/plan templates no longer contain file-writing or forge-output instructions."""
+
+    def test_spec_template_no_save_instruction(self) -> None:
+        from forge.prompt_builder import SPEC_TEMPLATE
+
+        assert "Save it to:" not in SPEC_TEMPLATE
+        assert "_forge/specs/{task_id}.md" not in SPEC_TEMPLATE
+
+    def test_plan_template_no_save_instruction(self) -> None:
+        from forge.prompt_builder import PLAN_TEMPLATE
+
+        assert "Save it to:" not in PLAN_TEMPLATE
+        assert "_forge/plans/{task_id}.md" not in PLAN_TEMPLATE
+
+    def test_spec_template_describes_structured_output(self) -> None:
+        from forge.prompt_builder import SPEC_TEMPLATE
+
+        assert "structured JSON" in SPEC_TEMPLATE
+        assert "acceptance_criteria" in SPEC_TEMPLATE
+        assert "overview" in SPEC_TEMPLATE
+
+    def test_plan_template_describes_structured_output(self) -> None:
+        from forge.prompt_builder import PLAN_TEMPLATE
+
+        assert "structured JSON" in PLAN_TEMPLATE
+        assert "acceptance_criteria_mapping" in PLAN_TEMPLATE
+        assert "criterion_id" in PLAN_TEMPLATE

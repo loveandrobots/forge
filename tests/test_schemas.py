@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from forge.schemas import REVIEW_SCHEMA, STAGE_SCHEMAS, get_schema
+from forge.schemas import PLAN_SCHEMA, REVIEW_SCHEMA, SPEC_SCHEMA, STAGE_SCHEMAS, get_schema
 
 
 class TestGetSchema:
@@ -36,12 +36,12 @@ class TestGetSchema:
                 del STAGE_SCHEMAS["review"]
 
     def test_falls_back_to_plain_stage_when_no_flow_override(self) -> None:
-        STAGE_SCHEMAS["spec"] = {"type": "object"}
+        STAGE_SCHEMAS["_test_stage"] = {"type": "object"}
         try:
-            result = get_schema("spec", flow="quick")
+            result = get_schema("_test_stage", flow="quick")
             assert result == {"type": "object"}
         finally:
-            del STAGE_SCHEMAS["spec"]
+            del STAGE_SCHEMAS["_test_stage"]
 
     def test_empty_schemas_returns_none_for_unknown(self) -> None:
         assert get_schema("anything") is None
@@ -100,3 +100,61 @@ class TestReviewSchema:
         required = set(schema["required"])
         expected = {"verdict", "issues", "criteria_check", "out_of_scope_changes", "summary", "content"}
         assert required == expected
+
+
+class TestSpecSchema:
+    def test_spec_schema_registered(self) -> None:
+        schema = get_schema("spec")
+        assert schema is not None
+        assert schema is SPEC_SCHEMA
+
+    def test_spec_schema_has_required_fields(self) -> None:
+        schema = get_schema("spec")
+        required = set(schema["required"])
+        assert required == {"overview", "acceptance_criteria", "out_of_scope", "dependencies", "content"}
+
+    def test_spec_schema_acceptance_criteria_structure(self) -> None:
+        schema = get_schema("spec")
+        ac_items = schema["properties"]["acceptance_criteria"]["items"]
+        assert ac_items["properties"]["id"]["type"] == "integer"
+        assert ac_items["properties"]["text"]["type"] == "string"
+        assert set(ac_items["required"]) == {"id", "text"}
+
+    def test_get_schema_returns_none_for_implement(self) -> None:
+        assert get_schema("implement") is None
+
+    def test_get_schema_returns_none_for_epic_spec(self) -> None:
+        assert get_schema("spec", flow="epic") is None
+
+    def test_get_schema_returns_none_for_quick_flow(self) -> None:
+        assert get_schema("implement", flow="quick") is None
+
+    def test_spec_schema_returns_for_standard_flow(self) -> None:
+        assert get_schema("spec", flow="standard") is SPEC_SCHEMA
+
+
+class TestPlanSchema:
+    def test_plan_schema_registered(self) -> None:
+        schema = get_schema("plan")
+        assert schema is not None
+        assert schema is PLAN_SCHEMA
+
+    def test_plan_schema_has_required_fields(self) -> None:
+        schema = get_schema("plan")
+        required = set(schema["required"])
+        assert required == {"approach", "acceptance_criteria_mapping", "files_to_modify", "test_plan", "risks"}
+
+    def test_plan_schema_mapping_structure(self) -> None:
+        schema = get_schema("plan")
+        mapping_items = schema["properties"]["acceptance_criteria_mapping"]["items"]
+        assert mapping_items["properties"]["criterion_id"]["type"] == "integer"
+        assert mapping_items["properties"]["criterion_text"]["type"] == "string"
+        assert mapping_items["properties"]["implementation"]["type"] == "string"
+        assert set(mapping_items["required"]) == {"criterion_id", "criterion_text", "implementation"}
+
+    def test_plan_schema_test_plan_structure(self) -> None:
+        schema = get_schema("plan")
+        tp_items = schema["properties"]["test_plan"]["items"]
+        assert tp_items["properties"]["criterion_id"]["type"] == "integer"
+        assert tp_items["properties"]["description"]["type"] == "string"
+        assert set(tp_items["required"]) == {"criterion_id", "description"}

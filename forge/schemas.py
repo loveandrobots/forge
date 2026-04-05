@@ -7,6 +7,88 @@ from __future__ import annotations
 # via "{flow}:{stage}" keys (e.g. "epic:spec").
 STAGE_SCHEMAS: dict[str, dict] = {}
 
+SPEC_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "overview": {"type": "string"},
+        "acceptance_criteria": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "text": {"type": "string"},
+                },
+                "required": ["id", "text"],
+            },
+        },
+        "out_of_scope": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "dependencies": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "content": {"type": "string"},
+    },
+    "required": [
+        "overview",
+        "acceptance_criteria",
+        "out_of_scope",
+        "dependencies",
+        "content",
+    ],
+}
+
+PLAN_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "approach": {"type": "string"},
+        "acceptance_criteria_mapping": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "criterion_id": {"type": "integer"},
+                    "criterion_text": {"type": "string"},
+                    "implementation": {"type": "string"},
+                },
+                "required": ["criterion_id", "criterion_text", "implementation"],
+            },
+        },
+        "files_to_modify": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "test_plan": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "criterion_id": {"type": "integer"},
+                    "description": {"type": "string"},
+                },
+                "required": ["criterion_id", "description"],
+            },
+        },
+        "risks": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": [
+        "approach",
+        "acceptance_criteria_mapping",
+        "files_to_modify",
+        "test_plan",
+        "risks",
+    ],
+}
+
+STAGE_SCHEMAS["spec"] = SPEC_SCHEMA
+STAGE_SCHEMAS["plan"] = PLAN_SCHEMA
+
 REVIEW_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -61,14 +143,21 @@ REVIEW_SCHEMA: dict = {
 STAGE_SCHEMAS["review"] = REVIEW_SCHEMA
 
 
+_NO_SCHEMA_FLOWS: set[str] = {
+    "epic:spec",   # Epic spec uses a different template (JSON array of child tasks)
+}
+
+
 def get_schema(stage: str, flow: str = "standard") -> dict | None:
     """Look up a JSON schema by stage name.
 
     Checks for a flow-specific override first (``{flow}:{stage}``),
     then falls back to the plain stage key.  Returns None if no schema
-    is registered for the given stage.
+    is registered for the given stage or if the flow explicitly opts out.
     """
     flow_key = f"{flow}:{stage}"
+    if flow_key in _NO_SCHEMA_FLOWS:
+        return None
     if flow_key in STAGE_SCHEMAS:
         return STAGE_SCHEMAS[flow_key]
     return STAGE_SCHEMAS.get(stage)

@@ -20,13 +20,14 @@ You are working on the project "{project_name}".
 {task_description}
 
 ## Your job
-Write a specification for this task. Save it to: _forge/specs/{task_id}.md
+Write a specification for this task. Your output is captured as structured JSON automatically — do not save a file.
 
-The spec must include these sections:
-- **Overview**: What this task accomplishes in 2-3 sentences.
-- **Acceptance criteria**: A numbered list of binary (pass/fail) criteria. Each criterion must be objectively verifiable — no subjective language like "looks good" or "feels right."
-- **Out of scope**: What this task explicitly does NOT include.
-- **Dependencies**: Any existing code, APIs, or features this task depends on.
+Your response must be a JSON object with these fields:
+- **overview** (string): What this task accomplishes in 2-3 sentences.
+- **acceptance_criteria** (array): A list of objects, each with a sequential integer `id` (starting at 1) and a `text` string. Each criterion must be genuinely binary (pass/fail) and objectively verifiable — no subjective language like "looks good" or "feels right." A reviewer with no context beyond this spec must be able to mechanically check each criterion.
+- **out_of_scope** (array of strings): What this task explicitly does NOT include.
+- **dependencies** (array of strings): Any existing code, APIs, or features this task depends on.
+- **content** (string): The full spec as markdown prose for human reading.
 
 Read the project's existing documentation before writing the spec to ensure alignment with established patterns and decisions.
 
@@ -41,15 +42,18 @@ You are working on the project "{project_name}".
 ## Specification
 {spec_content}
 
-## Your job
-Write an implementation plan for this spec. Save it to: _forge/plans/{task_id}.md
+## Acceptance criteria from spec
+{spec_criteria_list}
 
-The plan must include:
-- **Approach**: How you will implement this, in 2-3 paragraphs.
-- **Acceptance criteria mapping**: For each acceptance criterion in the spec, describe how the implementation will satisfy it. Use the exact criterion text from the spec.
-- **Files to create or modify**: An explicit list of every file path that will be touched.
-- **Test plan**: Descriptions of tests that verify each acceptance criterion from the spec. Be specific about what each test asserts.
-- **Risks**: Anything that might go wrong or need human input.
+## Your job
+Write an implementation plan for this spec. Your output is captured as structured JSON automatically — do not save a file.
+
+Your response must be a JSON object with these fields:
+- **approach** (string): How you will implement this, in 2-3 paragraphs.
+- **acceptance_criteria_mapping** (array): For each acceptance criterion listed above, an object with `criterion_id` (integer matching the spec's ID), `criterion_text` (the exact criterion text), and `implementation` (how you will satisfy it). Every criterion ID from the spec must be mapped.
+- **files_to_modify** (array of strings): An explicit list of every file path that will be created or modified.
+- **test_plan** (array): Objects with `criterion_id` (integer) and `description` (string) describing tests that verify each acceptance criterion. Be specific about what each test asserts.
+- **risks** (array of strings): Anything that might go wrong or need human input.
 
 The plan should be detailed enough that a different agent — with no context beyond this plan and the spec — could implement it correctly.
 
@@ -70,6 +74,7 @@ You are on branch: {branch_name}
 ## Implementation plan
 {plan_content}
 
+{structured_context}
 ## Your job
 Implement this task according to the plan. Write tests alongside your implementation.
 
@@ -287,6 +292,64 @@ EPIC_STAGE_TEMPLATES: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+def format_spec_criteria_list(spec_data: dict) -> str:
+    """Format spec acceptance criteria as a numbered list for plan template injection."""
+    criteria = spec_data.get("acceptance_criteria", [])
+    if not criteria:
+        return "(no acceptance criteria found)"
+    lines = []
+    for c in criteria:
+        lines.append(f"{c.get('id', '?')}. {c.get('text', '')}")
+    return "\n".join(lines)
+
+
+def format_structured_implement_context(spec_data: dict, plan_data: dict) -> dict:
+    """Format structured spec/plan JSON into organized context for IMPLEMENT_TEMPLATE.
+
+    Returns a dict with keys that can be merged into the artifacts dict.
+    """
+    parts: list[str] = []
+
+    # Acceptance criteria checklist
+    criteria = spec_data.get("acceptance_criteria", [])
+    if criteria:
+        parts.append("## Acceptance criteria checklist")
+        for c in criteria:
+            parts.append(f"- [ ] AC {c.get('id', '?')}: {c.get('text', '')}")
+        parts.append("")
+
+    # Files to modify
+    files = plan_data.get("files_to_modify", [])
+    if files:
+        parts.append("## Files to modify")
+        for f in files:
+            parts.append(f"- {f}")
+        parts.append("")
+
+    # Approach
+    approach = plan_data.get("approach", "")
+    if approach:
+        parts.append("## Approach")
+        parts.append(approach)
+        parts.append("")
+
+    # Test plan grouped by criterion
+    test_plan = plan_data.get("test_plan", [])
+    if test_plan:
+        parts.append("## Test plan")
+        by_criterion: dict[int, list[str]] = {}
+        for t in test_plan:
+            cid = t.get("criterion_id", 0)
+            by_criterion.setdefault(cid, []).append(t.get("description", ""))
+        for cid in sorted(by_criterion):
+            parts.append(f"### AC {cid}")
+            for desc in by_criterion[cid]:
+                parts.append(f"- {desc}")
+        parts.append("")
+
+    return {"structured_context": "\n".join(parts)}
+
+
 def load_artifact(path: str) -> str:
     """Read an artifact file and return its content, or empty string on failure."""
     if not path:
@@ -449,4 +512,6 @@ def build_prompt(
         skill_references=skill_references,
         retry_context=retry_context,
         review_feedback=review_feedback,
+        spec_criteria_list=artifacts.get("spec_criteria_list", ""),
+        structured_context=artifacts.get("structured_context", ""),
     )
