@@ -342,6 +342,49 @@ class TestRebaseBranch:
         assert result.success is False
         assert result.stderr  # should have error text
 
+    async def test_rebase_with_dirty_index_staged_deletion(self, git_repo):
+        """Rebase succeeds even when the feature branch has staged deletions."""
+        # Create feature branch with a commit
+        await create_branch(git_repo, "forge/dirty-idx", "main")
+        with open(os.path.join(git_repo, "feature_file.txt"), "w") as f:
+            f.write("feature work")
+        subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feature commit"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+
+        # Stage a deletion without committing (simulates timed-out session)
+        subprocess.run(
+            ["git", "rm", "README.md"], cwd=git_repo, capture_output=True
+        )
+        # Verify index is dirty
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+        )
+        assert "D" in status.stdout
+
+        # Switch to main and add a commit so rebase has work to do
+        subprocess.run(
+            ["git", "checkout", "main"], cwd=git_repo, capture_output=True
+        )
+        with open(os.path.join(git_repo, "main_new.txt"), "w") as f:
+            f.write("main progress")
+        subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "main progress"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+
+        # Rebase should succeed despite the dirty index on the feature branch
+        result = await rebase_branch(git_repo, "forge/dirty-idx", "main")
+        assert result.success is True
+
 
 class TestCheckoutAndPull:
     async def test_checkout_and_pull_success(self, git_repo):
@@ -692,8 +735,8 @@ class TestRebaseAbortFailure:
         async def mock_create_subprocess_exec(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            # The third call is the rebase --abort (1: checkout, 2: rebase, 3: abort)
-            if call_count == 3 and args[1:3] == ("rebase", "--abort"):
+            # The fourth call is the rebase --abort (1: checkout, 2: reset, 3: rebase, 4: abort)
+            if call_count == 4 and args[1:3] == ("rebase", "--abort"):
                 mock_proc = MagicMock()
                 mock_proc.communicate = AsyncMock(
                     return_value=(b"", b"abort failed: lock held")

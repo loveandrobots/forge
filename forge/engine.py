@@ -94,8 +94,9 @@ async def reset_repo_state(repo_path: str, default_branch: str) -> dict:
     """Reset a git repo to a clean state on the default branch.
 
     Runs (in order): git rebase --abort, git merge --abort,
-    git checkout -- ., git clean -fd, git checkout {default_branch}.
+    git reset --hard HEAD, git clean -fd, git checkout {default_branch}.
     The abort commands ignore failures (no rebase/merge may be active).
+    The reset clears both the index and working tree (including staged deletions).
     The remaining commands must all succeed.
 
     Returns {"success": True/False, "output": str with combined command logs}.
@@ -129,7 +130,7 @@ async def reset_repo_state(repo_path: str, default_branch: str) -> dict:
 
     # These must succeed
     for cmd in [
-        ("git", "checkout", "--", "."),
+        ("git", "reset", "--hard", "HEAD"),
         ("git", "clean", "-fd"),
         ("git", "checkout", default_branch),
     ]:

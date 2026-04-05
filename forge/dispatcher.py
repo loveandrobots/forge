@@ -362,6 +362,26 @@ async def rebase_branch(
             returncode=proc.returncode or 1,
         )
 
+    # Clean index and working tree before rebase (defends against dirty state
+    # left by a timed-out session, e.g. staged deletions).
+    reset_proc = await asyncio.create_subprocess_exec(
+        "git",
+        "reset",
+        "--hard",
+        "HEAD",
+        cwd=repo_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    reset_stdout, reset_stderr = await reset_proc.communicate()
+    if reset_proc.returncode != 0:
+        return GitResult(
+            success=False,
+            stdout=reset_stdout.decode(errors="replace"),
+            stderr=reset_stderr.decode(errors="replace"),
+            returncode=reset_proc.returncode or 1,
+        )
+
     # Rebase onto base
     proc = await asyncio.create_subprocess_exec(
         "git",

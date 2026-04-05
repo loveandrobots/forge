@@ -228,3 +228,74 @@ async def test_cleanup_combined_dirty_state(tmp_path):
     assert _git_status(repo) == ""
     branch = _run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
     assert branch == "main"
+
+
+# ---- AC5: reset_repo_state clears staged deletions ----
+
+
+async def test_cleanup_staged_deletion(tmp_path):
+    """Staged file deletion is cleared by reset_repo_state."""
+    repo = _init_repo(tmp_path)
+    target = os.path.join(repo, "README.md")
+
+    # Stage a deletion (git rm stages the delete but doesn't commit)
+    _run_git(repo, "rm", "README.md")
+    assert "D" in _git_status(repo)
+
+    result = await reset_repo_state(repo, "main")
+
+    assert result["success"] is True
+    assert _git_status(repo) == ""
+    assert os.path.exists(target), "Deleted file should be restored"
+
+
+# ---- AC1: staged addition cleared ----
+
+
+async def test_cleanup_staged_addition(tmp_path):
+    """Staged new file is cleared by reset_repo_state (reset + clean)."""
+    repo = _init_repo(tmp_path)
+
+    # Create and stage a new file
+    with open(os.path.join(repo, "newfile.txt"), "w") as f:
+        f.write("new\n")
+    _run_git(repo, "add", "newfile.txt")
+    assert "A" in _git_status(repo)
+
+    result = await reset_repo_state(repo, "main")
+
+    assert result["success"] is True
+    assert _git_status(repo) == ""
+    assert not os.path.exists(os.path.join(repo, "newfile.txt"))
+
+
+# ---- AC6: committed work preserved after cleanup ----
+
+
+async def test_cleanup_preserves_committed_work(tmp_path):
+    """Commits on a feature branch survive reset_repo_state."""
+    repo = _init_repo(tmp_path)
+
+    # Create feature branch with two commits
+    _run_git(repo, "checkout", "-b", "feature")
+    with open(os.path.join(repo, "a.txt"), "w") as f:
+        f.write("a\n")
+    _run_git(repo, "add", "a.txt")
+    _run_git(repo, "commit", "-m", "commit-one")
+
+    with open(os.path.join(repo, "b.txt"), "w") as f:
+        f.write("b\n")
+    _run_git(repo, "add", "b.txt")
+    _run_git(repo, "commit", "-m", "commit-two")
+
+    # Add dirty index state
+    _run_git(repo, "rm", "a.txt")
+
+    result = await reset_repo_state(repo, "main")
+    assert result["success"] is True
+
+    # Switch back to feature and verify commits are intact
+    _run_git(repo, "checkout", "feature")
+    after_commits = _run_git(repo, "log", "--oneline")
+    assert "commit-one" in after_commits
+    assert "commit-two" in after_commits
