@@ -33,7 +33,7 @@ def test_default_settings() -> None:
     assert s.engine.stage_timeout_seconds == 600
     assert s.engine.default_max_retries == 3
     assert s.claude.default_model == "opus"
-    assert s.claude.headless_flags == "--output-format stream-json"
+    assert s.claude.headless_flags == ""
 
 
 def test_get_settings_from_yaml() -> None:
@@ -51,7 +51,7 @@ def test_get_settings_from_yaml() -> None:
     # Defaults for missing keys
     assert s.engine.stage_timeout_seconds == 600
     assert s.claude.default_model == "sonnet"
-    assert s.claude.headless_flags == "--output-format stream-json"
+    assert s.claude.headless_flags == ""
     tmp.unlink()
 
 
