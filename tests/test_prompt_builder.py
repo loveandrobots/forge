@@ -747,24 +747,29 @@ class TestBuildPromptEpicFlow:
             "spec", epic_task, sample_project, sample_stage_run, empty_artifacts
         )
         assert "decompose" in prompt.lower()
-        assert "epic-decompositions" in prompt
         assert "JSON" in prompt
+        assert "--json-schema" in prompt
         # Should NOT contain standard spec template text
         assert "Acceptance criteria" not in prompt
         assert "Out of scope" not in prompt
 
-    def test_epic_spec_includes_task_id_in_path(
+    def test_epic_spec_describes_structured_fields(
         self,
         epic_task: dict,
         sample_project: dict,
         sample_stage_run: dict,
         empty_artifacts: dict,
     ) -> None:
-        """AC 2: Prompt directs agent to write JSON to path with task ID."""
+        """AC 11: Prompt describes structured output fields captured via --json-schema."""
         prompt = build_prompt(
             "spec", epic_task, sample_project, sample_stage_run, empty_artifacts
         )
-        assert f"_forge/epic-decompositions/{epic_task['id']}.json" in prompt
+        # Structured output fields are described
+        assert "tasks" in prompt
+        assert "rationale" in prompt
+        assert "content" in prompt
+        # No manual file-save instruction
+        assert "save" not in prompt.lower() or "do not save" in prompt.lower()
 
     def test_epic_spec_retry_context(
         self,
@@ -837,9 +842,9 @@ class TestBuildPromptEpicFlow:
         # Contains verdict instructions
         assert "PASS" in prompt
         assert "ISSUES" in prompt
-        # Contains review file path instruction
-        assert f"_forge/reviews/{epic_task['id']}.md" in prompt
-        # Contains follow-ups file instruction
+        # Structured output — no manual review file save instruction
+        assert "--json-schema" in prompt
+        # Contains follow-ups file instruction (follow-ups remain manual)
         assert f"_forge/follow-ups/{epic_task['id']}.json" in prompt
 
 
