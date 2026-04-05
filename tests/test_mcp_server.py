@@ -29,6 +29,7 @@ from forge.mcp_server import (
     reset_task,
     resume_task,
     retry_task,
+    update_project,
     update_task,
 )
 
@@ -1372,6 +1373,77 @@ class TestGetProjectConfig:
         result = get_project_config(project_id=fake_id)
         assert "error" in result
         assert fake_id in result["error"]
+
+
+class TestUpdateProject:
+    def test_update_name(self, project_id):
+        result = update_project(project_id=project_id, name="NewName")
+        assert result["name"] == "NewName"
+        assert "error" not in result
+
+    def test_update_repo_path(self, project_id):
+        result = update_project(project_id=project_id, repo_path="/tmp/new-repo")
+        assert result["repo_path"] == "/tmp/new-repo"
+
+    def test_update_default_branch(self, project_id):
+        result = update_project(project_id=project_id, default_branch="develop")
+        assert result["default_branch"] == "develop"
+
+    def test_update_gate_dir(self, project_id):
+        result = update_project(project_id=project_id, gate_dir="new-gates")
+        assert result["gate_dir"] == "new-gates"
+
+    def test_update_skill_refs(self, project_id):
+        result = update_project(project_id=project_id, skill_refs=["skill-a.md", "skill-b.md"])
+        assert result["skill_refs"] == ["skill-a.md", "skill-b.md"]
+
+    def test_update_config(self, project_id):
+        result = update_project(project_id=project_id, config={"new_key": "new_value"})
+        assert result["config"] == {"new_key": "new_value"}
+
+    def test_update_pause_after_completion(self, project_id):
+        result = update_project(project_id=project_id, pause_after_completion=True)
+        assert result["pause_after_completion"] == 1
+
+    def test_update_stage_timeouts(self, project_id):
+        timeouts = {"spec": 120, "plan": 180}
+        result = update_project(project_id=project_id, stage_timeouts=timeouts)
+        assert result["stage_timeouts"] == timeouts
+
+    def test_update_multiple_fields(self, project_id):
+        result = update_project(
+            project_id=project_id,
+            name="MultiUpdate",
+            default_branch="develop",
+            skill_refs=["s1.md"],
+        )
+        assert result["name"] == "MultiUpdate"
+        assert result["default_branch"] == "develop"
+        assert result["skill_refs"] == ["s1.md"]
+
+    def test_update_no_changes(self, project_id):
+        result = update_project(project_id=project_id)
+        assert result["name"] == "TestProject"
+        assert "error" not in result
+
+    def test_update_nonexistent_project(self):
+        result = update_project(project_id="nonexistent-id")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    def test_update_empty_name_rejected(self, project_id):
+        result = update_project(project_id=project_id, name="")
+        assert "error" in result
+        assert "name" in result["error"].lower()
+
+    def test_update_preserves_unchanged_fields(self, project_id):
+        """Updating one field should not affect other fields."""
+        result = update_project(project_id=project_id, name="Changed")
+        assert result["name"] == "Changed"
+        assert result["repo_path"] == "/tmp/test-repo"
+        assert result["default_branch"] == "main"
+        assert result["gate_dir"] == "gates"
+        assert result["config"] == {"key": "value"}
 
 
 class TestGetProjectGateScripts:

@@ -88,6 +88,7 @@ The server exposes the following tools:
 - `get_project_config` -- Get project configuration
 - `get_project_skills` -- List skills available in a project
 - `get_project_gate_scripts` -- List gate scripts for a project
+- `update_project` -- Update project configuration (name, repo_path, default_branch, gate_dir, skill_refs, config, pause_after_completion, stage_timeouts)
 
 ### Task queries
 - `get_task_detail` -- Get full details of a specific task

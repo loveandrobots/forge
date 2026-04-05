@@ -764,6 +764,59 @@ def get_project_config(project_id: str) -> dict:
 
 
 @mcp.tool()
+def update_project(
+    project_id: str,
+    name: str | None = None,
+    repo_path: str | None = None,
+    default_branch: str | None = None,
+    gate_dir: str | None = None,
+    skill_refs: list[str] | None = None,
+    config: dict | None = None,
+    pause_after_completion: bool | None = None,
+    stage_timeouts: dict | None = None,
+) -> dict:
+    """Update project configuration. Returns the updated project dict or an error dict.
+
+    Only provided fields are updated. Omitted fields remain unchanged.
+    """
+    conn = database.get_connection()
+    try:
+        project = database.get_project(conn, project_id)
+        if project is None:
+            return {"error": f"Project not found: {project_id}"}
+
+        if name is not None and not name:
+            return {"error": "name must not be empty"}
+
+        kwargs: dict = {}
+        if name is not None:
+            kwargs["name"] = name
+        if repo_path is not None:
+            kwargs["repo_path"] = repo_path
+        if default_branch is not None:
+            kwargs["default_branch"] = default_branch
+        if gate_dir is not None:
+            kwargs["gate_dir"] = gate_dir
+        if skill_refs is not None:
+            kwargs["skill_refs"] = skill_refs
+        if config is not None:
+            kwargs["config"] = config
+        if pause_after_completion is not None:
+            kwargs["pause_after_completion"] = pause_after_completion
+        if stage_timeouts is not None:
+            kwargs["stage_timeouts"] = stage_timeouts
+
+        if not kwargs:
+            return _row_to_dict(project)
+
+        database.update_project(conn, project_id, **kwargs)
+        updated = database.get_project(conn, project_id)
+        return _row_to_dict(updated)
+    finally:
+        conn.close()
+
+
+@mcp.tool()
 def get_project_gate_scripts(project_id: str) -> list[dict] | dict:
     """Get gate script contents for a project.
 

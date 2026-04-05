@@ -121,6 +121,7 @@ class TestMcpDocToolCoverage:
         "cancel_task",
         "delete_task",
         "update_task",
+        "update_project",
         "reprioritize_task",
     ]
 
