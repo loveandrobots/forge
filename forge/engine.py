@@ -472,8 +472,6 @@ class PipelineEngine:
                 )
                 gate_dir = project["gate_dir"]
                 # Resolve relative gate_dir against repo_path
-                import os
-
                 if not os.path.isabs(gate_dir):
                     gate_dir = os.path.join(project["repo_path"], gate_dir)
 

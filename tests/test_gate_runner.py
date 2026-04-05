@@ -7,8 +7,6 @@ import stat
 from pathlib import Path
 import textwrap
 
-import pytest
-
 from forge.gate_runner import GateResult, build_gate_env, run_gate
 
 
