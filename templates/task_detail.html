@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/artifact_macros.html" import render_review, render_spec, render_plan, render_markdown_artifact %}
 {% block title %}{{ task.title }} — Forge{% endblock %}
 {% block content %}
 <div class="task-header">
@@ -88,6 +89,25 @@
             {% endif %}
         </div>
     </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if artifacts and (artifacts.spec or artifacts.plan or artifacts.review) %}
+<h2>Artifacts</h2>
+<div class="artifacts-section">
+    {% for name, data in [("spec", artifacts.spec), ("plan", artifacts.plan), ("review", artifacts.review)] %}
+    {% if data is mapping %}
+        {% if name == "review" %}
+            {{ render_review(data) }}
+        {% elif name == "spec" %}
+            {{ render_spec(data) }}
+        {% elif name == "plan" %}
+            {{ render_plan(data) }}
+        {% endif %}
+    {% elif data is string %}
+        {{ render_markdown_artifact(name|capitalize, data) }}
+    {% endif %}
     {% endfor %}
 </div>
 {% endif %}

@@ -1,0 +1,235 @@
+{# Reusable macros for rendering structured artifacts #}
+
+{% macro severity_badge(severity) -%}
+<span class="severity-tag severity-{{ severity }}">{{ severity }}</span>
+{%- endmacro %}
+
+{% macro pass_fail_indicator(passed) -%}
+{% if passed -%}
+<span class="check-pass">&#10003;</span>
+{%- else -%}
+<span class="check-fail">&#10007;</span>
+{%- endif %}
+{%- endmacro %}
+
+{% macro verdict_badge(verdict) -%}
+{% if verdict == "PASS" -%}
+<span class="verdict-badge verdict-pass">PASS</span>
+{%- elif verdict == "ISSUES" -%}
+<span class="verdict-badge verdict-issues">ISSUES</span>
+{%- else -%}
+<span class="verdict-badge">{{ verdict }}</span>
+{%- endif %}
+{%- endmacro %}
+
+{% macro collapsible(title, content_text) -%}
+<details class="artifact-collapsible">
+    <summary>{{ title }}</summary>
+    <pre class="code-block">{{ content_text }}</pre>
+</details>
+{%- endmacro %}
+
+{% macro render_review(data) -%}
+<div class="artifact-panel artifact-review">
+    <div class="artifact-header">
+        <h3>Review</h3>
+        {{ verdict_badge(data.verdict) }}
+    </div>
+
+    {% if data.summary %}
+    <div class="artifact-summary">{{ data.summary }}</div>
+    {% endif %}
+
+    {% if data.criteria_check %}
+    <div class="artifact-section">
+        <h4>Criteria Check</h4>
+        <ul class="criteria-list">
+            {% for item in data.criteria_check %}
+            <li class="criteria-item">
+                {{ pass_fail_indicator(item.satisfied) }}
+                <span class="criteria-text">{{ item.criterion }}</span>
+                {% if item.evidence %}
+                <span class="criteria-evidence">{{ item.evidence }}</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if data.issues %}
+    <div class="artifact-section">
+        <h4>Issues</h4>
+        <ul class="issues-list">
+            {% for issue in data.issues %}
+            <li class="issue-item">
+                {{ severity_badge(issue.severity) }}
+                <span class="issue-desc">{{ issue.description }}</span>
+                {% if issue.file %}
+                <code class="issue-file">{{ issue.file }}</code>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if data.out_of_scope_changes %}
+    <div class="artifact-section">
+        <h4>Out of Scope Changes</h4>
+        <ul>
+            {% for item in data.out_of_scope_changes %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if data.content %}
+    {{ collapsible("Full review content", data.content) }}
+    {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro render_spec(data) -%}
+<div class="artifact-panel artifact-spec">
+    {% if data.overview %}
+    <div class="artifact-header">
+        <h3>Spec</h3>
+    </div>
+    <div class="artifact-summary">{{ data.overview }}</div>
+    {% else %}
+    <div class="artifact-header">
+        <h3>Spec</h3>
+    </div>
+    {% endif %}
+
+    {% if data.acceptance_criteria %}
+    <div class="artifact-section">
+        <h4>Acceptance Criteria</h4>
+        <ol class="acceptance-criteria-list">
+            {% for item in data.acceptance_criteria %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ol>
+    </div>
+    {% endif %}
+
+    {% if data.out_of_scope %}
+    <div class="artifact-section">
+        <h4>Out of Scope</h4>
+        <ul>
+            {% for item in data.out_of_scope %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if data.dependencies %}
+    <div class="artifact-section">
+        <h4>Dependencies</h4>
+        <ul>
+            {% for item in data.dependencies %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if data.content %}
+    {{ collapsible("Full spec content", data.content) }}
+    {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro render_plan(data) -%}
+<div class="artifact-panel artifact-plan">
+    <div class="artifact-header">
+        <h3>Plan</h3>
+    </div>
+
+    {% if data.approach %}
+    <div class="artifact-summary">{{ data.approach }}</div>
+    {% endif %}
+
+    {% if data.acceptance_criteria_mapping %}
+    <div class="artifact-section">
+        <h4>Acceptance Criteria Mapping</h4>
+        <table class="artifact-table">
+            <thead>
+                <tr>
+                    <th>Criterion</th>
+                    <th>Implementation</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in data.acceptance_criteria_mapping %}
+                <tr>
+                    <td>{{ item.criterion }}</td>
+                    <td>{{ item.implementation }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if data.files_to_modify %}
+    <div class="artifact-section">
+        <h4>Files to Modify</h4>
+        <ul class="file-list">
+            {% for f in data.files_to_modify %}
+            <li><code>{{ f if f is string else f.path }}</code>{% if f is mapping and f.reason %} &mdash; {{ f.reason }}{% endif %}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if data.test_plan %}
+    <div class="artifact-section">
+        <h4>Test Plan</h4>
+        <table class="artifact-table">
+            <thead>
+                <tr>
+                    <th>Test</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in data.test_plan %}
+                <tr>
+                    <td>{{ item.test if item is mapping else item }}</td>
+                    <td>{{ item.description if item is mapping and item.description else '' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if data.risks %}
+    <div class="artifact-section">
+        <h4>Risks</h4>
+        <ul>
+            {% for risk in data.risks %}
+            <li>{{ risk if risk is string else risk.description }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if data.content %}
+    {{ collapsible("Full plan content", data.content) }}
+    {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro render_markdown_artifact(name, text) -%}
+<div class="artifact-panel">
+    <div class="artifact-header">
+        <h3>{{ name }}</h3>
+    </div>
+    <pre class="code-block">{{ text }}</pre>
+</div>
+{%- endmacro %}

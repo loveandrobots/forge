@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from forge import database
 from forge.config import DB_PATH, FLOW_STAGES, STAGES
+from forge.engine import load_structured_artifact
 from forge.routers.pipeline import _get_engine
 from forge.utils import relative_time
 
@@ -18,6 +19,24 @@ _TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 router = APIRouter(tags=["dashboard"])
+
+
+def _load_artifact(path: str | None) -> dict | str | None:
+    """Load an artifact file, returning parsed dict for JSON or raw text for MD.
+
+    Returns None if path is missing or file cannot be read.
+    """
+    if not path:
+        return None
+    p = Path(path)
+    if not p.is_file():
+        return None
+    if p.suffix == ".json":
+        return load_structured_artifact(path)
+    try:
+        return p.read_text(encoding="utf-8")
+    except (OSError, IOError):
+        return None
 
 
 def _row_to_dict(row) -> dict:
@@ -163,6 +182,12 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
             if parent_row:
                 parent_task = _row_to_dict(parent_row)
 
+        artifacts: dict[str, dict | str | None] = {
+            "spec": _load_artifact(task.get("spec_path")),
+            "plan": _load_artifact(task.get("plan_path")),
+            "review": _load_artifact(task.get("review_path")),
+        }
+
         return templates.TemplateResponse(
             request,
             "task_detail.html",
@@ -173,6 +198,7 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
                 "flow_stages": flow_stages,
                 "child_tasks": child_tasks,
                 "parent_task": parent_task,
+                "artifacts": artifacts,
             },
         )
     finally:
