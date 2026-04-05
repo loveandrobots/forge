@@ -497,6 +497,35 @@ class TestLoadArtifactsFlowGating:
         with pytest.raises(RuntimeError, match="Spec file not found"):
             engine._load_artifacts(task, project, "implement", stage_run, conn)
 
+    def test_standard_flow_implement_raises_when_plan_missing(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Standard flow implement raises RuntimeError when spec exists but plan is missing."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, flow="standard"
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1
+        )
+
+        # Write a spec file so spec loading succeeds
+        spec_file = tmp_path / "spec.md"
+        spec_file.write_text("spec content")
+        db.update_task(conn, task_id, spec_path=str(spec_file))
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        with pytest.raises(RuntimeError, match="Plan file not found"):
+            engine._load_artifacts(task, project, "implement", stage_run, conn)
+
     def test_standard_flow_review_raises_when_spec_missing(
         self,
         conn: sqlite3.Connection,
