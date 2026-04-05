@@ -208,6 +208,7 @@ __marimo__/
 
 # Database
 forge.db*
+_forge/specs
 _forge/plans
 _forge/follow-ups
 _forge/reviews
