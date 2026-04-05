@@ -5498,3 +5498,66 @@ class TestReviewSchemaDispatch:
         artifacts = engine._load_artifacts(task, project, "implement", impl_run, conn)
         assert "review_feedback" in artifacts
         assert "broken logic" in artifacts["review_feedback"]
+
+
+class TestLoadArtifactsRuntimeError:
+    """Test that RuntimeError from _load_artifacts marks task needs_human."""
+
+    async def _run_one_iteration(self, engine: PipelineEngine) -> None:
+        """Run one engine loop iteration then stop."""
+        engine.running = True
+        loop_task = asyncio.create_task(engine.run_loop())
+        await asyncio.sleep(0.5)
+        engine.running = False
+        try:
+            await asyncio.wait_for(loop_task, timeout=3.0)
+        except asyncio.TimeoutError:
+            loop_task.cancel()
+
+    @pytest.mark.asyncio
+    async def test_load_artifacts_runtime_error_marks_needs_human(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        active_task_with_queued_run: tuple[str, str],
+    ) -> None:
+        """_load_artifacts raising RuntimeError marks task needs_human and stage_run error."""
+        task_id, sr_id = active_task_with_queued_run
+        db.update_task(conn, task_id, branch_name="forge/test-branch")
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        error_text = "Spec file not found: /fake/path.md — task may need to be reset to spec stage"
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch.object(
+                engine,
+                "_load_artifacts",
+                side_effect=RuntimeError(error_text),
+            ),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+            ) as mock_dispatch,
+        ):
+            await self._run_one_iteration(engine)
+
+        # AC4/AC8: task marked needs_human
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+        # AC2: stage_run marked error with exception message
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert "Spec file not found" in sr["error_message"]
+
+        # AC3: error logged via self._log (visible in dashboard)
+        logs = db.get_logs(conn, task_id=task_id)
+        artifact_logs = [row for row in logs if "Artifact loading failed" in row["message"]]
+        assert len(artifact_logs) >= 1
+        assert error_text in artifact_logs[0]["message"]
+
+        # AC5: dispatch was never called
+        mock_dispatch.assert_not_called()

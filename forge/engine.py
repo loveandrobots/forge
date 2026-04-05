@@ -348,20 +348,41 @@ class PipelineEngine:
                         continue
 
                 # Step 3: Build prompt
-                artifacts = self._load_artifacts(
-                    task,
-                    project,
-                    stage,
-                    stage_run,
-                    conn,
-                )
-                prompt = build_prompt(
-                    stage,
-                    task,
-                    project,
-                    stage_run,
-                    artifacts,
-                )
+                try:
+                    artifacts = self._load_artifacts(
+                        task,
+                        project,
+                        stage,
+                        stage_run,
+                        conn,
+                    )
+                    prompt = build_prompt(
+                        stage,
+                        task,
+                        project,
+                        stage_run,
+                        artifacts,
+                    )
+                except RuntimeError as exc:
+                    error_msg = str(exc)
+                    database.update_stage_run(
+                        conn,
+                        stage_run_id,
+                        status="error",
+                        error_message=error_msg,
+                        finished_at=_now(),
+                    )
+                    database.update_task(conn, task_id, status="needs_human")
+                    self._log(
+                        "error",
+                        f"Artifact loading failed for task {task_id}: {error_msg}",
+                        task_id=task_id,
+                        stage_run_id=stage_run_id,
+                    )
+                    await self._maybe_auto_pause(conn, task_id, project)
+                    conn.close()
+                    self.current_task_id = None
+                    continue
 
                 # Mark stage_run as running
                 started_at = _now()
