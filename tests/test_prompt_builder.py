@@ -268,7 +268,8 @@ class TestBuildPrompt:
             "review", sample_task, sample_project, sample_stage_run, artifacts
         )
         assert "diff --git" in prompt
-        assert "_forge/reviews/abc-123.md" in prompt
+        assert "PASS" in prompt
+        assert "ISSUES" in prompt
 
     def test_all_templates_have_no_unfilled_placeholders(
         self,
@@ -847,6 +848,47 @@ class TestBuildPromptEpicFlow:
 # ---------------------------------------------------------------------------
 
 
+class TestReviewTemplatesCleanedUp:
+    """Verify review templates no longer contain file-writing or forge-output instructions."""
+
+    def test_review_template_no_save_instruction(self) -> None:
+        from forge.prompt_builder import REVIEW_TEMPLATE
+
+        assert "Save your review to" not in REVIEW_TEMPLATE
+
+    def test_quick_review_template_no_save_instruction(self) -> None:
+        from forge.prompt_builder import QUICK_REVIEW_TEMPLATE
+
+        assert "Save your review to" not in QUICK_REVIEW_TEMPLATE
+
+    def test_review_template_no_forge_output(self) -> None:
+        from forge.prompt_builder import REVIEW_TEMPLATE
+
+        assert "forge-output" not in REVIEW_TEMPLATE
+
+    def test_quick_review_template_no_forge_output(self) -> None:
+        from forge.prompt_builder import QUICK_REVIEW_TEMPLATE
+
+        assert "forge-output" not in QUICK_REVIEW_TEMPLATE
+
+    def test_review_template_still_has_review_guidance(self) -> None:
+        """Templates still describe what to evaluate even without formatting instructions."""
+        from forge.prompt_builder import REVIEW_TEMPLATE
+
+        assert "PASS" in REVIEW_TEMPLATE
+        assert "ISSUES" in REVIEW_TEMPLATE
+        assert "severity" in REVIEW_TEMPLATE
+        assert "Criteria check" in REVIEW_TEMPLATE
+        assert "Out of scope" in REVIEW_TEMPLATE
+
+    def test_quick_review_template_still_has_review_guidance(self) -> None:
+        from forge.prompt_builder import QUICK_REVIEW_TEMPLATE
+
+        assert "PASS" in QUICK_REVIEW_TEMPLATE
+        assert "ISSUES" in QUICK_REVIEW_TEMPLATE
+        assert "severity" in QUICK_REVIEW_TEMPLATE
+
+
 class TestNoForgeOutputInTemplates:
     """Verify that forge-output blocks have been removed from all templates."""
 
@@ -919,18 +961,52 @@ class TestBuildStructuredReviewFeedback:
             "verdict": "ISSUES",
             "summary": "Found two problems.",
             "criteria_check": [
-                {"criterion": "Tests pass", "met": True},
-                {"criterion": "No lint errors", "met": False},
+                {"criterion": "Tests pass", "satisfied": True, "evidence": "All green"},
+                {"criterion": "No lint errors", "satisfied": False, "evidence": "ruff found 3 issues"},
             ],
-            "issues": ["Unused import in foo.py", "Missing docstring"],
+            "issues": [
+                {"file": "foo.py", "severity": "major", "description": "Unused import"},
+                {"file": "bar.py", "severity": "nit", "description": "Missing docstring"},
+            ],
         }
         result = build_structured_review_feedback(data)
         assert "**Verdict**: ISSUES" in result
         assert "Found two problems." in result
         assert "[PASS] Tests pass" in result
+        assert "All green" in result
         assert "[FAIL] No lint errors" in result
-        assert "- Unused import in foo.py" in result
-        assert "- Missing docstring" in result
+        assert "ruff found 3 issues" in result
+        assert "[major] Unused import (foo.py)" in result
+        assert "[nit] Missing docstring (bar.py)" in result
+
+    def test_full_review_produces_readable_markdown(self) -> None:
+        """build_structured_review_feedback produces readable markdown from a sample review dict."""
+        from forge.prompt_builder import build_structured_review_feedback
+
+        data = {
+            "verdict": "ISSUES",
+            "summary": "Implementation mostly correct but has a bug.",
+            "criteria_check": [
+                {"criterion": "Widget renders", "satisfied": True, "evidence": "Test confirms rendering"},
+                {"criterion": "Error handling", "satisfied": False, "evidence": "No try/except"},
+            ],
+            "issues": [
+                {"file": "widget.py", "severity": "critical", "description": "Crashes on empty input"},
+                {"file": "widget.py", "severity": "minor", "description": "Inconsistent variable naming"},
+            ],
+            "out_of_scope_changes": ["README.md"],
+            "content": "Full review markdown here.",
+        }
+        result = build_structured_review_feedback(data)
+        # Should be non-empty readable markdown
+        assert len(result) > 0
+        # Contains structured sections
+        assert "**Verdict**: ISSUES" in result
+        assert "### Criteria check" in result
+        assert "### Issues" in result
+        # Contains specific content
+        assert "Crashes on empty input" in result
+        assert "widget.py" in result
 
     def test_empty_data(self) -> None:
         from forge.prompt_builder import build_structured_review_feedback
@@ -944,7 +1020,16 @@ class TestBuildStructuredReviewFeedback:
         result = build_structured_review_feedback({"verdict": "PASS"})
         assert "**Verdict**: PASS" in result
 
-    def test_issues_as_dicts(self) -> None:
+    def test_issues_as_dicts_with_severity(self) -> None:
+        from forge.prompt_builder import build_structured_review_feedback
+
+        data = {
+            "issues": [{"file": "util.py", "severity": "major", "description": "Bad naming in util.py"}],
+        }
+        result = build_structured_review_feedback(data)
+        assert "[major] Bad naming in util.py (util.py)" in result
+
+    def test_issues_as_dicts_without_severity(self) -> None:
         from forge.prompt_builder import build_structured_review_feedback
 
         data = {
@@ -952,6 +1037,16 @@ class TestBuildStructuredReviewFeedback:
         }
         result = build_structured_review_feedback(data)
         assert "Bad naming in util.py" in result
+
+    def test_issues_as_strings(self) -> None:
+        from forge.prompt_builder import build_structured_review_feedback
+
+        data = {
+            "issues": ["Unused import in foo.py", "Missing docstring"],
+        }
+        result = build_structured_review_feedback(data)
+        assert "- Unused import in foo.py" in result
+        assert "- Missing docstring" in result
 
     def test_criteria_check_as_strings(self) -> None:
         from forge.prompt_builder import build_structured_review_feedback
@@ -962,3 +1057,28 @@ class TestBuildStructuredReviewFeedback:
         result = build_structured_review_feedback(data)
         assert "- Tests pass: yes" in result
         assert "- Lint: no" in result
+
+    def test_criteria_check_with_legacy_met_field(self) -> None:
+        """Backwards compatibility: 'met' field still works."""
+        from forge.prompt_builder import build_structured_review_feedback
+
+        data = {
+            "criteria_check": [
+                {"criterion": "Tests pass", "met": True},
+                {"criterion": "No lint errors", "met": False},
+            ],
+        }
+        result = build_structured_review_feedback(data)
+        assert "[PASS] Tests pass" in result
+        assert "[FAIL] No lint errors" in result
+
+    def test_criteria_with_evidence(self) -> None:
+        from forge.prompt_builder import build_structured_review_feedback
+
+        data = {
+            "criteria_check": [
+                {"criterion": "API works", "satisfied": True, "evidence": "curl returns 200"},
+            ],
+        }
+        result = build_structured_review_feedback(data)
+        assert "[PASS] API works — curl returns 200" in result

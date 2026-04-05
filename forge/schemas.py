@@ -7,6 +7,59 @@ from __future__ import annotations
 # via "{flow}:{stage}" keys (e.g. "epic:spec").
 STAGE_SCHEMAS: dict[str, dict] = {}
 
+REVIEW_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "verdict": {
+            "type": "string",
+            "enum": ["PASS", "ISSUES"],
+        },
+        "issues": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "major", "minor", "nit"],
+                    },
+                    "description": {"type": "string"},
+                },
+                "required": ["file", "severity", "description"],
+            },
+        },
+        "criteria_check": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "criterion": {"type": "string"},
+                    "satisfied": {"type": "boolean"},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["criterion", "satisfied", "evidence"],
+            },
+        },
+        "out_of_scope_changes": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "summary": {"type": "string"},
+        "content": {"type": "string"},
+    },
+    "required": [
+        "verdict",
+        "issues",
+        "criteria_check",
+        "out_of_scope_changes",
+        "summary",
+        "content",
+    ],
+}
+
+STAGE_SCHEMAS["review"] = REVIEW_SCHEMA
+
 
 def get_schema(stage: str, flow: str = "standard") -> dict | None:
     """Look up a JSON schema by stage name.

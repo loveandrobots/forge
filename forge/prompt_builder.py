@@ -97,13 +97,14 @@ You are reviewing branch: {branch_name}
 {git_diff}
 
 ## Your job
-Adversarially review this implementation against the spec. Save your review to: _forge/reviews/{task_id}.md
+Adversarially review this implementation against the spec.
 
-Your review must include:
+Your review must evaluate:
 - **Verdict**: Either "PASS" or "ISSUES"
-- **Criteria check**: For each acceptance criterion in the spec, state whether the implementation satisfies it (yes/no with evidence).
-- **Issues found**: If verdict is ISSUES, list each issue with: what's wrong, where it is, and what should be done about it. Be specific — cite file paths and line numbers.
-- **Out of scope changes**: Flag any modifications to files not listed in the plan.
+- **Criteria check**: For each acceptance criterion in the spec, state whether the implementation satisfies it, with evidence.
+- **Issues found**: If verdict is ISSUES, list each issue with the file path, severity (critical, major, minor, or nit), and a description of what's wrong and what should be done about it. Be specific — cite file paths and line numbers.
+- **Out of scope changes**: Flag any modifications to files not listed in the plan (as file paths).
+- **Summary**: A concise overall summary of the review.
 
 Your job is to find problems, not confirm success. Look for: unverified acceptance criteria, missing edge case tests, violations of project conventions or brand guidelines, dead code, and scope creep.
 
@@ -164,12 +165,14 @@ You are reviewing branch: {branch_name}
 {git_diff}
 
 ## Your job
-Adversarially review this implementation against the task description above. Save your review to: _forge/reviews/{task_id}.md
+Adversarially review this implementation against the task description above.
 
-Your review must include:
+Your review must evaluate:
 - **Verdict**: Either "PASS" or "ISSUES"
-- **Requirements check**: For each requirement in the task description, state whether the implementation satisfies it (yes/no with evidence).
-- **Issues found**: If verdict is ISSUES, list each issue with: what's wrong, where it is, and what should be done about it. Be specific — cite file paths and line numbers.
+- **Requirements check**: For each requirement in the task description, state whether the implementation satisfies it, with evidence.
+- **Issues found**: If verdict is ISSUES, list each issue with the file path, severity (critical, major, minor, or nit), and a description of what's wrong and what should be done about it. Be specific — cite file paths and line numbers.
+- **Out of scope changes**: Flag any file modifications not related to the task (as file paths).
+- **Summary**: A concise overall summary of the review.
 
 Your job is to find problems, not confirm success. Look for: unverified requirements, missing edge case tests, violations of project conventions, dead code, and scope creep.
 
@@ -310,8 +313,14 @@ def build_structured_review_feedback(data: dict) -> str:
         parts.append("\n### Criteria check")
         for item in data["criteria_check"]:
             if isinstance(item, dict):
-                status = "PASS" if item.get("met") else "FAIL"
-                parts.append(f"- [{status}] {item.get('criterion', '')}")
+                satisfied = item.get("satisfied", item.get("met"))
+                status = "PASS" if satisfied else "FAIL"
+                criterion = item.get("criterion", "")
+                evidence = item.get("evidence", "")
+                line = f"- [{status}] {criterion}"
+                if evidence:
+                    line += f" — {evidence}"
+                parts.append(line)
             else:
                 parts.append(f"- {item}")
     if data.get("issues"):
@@ -320,7 +329,12 @@ def build_structured_review_feedback(data: dict) -> str:
             if isinstance(issue, str):
                 parts.append(f"- {issue}")
             elif isinstance(issue, dict):
-                parts.append(f"- {issue.get('description', str(issue))}")
+                severity = issue.get("severity", "")
+                file_path = issue.get("file", "")
+                desc = issue.get("description", str(issue))
+                prefix = f"[{severity}] " if severity else ""
+                suffix = f" ({file_path})" if file_path else ""
+                parts.append(f"- {prefix}{desc}{suffix}")
     return "\n".join(parts)
 
 
