@@ -18,7 +18,7 @@ from forge.dispatcher import (
     delete_branch,
     dispatch_claude,
     ff_merge,
-    parse_forge_output,
+    parse_json_output,
     parse_stream_json,
     rebase_branch,
 )
@@ -103,121 +103,74 @@ class TestParseStreamJson:
 
 
 # ---------------------------------------------------------------------------
-# parse_forge_output tests
+# parse_json_output tests
 # ---------------------------------------------------------------------------
 
 
-class TestParseForgeOutput:
-    def test_valid_json(self):
-        """AC 1: Correctly extracts and parses JSON from a forge-output block."""
-        text = (
-            "I wrote the spec file.\n\n"
-            "```forge-output\n"
-            '{"spec_path": "_forge/specs/abc.md"}\n'
-            "```"
-        )
-        result = parse_forge_output(text)
-        assert result == {"spec_path": "_forge/specs/abc.md"}
+class TestParseJsonOutput:
+    def test_valid_json_with_all_fields(self):
+        """Parses a complete JSON output with result, structured_output, and usage."""
+        raw = json.dumps({
+            "result": "Task completed",
+            "structured_output": {"spec_path": "_forge/specs/abc.md"},
+            "usage": {"input_tokens": 100, "output_tokens": 50},
+        })
+        parsed = parse_json_output(raw)
+        assert parsed["result"] == "Task completed"
+        assert parsed["structured_output"] == {"spec_path": "_forge/specs/abc.md"}
+        assert parsed["tokens"] == 150
 
-    def test_no_block(self):
-        """AC 1, 5: Returns None when no forge-output block exists."""
-        text = "Just some regular output with no structured block."
-        result = parse_forge_output(text)
-        assert result is None
+    def test_missing_structured_output(self):
+        """Returns None for structured_output when not present."""
+        raw = json.dumps({
+            "result": "Done",
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        })
+        parsed = parse_json_output(raw)
+        assert parsed["result"] == "Done"
+        assert parsed["structured_output"] is None
+        assert parsed["tokens"] == 15
 
-    def test_invalid_json(self):
-        """AC 1, 5: Returns None when the block contains invalid JSON."""
-        text = (
-            "Some output\n\n"
-            "```forge-output\n"
-            "not valid json {{\n"
-            "```"
-        )
-        result = parse_forge_output(text)
-        assert result is None
+    def test_missing_usage(self):
+        """Returns None for tokens when usage not present."""
+        raw = json.dumps({
+            "result": "Done",
+            "structured_output": {"verdict": "PASS"},
+        })
+        parsed = parse_json_output(raw)
+        assert parsed["tokens"] is None
+        assert parsed["structured_output"] == {"verdict": "PASS"}
 
-    def test_multiple_blocks_uses_last(self):
-        """AC 1: Uses the last forge-output block when multiple are present."""
-        text = (
-            "First attempt:\n"
-            "```forge-output\n"
-            '{"spec_path": "wrong.md"}\n'
-            "```\n\n"
-            "Actually, the correct output:\n"
-            "```forge-output\n"
-            '{"spec_path": "correct.md"}\n'
-            "```"
-        )
-        result = parse_forge_output(text)
-        assert result == {"spec_path": "correct.md"}
-
-    def test_block_with_surrounding_text(self):
-        """Extracts the block even when surrounded by lots of text."""
-        text = (
-            "I did a lot of work.\n"
-            "Here are my changes:\n"
-            "- Modified file A\n"
-            "- Modified file B\n\n"
-            "```forge-output\n"
-            '{"plan_path": "_forge/plans/xyz.md", "extra": true}\n'
-            "```\n"
-        )
-        result = parse_forge_output(text)
-        assert result == {"plan_path": "_forge/plans/xyz.md", "extra": True}
-
-    def test_non_dict_json_returns_none(self):
-        """Returns None when the JSON is valid but not an object."""
-        text = (
-            "```forge-output\n"
-            '["not", "a", "dict"]\n'
-            "```"
-        )
-        result = parse_forge_output(text)
-        assert result is None
+    def test_invalid_json_returns_raw(self):
+        """Returns raw text as result when JSON is invalid."""
+        raw = "not valid json"
+        parsed = parse_json_output(raw)
+        assert parsed["result"] == raw
+        assert parsed["structured_output"] is None
+        assert parsed["tokens"] is None
 
     def test_empty_string(self):
-        """Returns None for empty input."""
-        assert parse_forge_output("") is None
+        """Handles empty string input."""
+        parsed = parse_json_output("")
+        assert parsed["result"] == ""
+        assert parsed["structured_output"] is None
+        assert parsed["tokens"] is None
 
-    def test_review_output_with_verdict(self):
-        """AC 6: Parses review structured output with verdict and issues."""
-        text = (
-            "Review complete.\n\n"
-            "```forge-output\n"
-            '{"verdict": "ISSUES", "review_path": "_forge/reviews/t1.md", '
-            '"issues": ["Missing test for edge case", "Unused import"]}\n'
-            "```"
-        )
-        result = parse_forge_output(text)
-        assert result["verdict"] == "ISSUES"
-        assert len(result["issues"]) == 2
-
-    def test_multiline_json(self):
-        """AC 1: Correctly parses multi-line / pretty-printed JSON."""
-        text = (
-            "```forge-output\n"
-            '{\n'
-            '  "verdict": "PASS",\n'
-            '  "review_path": "_forge/reviews/t1.md",\n'
-            '  "issues": []\n'
-            '}\n'
-            "```"
-        )
-        result = parse_forge_output(text)
-        assert result == {"verdict": "PASS", "review_path": "_forge/reviews/t1.md", "issues": []}
-
-    def test_review_output_with_follow_ups(self):
-        """AC 7: Parses review structured output with follow_ups array."""
-        text = (
-            "```forge-output\n"
-            '{"verdict": "PASS", "review_path": "_forge/reviews/t1.md", '
-            '"issues": [], "follow_ups": [{"title": "Fix typo", "description": "Typo in README", "flow": "quick"}]}\n'
-            "```"
-        )
-        result = parse_forge_output(text)
-        assert result["verdict"] == "PASS"
-        assert len(result["follow_ups"]) == 1
-        assert result["follow_ups"][0]["title"] == "Fix typo"
+    def test_structured_output_with_nested_data(self):
+        """Handles complex nested structured output."""
+        raw = json.dumps({
+            "result": "Review done",
+            "structured_output": {
+                "verdict": "ISSUES",
+                "issues": ["Missing test", "Bad naming"],
+                "follow_ups": [{"title": "Fix typo", "flow": "quick"}],
+            },
+            "usage": {"input_tokens": 200, "output_tokens": 100},
+        })
+        parsed = parse_json_output(raw)
+        assert parsed["structured_output"]["verdict"] == "ISSUES"
+        assert len(parsed["structured_output"]["issues"]) == 2
+        assert parsed["tokens"] == 300
 
 
 # ---------------------------------------------------------------------------
@@ -680,11 +633,113 @@ class TestDispatchClaude:
         assert "-b" in checkout_calls[1]
 
 
+class TestDispatchClaudeJsonSchema:
+    async def test_dispatch_with_json_schema(self, git_repo):
+        """dispatch_claude passes --output-format json --json-schema when schema provided."""
+        schema = '{"type": "object", "properties": {"verdict": {"type": "string"}}}'
+        json_response = json.dumps({
+            "result": "Review complete",
+            "structured_output": {"verdict": "PASS"},
+            "usage": {"input_tokens": 50, "output_tokens": 25},
+        })
+        captured_args: list[list] = []
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            mock_proc = AsyncMock()
+            cmd = args[0] if args else ""
+            if cmd == "claude":
+                captured_args.append(list(args))
+                mock_proc.communicate = AsyncMock(
+                    return_value=(json_response.encode(), b"")
+                )
+                mock_proc.returncode = 0
+                mock_proc.kill = MagicMock()
+            elif cmd == "git":
+                mock_proc.wait = AsyncMock(return_value=0)
+                mock_proc.returncode = 0
+                mock_proc.stdout = AsyncMock()
+                mock_proc.stdout.read = AsyncMock(return_value=b"")
+                mock_proc.stderr = AsyncMock()
+                mock_proc.stderr.read = AsyncMock(return_value=b"")
+            return mock_proc
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="Review this",
+                repo_path=git_repo,
+                branch="main",
+                timeout=60,
+                json_schema=schema,
+            )
+
+        assert result.exit_code == 0
+        assert result.output == "Review complete"
+        assert result.structured_output == {"verdict": "PASS"}
+        assert result.tokens_used == 75
+        # Verify CLI flags included json schema args
+        claude_args = captured_args[0]
+        assert "--output-format" in claude_args
+        fmt_idx = claude_args.index("--output-format")
+        assert claude_args[fmt_idx + 1] == "json"
+        assert "--json-schema" in claude_args
+
+    async def test_dispatch_without_json_schema_uses_stream_json(self, git_repo):
+        """dispatch_claude defaults to stream-json when no json_schema provided."""
+        result_json = json.dumps({
+            "type": "result",
+            "result": "Done",
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        })
+        captured_args: list[list] = []
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            mock_proc = AsyncMock()
+            cmd = args[0] if args else ""
+            if cmd == "claude":
+                captured_args.append(list(args))
+                mock_proc.communicate = AsyncMock(
+                    return_value=(result_json.encode(), b"")
+                )
+                mock_proc.returncode = 0
+                mock_proc.kill = MagicMock()
+            elif cmd == "git":
+                mock_proc.wait = AsyncMock(return_value=0)
+                mock_proc.returncode = 0
+                mock_proc.stdout = AsyncMock()
+                mock_proc.stdout.read = AsyncMock(return_value=b"")
+                mock_proc.stderr = AsyncMock()
+                mock_proc.stderr.read = AsyncMock(return_value=b"")
+            return mock_proc
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="Do something",
+                repo_path=git_repo,
+                branch="main",
+                timeout=60,
+            )
+
+        assert result.exit_code == 0
+        assert result.structured_output is None
+        # Verify stream-json is used
+        claude_args = captured_args[0]
+        assert "--output-format" in claude_args
+        fmt_idx = claude_args.index("--output-format")
+        assert claude_args[fmt_idx + 1] == "stream-json"
+
+
 class TestDispatchResult:
     def test_dataclass_defaults(self):
         r = DispatchResult(output="hi", exit_code=0, duration_seconds=1.0)
         assert r.tokens_used is None
         assert r.error is None
+        assert r.structured_output is None
 
     def test_dataclass_with_all_fields(self):
         r = DispatchResult(
@@ -693,10 +748,12 @@ class TestDispatchResult:
             duration_seconds=2.5,
             tokens_used=100,
             error=None,
+            structured_output={"verdict": "PASS"},
         )
         assert r.output == "out"
         assert r.duration_seconds == 2.5
         assert r.tokens_used == 100
+        assert r.structured_output == {"verdict": "PASS"}
 
 
 # ---------------------------------------------------------------------------

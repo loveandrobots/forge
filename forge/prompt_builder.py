@@ -33,14 +33,7 @@ Read the project's existing documentation before writing the spec to ensure alig
 Load the following skills for context:
 {skill_references}
 
-{retry_context}
-
-## Output protocol
-When you are finished, emit a fenced JSON block with the artifact paths you produced. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
-
-```forge-output
-{{"spec_path": "_forge/specs/{task_id}.md"}}
-```"""
+{retry_context}"""
 
 PLAN_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -65,14 +58,7 @@ Read the existing codebase before planning to understand current patterns and co
 Load the following skills for context:
 {skill_references}
 
-{retry_context}
-
-## Output protocol
-When you are finished, emit a fenced JSON block with the artifact paths you produced. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
-
-```forge-output
-{{"plan_path": "_forge/plans/{task_id}.md"}}
-```"""
+{retry_context}"""
 
 IMPLEMENT_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -98,14 +84,7 @@ Load the following skills:
 {skill_references}
 
 {retry_context}
-{review_feedback}
-
-## Output protocol
-When you are finished, emit a fenced JSON block summarizing the work you did. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
-
-```forge-output
-{{"files_modified": ["path/to/file1.py", "path/to/file2.py"]}}
-```"""
+{review_feedback}"""
 
 REVIEW_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -146,18 +125,7 @@ Only task-related issues determine your verdict. Pre-existing issues must not ca
 Load the following skills:
 {skill_references}
 
-{retry_context}
-
-## Output protocol
-When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
-
-```forge-output
-{{"verdict": "PASS", "review_path": "_forge/reviews/{task_id}.md", "issues": [], "follow_ups": []}}
-```
-
-- `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
-- `issues`: Array of issue description strings. Empty array if verdict is PASS.
-- `follow_ups`: Array of follow-up task objects for pre-existing issues. Empty array if none."""
+{retry_context}"""
 
 QUICK_IMPLEMENT_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -181,14 +149,7 @@ Load the following skills:
 {skill_references}
 
 {retry_context}
-{review_feedback}
-
-## Output protocol
-When you are finished, emit a fenced JSON block summarizing the work you did. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
-
-```forge-output
-{{"files_modified": ["path/to/file1.py", "path/to/file2.py"]}}
-```"""
+{review_feedback}"""
 
 QUICK_REVIEW_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -230,18 +191,7 @@ Only task-related issues determine your verdict. Pre-existing issues must not ca
 Load the following skills:
 {skill_references}
 
-{retry_context}
-
-## Output protocol
-When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
-
-```forge-output
-{{"verdict": "PASS", "review_path": "_forge/reviews/{task_id}.md", "issues": [], "follow_ups": []}}
-```
-
-- `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
-- `issues`: Array of issue description strings. Empty array if verdict is PASS.
-- `follow_ups`: Array of follow-up task objects for pre-existing issues. Empty array if none."""
+{retry_context}"""
 
 EPIC_SPEC_TEMPLATE = """\
 You are working on the project "{project_name}".
@@ -276,14 +226,7 @@ Example output:
 Load the following skills for context:
 {skill_references}
 
-{retry_context}
-
-## Output protocol
-When you are finished, emit a fenced JSON block with the artifact paths you produced. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it.
-
-```forge-output
-{{"spec_path": "_forge/epic-decompositions/{task_id}.json"}}
-```"""
+{retry_context}"""
 
 STAGE_TEMPLATES: dict[str, str] = {
     "spec": SPEC_TEMPLATE,
@@ -329,18 +272,7 @@ If verdict is ISSUES, also write follow-up tasks to `_forge/follow-ups/{task_id}
 Load the following skills for context:
 {skill_references}
 
-{retry_context}
-
-## Output protocol
-When you are finished, emit a fenced JSON block with your review results. This block MUST appear at the very end of your output, using the exact fence marker shown below. Do not nest code fences inside it. The gate script remains the authority on pass/fail — this block is for engine observability.
-
-```forge-output
-{{"verdict": "PASS", "review_path": "_forge/reviews/{task_id}.md", "issues": [], "follow_ups": []}}
-```
-
-- `verdict`: Use `PASS` if all criteria met, `ISSUES` otherwise.
-- `issues`: Array of issue description strings. Empty array if verdict is PASS.
-- `follow_ups`: Array of follow-up task objects for pre-existing issues. Empty array if none."""
+{retry_context}"""
 
 EPIC_STAGE_TEMPLATES: dict[str, str] = {
     "spec": EPIC_SPEC_TEMPLATE,
@@ -362,6 +294,34 @@ def load_artifact(path: str) -> str:
     except (OSError, IOError):
         logger.warning("Could not read artifact: %s", path)
         return ""
+
+
+def build_structured_review_feedback(data: dict) -> str:
+    """Convert a structured review dict into human-readable markdown for bounce context.
+
+    Expects keys: verdict, issues, criteria_check, summary.
+    """
+    parts: list[str] = []
+    if data.get("verdict"):
+        parts.append(f"**Verdict**: {data['verdict']}")
+    if data.get("summary"):
+        parts.append(f"\n{data['summary']}")
+    if data.get("criteria_check"):
+        parts.append("\n### Criteria check")
+        for item in data["criteria_check"]:
+            if isinstance(item, dict):
+                status = "PASS" if item.get("met") else "FAIL"
+                parts.append(f"- [{status}] {item.get('criterion', '')}")
+            else:
+                parts.append(f"- {item}")
+    if data.get("issues"):
+        parts.append("\n### Issues")
+        for issue in data["issues"]:
+            if isinstance(issue, str):
+                parts.append(f"- {issue}")
+            elif isinstance(issue, dict):
+                parts.append(f"- {issue.get('description', str(issue))}")
+    return "\n".join(parts)
 
 
 def build_review_feedback_context(review_content: str) -> str:

@@ -80,7 +80,7 @@ def resolve_stage_timeout(
 
 class ClaudeSettings(BaseModel):
     default_model: str = "opus"
-    headless_flags: str = "--output-format stream-json"
+    headless_flags: str = ""
 
 
 class Settings(BaseModel):

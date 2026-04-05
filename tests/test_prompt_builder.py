@@ -288,7 +288,6 @@ class TestBuildPrompt:
                 stage, sample_task, sample_project, sample_stage_run, artifacts
             )
             # Check for unfilled Python format placeholders like {variable_name}
-            # but allow JSON content (e.g. {"key": "value"}) in forge-output blocks
             unfilled = re.findall(r"\{[a-z_]+\}", prompt)
             assert not unfilled, f"Unfilled placeholder in {stage} prompt: {unfilled}"
 
@@ -848,66 +847,30 @@ class TestBuildPromptEpicFlow:
 # ---------------------------------------------------------------------------
 
 
-class TestOutputProtocol:
-    def test_spec_template_includes_output_protocol(
+class TestNoForgeOutputInTemplates:
+    """Verify that forge-output blocks have been removed from all templates."""
+
+    def test_templates_do_not_contain_forge_output(
         self,
         sample_task: dict,
         sample_project: dict,
         sample_stage_run: dict,
         empty_artifacts: dict,
     ) -> None:
-        """AC 2: Spec prompt includes forge-output instructions with spec_path."""
-        prompt = build_prompt(
-            "spec", sample_task, sample_project, sample_stage_run, empty_artifacts
-        )
-        assert "forge-output" in prompt
-        assert "spec_path" in prompt
+        """No template should contain forge-output fenced blocks."""
+        for stage in ("spec", "plan", "implement"):
+            prompt = build_prompt(
+                stage, sample_task, sample_project, sample_stage_run, empty_artifacts
+            )
+            assert "forge-output" not in prompt, f"{stage} template still has forge-output"
 
-    def test_plan_template_includes_output_protocol(
-        self,
-        sample_task: dict,
-        sample_project: dict,
-        sample_stage_run: dict,
-        empty_artifacts: dict,
-    ) -> None:
-        """AC 2: Plan prompt includes forge-output instructions with plan_path."""
+        review_artifacts = {"spec_content": "Spec.", "git_diff": "diff"}
         prompt = build_prompt(
-            "plan", sample_task, sample_project, sample_stage_run, empty_artifacts
+            "review", sample_task, sample_project, sample_stage_run, review_artifacts
         )
-        assert "forge-output" in prompt
-        assert "plan_path" in prompt
+        assert "forge-output" not in prompt
 
-    def test_implement_template_includes_output_protocol(
-        self,
-        sample_task: dict,
-        sample_project: dict,
-        sample_stage_run: dict,
-        empty_artifacts: dict,
-    ) -> None:
-        """AC 2: Implement prompt includes forge-output instructions with files_modified."""
-        prompt = build_prompt(
-            "implement", sample_task, sample_project, sample_stage_run, empty_artifacts
-        )
-        assert "forge-output" in prompt
-        assert "files_modified" in prompt
-
-    def test_review_template_includes_output_protocol(
-        self,
-        sample_task: dict,
-        sample_project: dict,
-        sample_stage_run: dict,
-    ) -> None:
-        """AC 2, 6: Review prompt includes forge-output with verdict, issues, follow_ups."""
-        artifacts = {"spec_content": "Spec.", "git_diff": "diff"}
-        prompt = build_prompt(
-            "review", sample_task, sample_project, sample_stage_run, artifacts
-        )
-        assert "forge-output" in prompt
-        assert "verdict" in prompt
-        assert "issues" in prompt
-        assert "follow_ups" in prompt
-
-    def test_quick_implement_template_includes_output_protocol(
+    def test_quick_templates_do_not_contain_forge_output(
         self,
         sample_project: dict,
         sample_stage_run: dict,
@@ -921,34 +884,12 @@ class TestOutputProtocol:
             "skill_overrides": None,
             "flow": "quick",
         }
-        prompt = build_prompt(
-            "implement", task, sample_project, sample_stage_run, empty_artifacts
-        )
-        assert "forge-output" in prompt
-        assert "files_modified" in prompt
+        for stage in ("implement", "review"):
+            arts = empty_artifacts if stage == "implement" else {"git_diff": "diff"}
+            prompt = build_prompt(stage, task, sample_project, sample_stage_run, arts)
+            assert "forge-output" not in prompt, f"quick {stage} template still has forge-output"
 
-    def test_quick_review_template_includes_output_protocol(
-        self,
-        sample_project: dict,
-        sample_stage_run: dict,
-    ) -> None:
-        task = {
-            "id": "qf-001",
-            "title": "Fix thing",
-            "description": "Fix it.",
-            "branch_name": "forge/qf-001-fix",
-            "skill_overrides": None,
-            "flow": "quick",
-        }
-        artifacts = {"git_diff": "diff"}
-        prompt = build_prompt(
-            "review", task, sample_project, sample_stage_run, artifacts
-        )
-        assert "forge-output" in prompt
-        assert "verdict" in prompt
-        assert "follow_ups" in prompt
-
-    def test_epic_spec_template_includes_output_protocol(
+    def test_epic_templates_do_not_contain_forge_output(
         self,
         sample_project: dict,
         sample_stage_run: dict,
@@ -962,29 +903,62 @@ class TestOutputProtocol:
             "skill_overrides": None,
             "flow": "epic",
         }
-        prompt = build_prompt(
-            "spec", task, sample_project, sample_stage_run, empty_artifacts
-        )
-        assert "forge-output" in prompt
-        assert "spec_path" in prompt
+        prompt = build_prompt("spec", task, sample_project, sample_stage_run, empty_artifacts)
+        assert "forge-output" not in prompt
 
-    def test_epic_review_template_includes_output_protocol(
-        self,
-        sample_project: dict,
-        sample_stage_run: dict,
-    ) -> None:
-        task = {
-            "id": "epic-001",
-            "title": "Big feature",
-            "description": "Do it all.",
-            "branch_name": "",
-            "skill_overrides": None,
-            "flow": "epic",
-        }
         artifacts = {"spec_content": "decomp", "git_diff": ""}
-        prompt = build_prompt(
-            "review", task, sample_project, sample_stage_run, artifacts
-        )
-        assert "forge-output" in prompt
-        assert "verdict" in prompt
-        assert "follow_ups" in prompt
+        prompt = build_prompt("review", task, sample_project, sample_stage_run, artifacts)
+        assert "forge-output" not in prompt
+
+
+class TestBuildStructuredReviewFeedback:
+    def test_full_review_data(self) -> None:
+        from forge.prompt_builder import build_structured_review_feedback
+
+        data = {
+            "verdict": "ISSUES",
+            "summary": "Found two problems.",
+            "criteria_check": [
+                {"criterion": "Tests pass", "met": True},
+                {"criterion": "No lint errors", "met": False},
+            ],
+            "issues": ["Unused import in foo.py", "Missing docstring"],
+        }
+        result = build_structured_review_feedback(data)
+        assert "**Verdict**: ISSUES" in result
+        assert "Found two problems." in result
+        assert "[PASS] Tests pass" in result
+        assert "[FAIL] No lint errors" in result
+        assert "- Unused import in foo.py" in result
+        assert "- Missing docstring" in result
+
+    def test_empty_data(self) -> None:
+        from forge.prompt_builder import build_structured_review_feedback
+
+        result = build_structured_review_feedback({})
+        assert result == ""
+
+    def test_verdict_only(self) -> None:
+        from forge.prompt_builder import build_structured_review_feedback
+
+        result = build_structured_review_feedback({"verdict": "PASS"})
+        assert "**Verdict**: PASS" in result
+
+    def test_issues_as_dicts(self) -> None:
+        from forge.prompt_builder import build_structured_review_feedback
+
+        data = {
+            "issues": [{"description": "Bad naming in util.py"}],
+        }
+        result = build_structured_review_feedback(data)
+        assert "Bad naming in util.py" in result
+
+    def test_criteria_check_as_strings(self) -> None:
+        from forge.prompt_builder import build_structured_review_feedback
+
+        data = {
+            "criteria_check": ["Tests pass: yes", "Lint: no"],
+        }
+        result = build_structured_review_feedback(data)
+        assert "- Tests pass: yes" in result
+        assert "- Lint: no" in result

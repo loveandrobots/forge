@@ -28,10 +28,17 @@ class GateResult:
     duration_seconds: float
 
 
-def build_gate_env(task: Row, stage_run: Row, project: Row) -> dict[str, str]:
+def build_gate_env(
+    task: Row,
+    stage_run: Row,
+    project: Row,
+    artifact_path: str | None = None,
+) -> dict[str, str]:
     """Assemble environment variables for the gate script.
 
     Sets the FORGE_* env vars per the gate contract (spec section 7).
+    When *artifact_path* is provided, sets ``FORGE_ARTIFACT_PATH`` pointing
+    to the structured output JSON file.
     """
     env: dict[str, str] = {
         "FORGE_TASK_ID": str(task["id"]),
@@ -43,6 +50,8 @@ def build_gate_env(task: Row, stage_run: Row, project: Row) -> dict[str, str]:
         "FORGE_PLAN_PATH": str(task["plan_path"] or ""),
         "FORGE_REVIEW_PATH": str(task["review_path"] or ""),
     }
+    if artifact_path:
+        env["FORGE_ARTIFACT_PATH"] = artifact_path
     return env
 
 

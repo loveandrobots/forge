@@ -4737,380 +4737,51 @@ class TestEngineStatusNullStage:
 
 
 # ---------------------------------------------------------------------------
-# Structured output extraction tests
+# load_structured_artifact tests
 # ---------------------------------------------------------------------------
 
 
-class TestStructuredOutputExtraction:
-    """Tests for structured output parsing and task record updates."""
+class TestLoadStructuredArtifact:
+    """Tests for JSON artifact loading."""
 
-    async def _run_one_iteration(self, engine: PipelineEngine) -> None:
-        engine.running = True
-        loop_task = asyncio.create_task(engine.run_loop())
-        await asyncio.sleep(0.5)
-        engine.running = False
-        try:
-            await asyncio.wait_for(loop_task, timeout=3.0)
-        except asyncio.TimeoutError:
-            loop_task.cancel()
+    def test_load_valid_json(self, tmp_path) -> None:
+        from forge.engine import load_structured_artifact
 
-    async def test_engine_extracts_spec_path(
-        self,
-        conn: sqlite3.Connection,
-        settings: Settings,
-        active_task_with_queued_run: tuple[str, str],
-    ) -> None:
-        """AC 3: After spec dispatch with structured output, engine updates task spec_path."""
-        task_id, sr_id = active_task_with_queued_run
-        db.update_task(conn, task_id, branch_name="forge/test-branch")
+        path = str(tmp_path / "artifact.json")
+        with open(path, "w") as f:
+            json.dump({"verdict": "PASS", "issues": []}, f)
+        result = load_structured_artifact(path)
+        assert result == {"verdict": "PASS", "issues": []}
 
-        output_text = (
-            "I wrote the spec.\n\n"
-            "```forge-output\n"
-            '{"spec_path": "_forge/specs/abc.md"}\n'
-            "```"
-        )
-        dispatch_result = DispatchResult(
-            output=output_text,
-            exit_code=0,
-            duration_seconds=5.0,
-            tokens_used=100,
-        )
-        gate_result = GateResult(
-            passed=True,
-            exit_code=0,
-            stdout="ok",
-            stderr="",
-            gate_name="post-spec.sh",
-            duration_seconds=1.0,
-        )
+    def test_load_nonexistent_file(self) -> None:
+        from forge.engine import load_structured_artifact
 
-        safe_conn = _UnclosableConnection(conn)
-        engine = PipelineEngine(settings, ":memory:")
+        result = load_structured_artifact("/no/such/file.json")
+        assert result is None
 
-        with (
-            patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch(
-                "forge.engine.dispatch_claude",
-                new_callable=AsyncMock,
-                return_value=dispatch_result,
-            ),
-            patch(
-                "forge.engine.run_gate",
-                new_callable=AsyncMock,
-                return_value=gate_result,
-            ),
-            patch("forge.engine.build_prompt", return_value="test prompt"),
-        ):
-            await self._run_one_iteration(engine)
+    def test_load_invalid_json(self, tmp_path) -> None:
+        from forge.engine import load_structured_artifact
 
-        task = db.get_task(conn, task_id)
-        assert task["spec_path"] == "_forge/specs/abc.md"
+        path = str(tmp_path / "bad.json")
+        with open(path, "w") as f:
+            f.write("not json {{{")
+        result = load_structured_artifact(path)
+        assert result is None
 
-    async def test_engine_extracts_plan_path(
-        self,
-        conn: sqlite3.Connection,
-        settings: Settings,
-        project_id: str,
-    ) -> None:
-        """AC 3: After plan dispatch with structured output, engine updates task plan_path."""
-        task_id = db.insert_task(conn, project_id=project_id, title="Test", priority=10)
-        db.update_task(
-            conn,
-            task_id,
-            status="active",
-            current_stage="plan",
-            branch_name="forge/test-branch",
-        )
-        db.insert_stage_run(
-            conn, task_id=task_id, stage="plan", attempt=1, status="queued"
-        )
+    def test_load_non_dict_json(self, tmp_path) -> None:
+        from forge.engine import load_structured_artifact
 
-        output_text = (
-            "Plan written.\n\n"
-            "```forge-output\n"
-            '{"plan_path": "_forge/plans/xyz.md"}\n'
-            "```"
-        )
-        dispatch_result = DispatchResult(
-            output=output_text,
-            exit_code=0,
-            duration_seconds=5.0,
-            tokens_used=100,
-        )
-        gate_result = GateResult(
-            passed=True,
-            exit_code=0,
-            stdout="ok",
-            stderr="",
-            gate_name="post-plan.sh",
-            duration_seconds=1.0,
-        )
+        path = str(tmp_path / "array.json")
+        with open(path, "w") as f:
+            json.dump(["not", "a", "dict"], f)
+        result = load_structured_artifact(path)
+        assert result is None
 
-        safe_conn = _UnclosableConnection(conn)
-        engine = PipelineEngine(settings, ":memory:")
+    def test_load_empty_path(self) -> None:
+        from forge.engine import load_structured_artifact
 
-        with (
-            patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch(
-                "forge.engine.dispatch_claude",
-                new_callable=AsyncMock,
-                return_value=dispatch_result,
-            ),
-            patch(
-                "forge.engine.run_gate",
-                new_callable=AsyncMock,
-                return_value=gate_result,
-            ),
-            patch("forge.engine.build_prompt", return_value="test prompt"),
-            patch("forge.engine.os.path.exists", return_value=True),
-        ):
-            await self._run_one_iteration(engine)
-
-        task = db.get_task(conn, task_id)
-        assert task["plan_path"] == "_forge/plans/xyz.md"
-
-    async def test_engine_extracts_review_path(
-        self,
-        conn: sqlite3.Connection,
-        settings: Settings,
-        project_id: str,
-        tmp_path,
-    ) -> None:
-        """AC 3: After review dispatch with structured output, engine updates task review_path."""
-        task_id = db.insert_task(conn, project_id=project_id, title="Test", priority=10)
-        db.update_task(
-            conn,
-            task_id,
-            status="active",
-            current_stage="review",
-            branch_name="forge/test-branch",
-        )
-        db.insert_stage_run(
-            conn, task_id=task_id, stage="review", attempt=1, status="queued"
-        )
-
-        # Update project repo_path so auto-merge doesn't fail
-        db.update_project(conn, project_id, repo_path=str(tmp_path))
-
-        output_text = (
-            "Review done.\n\n"
-            "```forge-output\n"
-            '{"verdict": "PASS", "review_path": "_forge/reviews/t1.md", "issues": []}\n'
-            "```"
-        )
-        dispatch_result = DispatchResult(
-            output=output_text,
-            exit_code=0,
-            duration_seconds=5.0,
-            tokens_used=100,
-        )
-        gate_result = GateResult(
-            passed=True,
-            exit_code=0,
-            stdout="ok",
-            stderr="",
-            gate_name="post-review.sh",
-            duration_seconds=1.0,
-        )
-
-        safe_conn = _UnclosableConnection(conn)
-        engine = PipelineEngine(settings, ":memory:")
-
-        with (
-            patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch(
-                "forge.engine.dispatch_claude",
-                new_callable=AsyncMock,
-                return_value=dispatch_result,
-            ),
-            patch(
-                "forge.engine.run_gate",
-                new_callable=AsyncMock,
-                return_value=gate_result,
-            ),
-            patch("forge.engine.build_prompt", return_value="test prompt"),
-            patch.object(
-                engine, "_auto_merge", new_callable=AsyncMock, return_value=True
-            ),
-            patch("forge.engine.os.path.exists", return_value=True),
-        ):
-            await self._run_one_iteration(engine)
-
-        task = db.get_task(conn, task_id)
-        assert task["review_path"] == "_forge/reviews/t1.md"
-
-    async def test_engine_stores_structured_output(
-        self,
-        conn: sqlite3.Connection,
-        settings: Settings,
-        active_task_with_queued_run: tuple[str, str],
-    ) -> None:
-        """AC 4: Structured output JSON is stored in the stage_run record."""
-        task_id, sr_id = active_task_with_queued_run
-        db.update_task(conn, task_id, branch_name="forge/test-branch")
-
-        output_text = (
-            'Done.\n\n```forge-output\n{"spec_path": "_forge/specs/abc.md"}\n```'
-        )
-        dispatch_result = DispatchResult(
-            output=output_text,
-            exit_code=0,
-            duration_seconds=5.0,
-            tokens_used=100,
-        )
-        gate_result = GateResult(
-            passed=True,
-            exit_code=0,
-            stdout="ok",
-            stderr="",
-            gate_name="post-spec.sh",
-            duration_seconds=1.0,
-        )
-
-        safe_conn = _UnclosableConnection(conn)
-        engine = PipelineEngine(settings, ":memory:")
-
-        with (
-            patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch(
-                "forge.engine.dispatch_claude",
-                new_callable=AsyncMock,
-                return_value=dispatch_result,
-            ),
-            patch(
-                "forge.engine.run_gate",
-                new_callable=AsyncMock,
-                return_value=gate_result,
-            ),
-            patch("forge.engine.build_prompt", return_value="test prompt"),
-        ):
-            await self._run_one_iteration(engine)
-
-        sr = db.get_stage_run(conn, sr_id)
-        assert sr["structured_output"] is not None
-        parsed = json.loads(sr["structured_output"])
-        assert parsed["spec_path"] == "_forge/specs/abc.md"
-
-    async def test_engine_graceful_on_missing_output(
-        self,
-        conn: sqlite3.Connection,
-        settings: Settings,
-        active_task_with_queued_run: tuple[str, str],
-    ) -> None:
-        """AC 5: No forge-output block logs warning but proceeds normally."""
-        task_id, sr_id = active_task_with_queued_run
-        db.update_task(conn, task_id, branch_name="forge/test-branch")
-
-        dispatch_result = DispatchResult(
-            output="Just some text, no structured output block.",
-            exit_code=0,
-            duration_seconds=5.0,
-            tokens_used=100,
-        )
-        gate_result = GateResult(
-            passed=True,
-            exit_code=0,
-            stdout="ok",
-            stderr="",
-            gate_name="post-spec.sh",
-            duration_seconds=1.0,
-        )
-
-        safe_conn = _UnclosableConnection(conn)
-        engine = PipelineEngine(settings, ":memory:")
-
-        with (
-            patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch(
-                "forge.engine.dispatch_claude",
-                new_callable=AsyncMock,
-                return_value=dispatch_result,
-            ),
-            patch(
-                "forge.engine.run_gate",
-                new_callable=AsyncMock,
-                return_value=gate_result,
-            ),
-            patch("forge.engine.build_prompt", return_value="test prompt"),
-        ):
-            await self._run_one_iteration(engine)
-
-        # Stage should still pass and advance
-        sr = db.get_stage_run(conn, sr_id)
-        assert sr["status"] == "passed"
-        task = db.get_task(conn, task_id)
-        assert task["current_stage"] == "plan"
-        # No structured_output stored
-        assert sr["structured_output"] is None
-
-    async def test_engine_review_verdict_from_structured(
-        self,
-        conn: sqlite3.Connection,
-        settings: Settings,
-        active_task_with_queued_run: tuple[str, str],
-    ) -> None:
-        """AC 6: When review structured output has verdict, FORGE_VERDICT is passed to gate."""
-        task_id, sr_id = active_task_with_queued_run
-        db.update_task(
-            conn,
-            task_id,
-            status="active",
-            current_stage="review",
-            branch_name="forge/test-branch",
-        )
-        # Update the stage run to be review
-        db.update_stage_run(conn, sr_id, status="passed")
-        db.insert_stage_run(
-            conn, task_id=task_id, stage="review", attempt=1, status="queued"
-        )
-
-        output_text = (
-            "```forge-output\n"
-            '{"verdict": "PASS", "review_path": "_forge/reviews/t1.md", "issues": []}\n'
-            "```"
-        )
-        dispatch_result = DispatchResult(
-            output=output_text,
-            exit_code=0,
-            duration_seconds=5.0,
-            tokens_used=100,
-        )
-        gate_result = GateResult(
-            passed=True,
-            exit_code=0,
-            stdout="ok",
-            stderr="",
-            gate_name="post-review.sh",
-            duration_seconds=1.0,
-        )
-
-        captured_gate_env: dict = {}
-
-        async def capture_run_gate(gate_dir, stage, env_vars):
-            captured_gate_env.update(env_vars)
-            return gate_result
-
-        safe_conn = _UnclosableConnection(conn)
-        engine = PipelineEngine(settings, ":memory:")
-
-        with (
-            patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch(
-                "forge.engine.dispatch_claude",
-                new_callable=AsyncMock,
-                return_value=dispatch_result,
-            ),
-            patch("forge.engine.run_gate", side_effect=capture_run_gate),
-            patch("forge.engine.build_prompt", return_value="test prompt"),
-            patch.object(
-                engine, "_auto_merge", new_callable=AsyncMock, return_value=True
-            ),
-            patch("forge.engine.os.path.exists", return_value=True),
-        ):
-            await self._run_one_iteration(engine)
-
-        assert captured_gate_env.get("FORGE_VERDICT") == "PASS"
+        result = load_structured_artifact("")
+        assert result is None
 
 
 class TestFollowUpsFromStructuredOutput:

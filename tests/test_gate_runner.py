@@ -97,6 +97,39 @@ class TestBuildGateEnv:
         assert env["FORGE_PLAN_PATH"] == ""
         assert env["FORGE_REVIEW_PATH"] == ""
 
+    def test_artifact_path_set_when_provided(self) -> None:
+        task = _FakeRow(
+            id="task-456",
+            branch_name="forge/abc",
+            spec_path="",
+            plan_path="",
+            review_path="",
+        )
+        stage_run = _FakeRow(stage="review", attempt=1)
+        project = _FakeRow(repo_path="/srv/repos/myproject")
+
+        env = build_gate_env(
+            task, stage_run, project,
+            artifact_path="/tmp/artifacts/review.json",
+        )
+
+        assert env["FORGE_ARTIFACT_PATH"] == "/tmp/artifacts/review.json"
+
+    def test_artifact_path_not_set_when_none(self) -> None:
+        task = _FakeRow(
+            id="task-789",
+            branch_name="forge/abc",
+            spec_path="",
+            plan_path="",
+            review_path="",
+        )
+        stage_run = _FakeRow(stage="spec", attempt=1)
+        project = _FakeRow(repo_path="/srv/repos/myproject")
+
+        env = build_gate_env(task, stage_run, project)
+
+        assert "FORGE_ARTIFACT_PATH" not in env
+
 
 # ---------------------------------------------------------------------------
 # run_gate

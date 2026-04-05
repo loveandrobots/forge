@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import shlex
 import time
 from dataclasses import dataclass
@@ -35,33 +34,36 @@ class DispatchResult:
     duration_seconds: float
     tokens_used: int | None = None
     error: str | None = None
+    structured_output: dict | None = None
 
 
-_FORGE_OUTPUT_RE = re.compile(
-    r"```forge-output\s*\n(.*?)\n\s*```",
-    re.DOTALL,
-)
+def parse_json_output(raw: str) -> dict:
+    """Parse the --output-format json response from Claude CLI.
 
-
-def parse_forge_output(text: str) -> dict | None:
-    """Extract a JSON object from the last ```forge-output``` fenced block.
-
-    Returns the parsed dict, or None if no valid block is found.
+    Extracts ``result`` (text), ``structured_output`` (parsed JSON from schema),
+    and ``tokens`` (usage info).  Returns a dict with these keys.
     """
-    matches = _FORGE_OUTPUT_RE.findall(text)
-    if not matches:
-        return None
-    # Use the last match (agent may emit partial blocks during reasoning)
-    raw_json = matches[-1].strip()
     try:
-        result = json.loads(raw_json)
+        obj = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        logger.warning("Failed to parse forge-output JSON block")
-        return None
-    if not isinstance(result, dict):
-        logger.warning("forge-output block is not a JSON object")
-        return None
-    return result
+        logger.warning("Failed to parse JSON output from Claude CLI")
+        return {"result": raw, "structured_output": None, "tokens": None}
+
+    result_text = obj.get("result", "")
+    structured_output = obj.get("structured_output", None)
+
+    tokens: int | None = None
+    usage = obj.get("usage", {})
+    if usage:
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        tokens = input_tokens + output_tokens
+
+    return {
+        "result": result_text,
+        "structured_output": structured_output,
+        "tokens": tokens,
+    }
 
 
 def parse_stream_json(raw: str) -> tuple[str, int | None]:
@@ -121,12 +123,16 @@ async def dispatch_claude(
     repo_path: str,
     branch: str,
     timeout: int,
-    headless_flags: str = "--output-format stream-json",
+    headless_flags: str = "",
+    json_schema: str | None = None,
 ) -> DispatchResult:
     """Spawn a Claude Code CLI session and capture output.
 
     Checks out the given branch in repo_path, runs ``claude -p`` with
-    stream-json output, and returns the parsed result.
+    the appropriate output format, and returns the parsed result.
+
+    When *json_schema* is provided, uses ``--output-format json --json-schema``
+    to get structured output.  Otherwise uses ``--output-format stream-json``.
     """
     start = time.monotonic()
 
@@ -164,7 +170,14 @@ async def dispatch_claude(
 
     # Run claude CLI
     try:
-        extra_flags = shlex.split(headless_flags)
+        extra_flags = shlex.split(headless_flags) if headless_flags else []
+        if json_schema is not None:
+            extra_flags.extend([
+                "--output-format", "json",
+                "--json-schema", json_schema,
+            ])
+        elif not any(f.startswith("--output-format") for f in extra_flags):
+            extra_flags.extend(["--output-format", "stream-json"])
         proc = await asyncio.create_subprocess_exec(
             "claude",
             "-p",
@@ -200,6 +213,16 @@ async def dispatch_claude(
                 exit_code=exit_code,
                 duration_seconds=time.monotonic() - start,
                 error=stderr_text or f"Claude exited with code {exit_code}",
+            )
+
+        if json_schema is not None:
+            parsed = parse_json_output(raw_output)
+            return DispatchResult(
+                output=parsed["result"],
+                exit_code=exit_code,
+                duration_seconds=time.monotonic() - start,
+                tokens_used=parsed["tokens"],
+                structured_output=parsed["structured_output"],
             )
 
         final_text, tokens_used = parse_stream_json(raw_output)

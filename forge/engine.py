@@ -26,13 +26,27 @@ from forge.dispatcher import (
     delete_branch,
     dispatch_claude,
     ff_merge,
-    parse_forge_output,
     rebase_branch,
 )
 from forge.gate_runner import GateResult, build_gate_env, run_gate
 from forge.prompt_builder import build_prompt, get_git_diff, load_artifact
 
 logger = logging.getLogger(__name__)
+
+
+def load_structured_artifact(path: str) -> dict | None:
+    """Read and parse a JSON artifact file. Returns None on failure."""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+        return None
+    except (OSError, IOError, json.JSONDecodeError, ValueError):
+        logger.warning("Could not read/parse structured artifact: %s", path)
+        return None
 
 
 def _now() -> str:
@@ -411,8 +425,8 @@ class PipelineEngine:
                     self.current_task_id = None
                     continue
 
-                # Step 4b: Extract structured output
-                structured = parse_forge_output(result.output)
+                # Step 4b: Handle structured output from --json-schema dispatch
+                structured = result.structured_output
                 structured_json: str | None = None
                 if structured is not None:
                     structured_json = json.dumps(structured)
@@ -433,26 +447,14 @@ class PipelineEngine:
                         stage_run_id,
                         structured_output=structured_json,
                     )
-                else:
-                    self._log(
-                        "warn",
-                        f"No forge-output block found in {stage} output for task {task_id}",
-                        task_id=task_id,
-                        stage_run_id=stage_run_id,
-                    )
 
                 # Step 5: Run gate
-                # Re-fetch task_row so gate env reflects any artifact paths
-                # written by structured output extraction above.
                 task_row = database.get_task(conn, task_id)
                 gate_env = build_gate_env(
                     task_row,
                     stage_runs[0],
                     project_row,
                 )
-                # Pass verdict from structured output to gate env
-                if structured and structured.get("verdict"):
-                    gate_env["FORGE_VERDICT"] = str(structured["verdict"])
                 gate_dir = project["gate_dir"]
                 # Resolve relative gate_dir against repo_path
                 import os
