@@ -142,10 +142,69 @@ REVIEW_SCHEMA: dict = {
 
 STAGE_SCHEMAS["review"] = REVIEW_SCHEMA
 
-
-_NO_SCHEMA_FLOWS: set[str] = {
-    "epic:spec",   # Epic spec uses a different template (JSON array of child tasks)
+EPIC_SPEC_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "tasks": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "flow": {
+                        "type": "string",
+                        "enum": ["standard", "quick"],
+                    },
+                    "priority": {"type": "integer"},
+                },
+                "required": ["title"],
+            },
+        },
+        "rationale": {"type": "string"},
+        "content": {"type": "string"},
+    },
+    "required": ["tasks", "rationale", "content"],
 }
+
+STAGE_SCHEMAS["epic:spec"] = EPIC_SPEC_SCHEMA
+
+EPIC_REVIEW_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "verdict": {
+            "type": "string",
+            "enum": ["PASS", "ISSUES"],
+        },
+        "epic_intent_check": {"type": "string"},
+        "integration_check": {"type": "string"},
+        "issues": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "severity": {"type": "string"},
+                    "description": {"type": "string"},
+                    "file": {"type": "string"},
+                },
+                "required": ["severity", "description"],
+            },
+        },
+        "summary": {"type": "string"},
+        "content": {"type": "string"},
+    },
+    "required": [
+        "verdict",
+        "epic_intent_check",
+        "integration_check",
+        "issues",
+        "summary",
+        "content",
+    ],
+}
+
+STAGE_SCHEMAS["epic:review"] = EPIC_REVIEW_SCHEMA
 
 
 def get_schema(stage: str, flow: str = "standard") -> dict | None:
@@ -156,8 +215,6 @@ def get_schema(stage: str, flow: str = "standard") -> dict | None:
     is registered for the given stage or if the flow explicitly opts out.
     """
     flow_key = f"{flow}:{stage}"
-    if flow_key in _NO_SCHEMA_FLOWS:
-        return None
     if flow_key in STAGE_SCHEMAS:
         return STAGE_SCHEMAS[flow_key]
     return STAGE_SCHEMAS.get(stage)

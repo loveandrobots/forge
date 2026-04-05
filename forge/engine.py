@@ -480,7 +480,12 @@ class PipelineEngine:
                 # Step 4c: Write structured output as JSON artifact for spec/plan/review
                 if stage == "spec" and structured is not None:
                     repo_path = project.get("repo_path", "")
-                    spec_dir = os.path.join(repo_path, "_forge", "specs")
+                    if flow == "epic":
+                        spec_dir = os.path.join(
+                            repo_path, "_forge", "epic-decompositions"
+                        )
+                    else:
+                        spec_dir = os.path.join(repo_path, "_forge", "specs")
                     os.makedirs(spec_dir, exist_ok=True)
                     spec_json_path = os.path.join(
                         spec_dir, f"{task_id}.json"
@@ -1263,6 +1268,11 @@ class PipelineEngine:
                 task_id=task_id,
             )
             return
+
+        # Support structured output object with a "tasks" key,
+        # falling back to bare list for legacy decompositions.
+        if isinstance(entries, dict):
+            entries = entries.get("tasks", [])
 
         if not isinstance(entries, list) or not entries:
             database.update_task(conn, task_id, status="needs_human")

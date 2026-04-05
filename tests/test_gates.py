@@ -536,9 +536,28 @@ class TestPostEpicSpec:
             json.dumps(data),
         )
 
-    # -- Existing tests (updated for stricter validation) --
+    def _structured(self, tasks: list) -> dict:
+        """Wrap tasks in a structured output object."""
+        return {
+            "tasks": tasks,
+            "rationale": "Decomposition rationale for testing.",
+            "content": "Full decomposition content.",
+        }
 
-    def test_passes_with_valid_decomposition(self, tmp_path: Path) -> None:
+    # -- Structured format tests --
+
+    def test_passes_with_valid_structured_decomposition(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, self._structured([
+            _valid_child("Child task A"),
+            _valid_child("Child task B"),
+        ]))
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+    def test_backwards_compat_bare_array(self, tmp_path: Path) -> None:
+        """Legacy bare array format still works."""
         repo = str(tmp_path)
         self._write_decomposition(repo, [
             _valid_child("Child task A"),
@@ -554,7 +573,14 @@ class TestPostEpicSpec:
         assert result.returncode == 1
         assert "not found" in result.stderr
 
-    def test_fails_with_empty_array(self, tmp_path: Path) -> None:
+    def test_fails_with_empty_tasks_array(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        self._write_decomposition(repo, self._structured([]))
+        result = _run_gate(self.SCRIPT, {}, repo)
+        assert result.returncode == 1
+        assert "empty" in result.stderr.lower()
+
+    def test_fails_with_empty_bare_array(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         self._write_decomposition(repo, [])
         result = _run_gate(self.SCRIPT, {}, repo)
@@ -563,10 +589,10 @@ class TestPostEpicSpec:
 
     def test_fails_with_missing_title(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             {"description": _valid_desc()},
             _valid_child("Other"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "title" in result.stderr.lower()
@@ -582,38 +608,37 @@ class TestPostEpicSpec:
 
     def test_fails_with_empty_title(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             {"title": "", "description": _valid_desc()},
             _valid_child("Other"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "title" in result.stderr.lower()
 
-    def test_fails_with_json_object_instead_of_array(self, tmp_path: Path) -> None:
+    def test_fails_with_object_missing_tasks_key(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, {"title": "Not an array"})
+        self._write_decomposition(repo, {"title": "Not a valid structured object"})
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
-        assert "array" in result.stderr.lower()
 
     # -- New tests: minimum child count --
 
     def test_fails_when_only_one_child(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [_valid_child("Solo task")])
+        self._write_decomposition(repo, self._structured([_valid_child("Solo task")]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "at least 2" in result.stderr
 
-    # -- New tests: description validation --
+    # -- Description validation --
 
     def test_fails_when_description_missing(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             {"title": "Task B"},  # no description key
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "Task B" in result.stderr
@@ -621,10 +646,10 @@ class TestPostEpicSpec:
 
     def test_fails_when_description_too_short(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B", description="This is way too short."),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "Task B" in result.stderr
@@ -636,22 +661,22 @@ class TestPostEpicSpec:
         repo = str(tmp_path)
         # 20 real chars + lots of whitespace
         padded = "   " + "x" * 20 + "   " * 40
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B", description=padded),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "too short" in result.stderr
 
-    # -- New tests: flow validation --
+    # -- Flow validation --
 
     def test_fails_with_invalid_flow(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B", flow="epic"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "invalid flow" in result.stderr.lower()
@@ -659,40 +684,40 @@ class TestPostEpicSpec:
 
     def test_passes_with_missing_flow_defaults(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 0
 
     def test_passes_with_valid_flow_values(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", flow="standard"),
             _valid_child("Task B", flow="quick"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 0
 
-    # -- New tests: depends_on validation --
+    # -- depends_on validation --
 
     def test_fails_with_dangling_depends_on_index(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", depends_on=[5]),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "dangling" in result.stderr.lower()
 
     def test_fails_with_dangling_depends_on_title(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", depends_on=["Nonexistent task"]),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "dangling" in result.stderr.lower()
@@ -700,111 +725,111 @@ class TestPostEpicSpec:
 
     def test_passes_with_valid_depends_on_index(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B"),
             _valid_child("Task C", depends_on=[0]),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 0
 
     def test_passes_with_valid_depends_on_title(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B"),
             _valid_child("Task C", depends_on=["Task A"]),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 0
 
-    # -- New tests: whitespace-only title --
+    # -- Whitespace-only title --
 
     def test_fails_with_whitespace_only_title(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             {"title": "   ", "description": _valid_desc()},
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "title" in result.stderr.lower()
 
-    # -- New tests: self-referential depends_on --
+    # -- Self-referential depends_on --
 
     def test_fails_with_self_referential_depends_on_index(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", depends_on=[0]),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "references itself" in result.stderr.lower()
 
     def test_fails_with_self_referential_depends_on_title(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", depends_on=["Task A"]),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "references itself" in result.stderr.lower()
 
-    # -- New tests: depends_on type validation --
+    # -- depends_on type validation --
 
     def test_fails_with_depends_on_not_a_list(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", depends_on="Task B"),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "depends_on must be an array" in result.stderr
 
     def test_fails_with_negative_depends_on_index(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", depends_on=[-1]),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "dangling" in result.stderr.lower()
 
     def test_fails_with_depends_on_boolean_entry(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", depends_on=[True]),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "integer index or string title" in result.stderr
 
     def test_fails_with_depends_on_invalid_entry_type(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A", depends_on=[{"task": "B"}]),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "integer index or string title" in result.stderr
 
-    # -- New tests: cross-reference convention --
+    # -- Cross-reference convention --
 
     def test_fails_when_description_references_parent_epic(
         self, tmp_path: Path
     ) -> None:
         repo = str(tmp_path)
         bad_desc = "x" * 80 + " as described in the epic we need to do this thing properly."
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B", description=bad_desc),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "cross-reference" in result.stderr.lower()
@@ -812,10 +837,10 @@ class TestPostEpicSpec:
     def test_fails_when_description_says_see_above(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
         bad_desc = "x" * 80 + " see task above for more details on the implementation."
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B", description=bad_desc),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "cross-reference" in result.stderr.lower()
@@ -825,34 +850,34 @@ class TestPostEpicSpec:
     ) -> None:
         repo = str(tmp_path)
         bad_desc = "x" * 80 + " the parent task defines the requirements for this work."
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B", description=bad_desc),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         assert "cross-reference" in result.stderr.lower()
 
     def test_passes_with_no_cross_references(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             _valid_child("Task B"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 0
 
-    # -- New tests: error reporting quality --
+    # -- Error reporting quality --
 
     def test_error_messages_identify_child_index_and_title(
         self, tmp_path: Path
     ) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             _valid_child("Task A"),
             {"title": "Bad Task", "description": "Too short", "flow": "invalid"},
             _valid_child("Task C"),
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         # Should reference child 1 and its title
@@ -861,11 +886,11 @@ class TestPostEpicSpec:
 
     def test_accumulates_multiple_errors(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        self._write_decomposition(repo, [
+        self._write_decomposition(repo, self._structured([
             {"title": "Task A", "description": "Short"},  # too-short description
             {"title": "Task B", "flow": "epic"},  # missing desc + invalid flow
             _valid_child("Task C", depends_on=[99]),  # dangling ref
-        ])
+        ]))
         result = _run_gate(self.SCRIPT, {}, repo)
         assert result.returncode == 1
         # Should have errors for all three children
@@ -882,41 +907,47 @@ class TestPostEpicSpec:
 class TestPostEpicReview:
     SCRIPT = "post-epic-review.sh"
 
-    def test_post_epic_review_gate_pass(self, tmp_path: Path) -> None:
+    def _valid_review(self, verdict: str = "PASS", issues: list | None = None) -> dict:
+        return {
+            "verdict": verdict,
+            "epic_intent_check": "All child tasks contribute to the epic goal.",
+            "integration_check": "Components integrate well.",
+            "issues": issues or [],
+            "summary": "Overall review summary.",
+            "content": "Full review content in markdown.",
+        }
+
+    def test_passes_with_valid_json_pass_verdict(self, tmp_path: Path) -> None:
         """PASS verdict exits 0."""
         repo = str(tmp_path)
         _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Epic Review
-
-            Everything looks good across all child tasks.
-
-            ## Verdict: PASS
-            """,
+            os.path.join(repo, "_forge/reviews/test-task-42.json"),
+            json.dumps(self._valid_review("PASS")),
         )
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_post_epic_review_gate_issues(self, tmp_path: Path) -> None:
-        """ISSUES verdict with follow-ups file exits 1."""
+    def test_fails_issues_with_empty_issues_array(self, tmp_path: Path) -> None:
+        """ISSUES verdict with empty issues array exits 1."""
         repo = str(tmp_path)
         _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Epic Review
-
-            Found gaps in the implementation.
-
-            ## Verdict: ISSUES
-            """,
+            os.path.join(repo, "_forge/reviews/test-task-42.json"),
+            json.dumps(self._valid_review("ISSUES", issues=[])),
         )
-        followups_path = os.path.join(repo, "_forge/follow-ups/test-task-42.json")
-        os.makedirs(os.path.dirname(followups_path), exist_ok=True)
-        with open(followups_path, "w") as f:
-            json.dump([{"title": "Fix gap", "description": "Address the gap"}], f)
+        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "non-empty" in result.stderr.lower() or "issues" in result.stderr.lower()
 
+    def test_fails_issues_with_populated_issues_exits_1(self, tmp_path: Path) -> None:
+        """ISSUES verdict with actual issues exits 1 (verdict is ISSUES)."""
+        repo = str(tmp_path)
+        _write_file(
+            os.path.join(repo, "_forge/reviews/test-task-42.json"),
+            json.dumps(self._valid_review("ISSUES", issues=[
+                {"severity": "major", "description": "Missing integration test"},
+            ])),
+        )
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 1
         assert "ISSUES" in result.stderr
@@ -928,19 +959,26 @@ class TestPostEpicReview:
         assert result.returncode == 1
         assert "not found" in result.stderr
 
-    def test_fails_when_issues_without_followups(self, tmp_path: Path) -> None:
-        """ISSUES verdict without follow-ups file exits 1."""
+    def test_prefers_forge_artifact_path(self, tmp_path: Path) -> None:
+        """Gate reads from FORGE_ARTIFACT_PATH when set."""
+        repo = str(tmp_path)
+        artifact_path = os.path.join(repo, "_forge/artifacts/epic-review.json")
+        _write_file(artifact_path, json.dumps(self._valid_review("PASS")))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": artifact_path},
+            repo,
+        )
+        assert result.returncode == 0
+        assert "passed" in result.stdout
+
+    def test_fails_with_invalid_json(self, tmp_path: Path) -> None:
+        """Invalid JSON exits 1."""
         repo = str(tmp_path)
         _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Epic Review
-
-            Found gaps in the implementation.
-
-            ## Verdict: ISSUES
-            """,
+            os.path.join(repo, "_forge/reviews/test-task-42.json"),
+            "NOT VALID JSON {{{",
         )
         result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 1
-        assert "follow-ups" in result.stderr.lower()
+        assert "not valid JSON" in result.stderr

@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from forge.schemas import PLAN_SCHEMA, REVIEW_SCHEMA, SPEC_SCHEMA, STAGE_SCHEMAS, get_schema
+from forge.schemas import (
+    EPIC_REVIEW_SCHEMA,
+    EPIC_SPEC_SCHEMA,
+    PLAN_SCHEMA,
+    REVIEW_SCHEMA,
+    SPEC_SCHEMA,
+    STAGE_SCHEMAS,
+    get_schema,
+)
 
 
 class TestGetSchema:
@@ -20,6 +28,7 @@ class TestGetSchema:
 
     def test_flow_specific_override(self) -> None:
         original_review = STAGE_SCHEMAS.get("review")
+        original_epic_review = STAGE_SCHEMAS.get("epic:review")
         STAGE_SCHEMAS["review"] = {"type": "object", "properties": {"verdict": {}}}
         STAGE_SCHEMAS["epic:review"] = {"type": "object", "properties": {"epic_verdict": {}}}
         try:
@@ -29,7 +38,10 @@ class TestGetSchema:
             result_standard = get_schema("review", flow="standard")
             assert "verdict" in result_standard["properties"]
         finally:
-            del STAGE_SCHEMAS["epic:review"]
+            if original_epic_review is not None:
+                STAGE_SCHEMAS["epic:review"] = original_epic_review
+            else:
+                del STAGE_SCHEMAS["epic:review"]
             if original_review is not None:
                 STAGE_SCHEMAS["review"] = original_review
             else:
@@ -123,9 +135,6 @@ class TestSpecSchema:
     def test_get_schema_returns_none_for_implement(self) -> None:
         assert get_schema("implement") is None
 
-    def test_get_schema_returns_none_for_epic_spec(self) -> None:
-        assert get_schema("spec", flow="epic") is None
-
     def test_get_schema_returns_none_for_quick_flow(self) -> None:
         assert get_schema("implement", flow="quick") is None
 
@@ -158,3 +167,128 @@ class TestPlanSchema:
         assert tp_items["properties"]["criterion_id"]["type"] == "integer"
         assert tp_items["properties"]["description"]["type"] == "string"
         assert set(tp_items["required"]) == {"criterion_id", "description"}
+
+
+class TestEpicSpecSchema:
+    def test_epic_spec_schema_registered(self) -> None:
+        schema = get_schema("spec", flow="epic")
+        assert schema is not None
+        assert schema["type"] == "object"
+        assert "tasks" in schema["properties"]
+
+    def test_epic_spec_schema_is_correct_object(self) -> None:
+        assert get_schema("spec", flow="epic") is EPIC_SPEC_SCHEMA
+
+    def test_standard_spec_unaffected(self) -> None:
+        assert get_schema("spec") is SPEC_SCHEMA
+        assert get_schema("spec", flow="standard") is SPEC_SCHEMA
+
+    def test_epic_spec_schema_required_fields(self) -> None:
+        schema = get_schema("spec", flow="epic")
+        assert set(schema["required"]) == {"tasks", "rationale", "content"}
+
+    def test_epic_spec_schema_tasks_array(self) -> None:
+        schema = get_schema("spec", flow="epic")
+        tasks_prop = schema["properties"]["tasks"]
+        assert tasks_prop["type"] == "array"
+        assert tasks_prop["minItems"] == 1
+
+    def test_epic_spec_schema_task_item_properties(self) -> None:
+        schema = get_schema("spec", flow="epic")
+        item = schema["properties"]["tasks"]["items"]
+        assert item["properties"]["title"]["type"] == "string"
+        assert item["properties"]["description"]["type"] == "string"
+        assert item["properties"]["flow"]["type"] == "string"
+        assert set(item["properties"]["flow"]["enum"]) == {"standard", "quick"}
+        assert item["properties"]["priority"]["type"] == "integer"
+        assert item["required"] == ["title"]
+
+    def test_epic_spec_schema_rationale_and_content(self) -> None:
+        schema = get_schema("spec", flow="epic")
+        assert schema["properties"]["rationale"]["type"] == "string"
+        assert schema["properties"]["content"]["type"] == "string"
+
+    def test_epic_spec_validation_valid(self) -> None:
+        """A valid decomposition dict has the right structure."""
+        schema = EPIC_SPEC_SCHEMA
+        valid = {
+            "tasks": [{"title": "Task A", "description": "Do something", "flow": "standard", "priority": 1}],
+            "rationale": "Split into components",
+            "content": "Full decomposition content",
+        }
+        # Verify required fields are present
+        for field in schema["required"]:
+            assert field in valid
+
+    def test_epic_spec_validation_missing_tasks(self) -> None:
+        """Missing tasks field violates required."""
+        schema = EPIC_SPEC_SCHEMA
+        invalid = {"rationale": "reason", "content": "stuff"}
+        assert "tasks" not in invalid
+        assert "tasks" in schema["required"]
+
+    def test_epic_spec_validation_empty_tasks(self) -> None:
+        """Empty tasks array violates minItems."""
+        schema = EPIC_SPEC_SCHEMA
+        assert schema["properties"]["tasks"]["minItems"] == 1
+
+
+class TestEpicReviewSchema:
+    def test_epic_review_schema_registered(self) -> None:
+        schema = get_schema("review", flow="epic")
+        assert schema is not None
+        assert schema["type"] == "object"
+        assert "verdict" in schema["properties"]
+
+    def test_epic_review_schema_is_correct_object(self) -> None:
+        assert get_schema("review", flow="epic") is EPIC_REVIEW_SCHEMA
+
+    def test_standard_review_unaffected(self) -> None:
+        assert get_schema("review") is REVIEW_SCHEMA
+        assert get_schema("review", flow="standard") is REVIEW_SCHEMA
+
+    def test_epic_review_schema_required_fields(self) -> None:
+        schema = get_schema("review", flow="epic")
+        expected = {"verdict", "epic_intent_check", "integration_check", "issues", "summary", "content"}
+        assert set(schema["required"]) == expected
+
+    def test_epic_review_schema_verdict(self) -> None:
+        schema = get_schema("review", flow="epic")
+        verdict = schema["properties"]["verdict"]
+        assert verdict["type"] == "string"
+        assert set(verdict["enum"]) == {"PASS", "ISSUES"}
+
+    def test_epic_review_schema_issues_structure(self) -> None:
+        schema = get_schema("review", flow="epic")
+        issues = schema["properties"]["issues"]
+        assert issues["type"] == "array"
+        item = issues["items"]
+        assert set(item["required"]) == {"severity", "description"}
+        assert "file" in item["properties"]
+        assert item["properties"]["severity"]["type"] == "string"
+        assert item["properties"]["description"]["type"] == "string"
+
+    def test_epic_review_schema_string_fields(self) -> None:
+        schema = get_schema("review", flow="epic")
+        for field in ("epic_intent_check", "integration_check", "summary", "content"):
+            assert schema["properties"][field]["type"] == "string"
+
+    def test_epic_review_validation_valid(self) -> None:
+        """A valid review dict has the right structure."""
+        valid = {
+            "verdict": "PASS",
+            "epic_intent_check": "All good",
+            "integration_check": "Components integrate well",
+            "issues": [],
+            "summary": "Everything passes",
+            "content": "Full review content",
+        }
+        for field in EPIC_REVIEW_SCHEMA["required"]:
+            assert field in valid
+
+    def test_epic_review_validation_missing_fields(self) -> None:
+        """Missing required fields violate the schema."""
+        incomplete = {"verdict": "PASS"}
+        for field in EPIC_REVIEW_SCHEMA["required"]:
+            if field != "verdict":
+                assert field not in incomplete

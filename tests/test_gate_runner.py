@@ -62,6 +62,7 @@ class TestBuildGateEnv:
             spec_path="_forge/specs/task-123.md",
             plan_path="_forge/plans/task-123.md",
             review_path=None,
+            flow="standard",
         )
         stage_run = _FakeRow(stage="implement", attempt=2)
         project = _FakeRow(repo_path="/srv/repos/myproject")
@@ -84,6 +85,7 @@ class TestBuildGateEnv:
             spec_path=None,
             plan_path=None,
             review_path=None,
+            flow="standard",
         )
         stage_run = _FakeRow(stage="spec", attempt=1)
         project = _FakeRow(repo_path="/tmp/repo")
@@ -102,6 +104,7 @@ class TestBuildGateEnv:
             spec_path="",
             plan_path="",
             review_path="",
+            flow="standard",
         )
         stage_run = _FakeRow(stage="review", attempt=1)
         project = _FakeRow(repo_path="/srv/repos/myproject")
@@ -120,6 +123,7 @@ class TestBuildGateEnv:
             spec_path="",
             plan_path="",
             review_path="",
+            flow="standard",
         )
         stage_run = _FakeRow(stage="spec", attempt=1)
         project = _FakeRow(repo_path="/srv/repos/myproject")
@@ -127,6 +131,37 @@ class TestBuildGateEnv:
         env = build_gate_env(task, stage_run, project)
 
         assert "FORGE_ARTIFACT_PATH" not in env
+
+    def test_forge_flow_included(self) -> None:
+        task = _FakeRow(
+            id="task-epic-1",
+            branch_name="forge/epic-branch",
+            spec_path="",
+            plan_path="",
+            review_path="",
+            flow="epic",
+        )
+        stage_run = _FakeRow(stage="spec", attempt=1)
+        project = _FakeRow(repo_path="/srv/repos/myproject")
+
+        env = build_gate_env(task, stage_run, project)
+
+        assert env["FORGE_FLOW"] == "epic"
+
+    def test_forge_flow_defaults_to_standard(self) -> None:
+        task = _FakeRow(
+            id="task-no-flow",
+            branch_name="forge/branch",
+            spec_path="",
+            plan_path="",
+            review_path="",
+        )
+        stage_run = _FakeRow(stage="spec", attempt=1)
+        project = _FakeRow(repo_path="/srv/repos/myproject")
+
+        env = build_gate_env(task, stage_run, project)
+
+        assert env["FORGE_FLOW"] == "standard"
 
 
 # ---------------------------------------------------------------------------

@@ -50,6 +50,10 @@ def build_gate_env(
         "FORGE_PLAN_PATH": str(task["plan_path"] or ""),
         "FORGE_REVIEW_PATH": str(task["review_path"] or ""),
     }
+    try:
+        env["FORGE_FLOW"] = str(task["flow"] or "standard")
+    except (KeyError, IndexError):
+        env["FORGE_FLOW"] = "standard"
     if artifact_path:
         env["FORGE_ARTIFACT_PATH"] = artifact_path
     return env

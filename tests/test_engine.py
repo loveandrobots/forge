@@ -3614,14 +3614,14 @@ class TestEpicDecomposition:
         assert len(children) == 1
         assert children[0]["flow"] == "standard"
 
-    async def test_process_epic_decomposition_json_object_not_array(
+    async def test_process_epic_decomposition_json_object_without_tasks_key(
         self,
         conn: sqlite3.Connection,
         settings: Settings,
         project_id: str,
         tmp_path,
     ) -> None:
-        """JSON object (not array) in decomposition file marks task needs_human."""
+        """JSON object without 'tasks' key marks task needs_human."""
         db.update_project(conn, project_id, repo_path=str(tmp_path))
         project = dict(db.get_project(conn, project_id))
 
@@ -3638,6 +3638,120 @@ class TestEpicDecomposition:
         os.makedirs(decomp_dir, exist_ok=True)
         with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
             json.dump({"title": "Not an array"}, f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+
+    async def test_process_epic_decomposition_structured_object(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Structured object with 'tasks' key creates child tasks."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic structured",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        structured = {
+            "tasks": [
+                {"title": "Child A", "description": "Do A", "flow": "standard", "priority": 1},
+                {"title": "Child B", "description": "Do B", "flow": "quick"},
+            ],
+            "rationale": "Split into two components.",
+            "content": "Full decomposition content.",
+        }
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump(structured, f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        children = db.get_child_tasks(conn, task_id)
+        assert len(children) == 2
+        titles = {c["title"] for c in children}
+        assert titles == {"Child A", "Child B"}
+
+    async def test_process_epic_decomposition_bare_list_fallback(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Bare list (legacy format) still creates child tasks."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic legacy",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        bare_list = [
+            {"title": "Legacy A", "description": "Do A"},
+            {"title": "Legacy B", "description": "Do B"},
+        ]
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump(bare_list, f)
+
+        engine = PipelineEngine(settings, ":memory:")
+        await engine.advance_task(conn, task_id, "spec", project=project)
+
+        children = db.get_child_tasks(conn, task_id)
+        assert len(children) == 2
+        titles = {c["title"] for c in children}
+        assert titles == {"Legacy A", "Legacy B"}
+
+    async def test_process_epic_decomposition_structured_empty_tasks(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Structured object with empty tasks array marks needs_human."""
+        db.update_project(conn, project_id, repo_path=str(tmp_path))
+        project = dict(db.get_project(conn, project_id))
+
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Epic empty",
+            flow="epic",
+            epic_status="pending",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        decomp_dir = os.path.join(str(tmp_path), "_forge/epic-decompositions")
+        os.makedirs(decomp_dir, exist_ok=True)
+        structured = {
+            "tasks": [],
+            "rationale": "No tasks needed.",
+            "content": "Empty decomposition.",
+        }
+        with open(os.path.join(decomp_dir, f"{task_id}.json"), "w") as f:
+            json.dump(structured, f)
 
         engine = PipelineEngine(settings, ":memory:")
         await engine.advance_task(conn, task_id, "spec", project=project)

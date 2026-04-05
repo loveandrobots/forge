@@ -23,23 +23,35 @@ import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
 
-if not isinstance(data, list):
-    print('FAIL: Decomposition must be a JSON array', file=sys.stderr)
+# Support structured output object with 'tasks' key, or bare array (legacy)
+if isinstance(data, dict):
+    tasks = data.get('tasks')
+    if tasks is None:
+        print('FAIL: Structured decomposition object missing \"tasks\" key', file=sys.stderr)
+        sys.exit(1)
+elif isinstance(data, list):
+    tasks = data
+else:
+    print('FAIL: Decomposition must be a JSON object or array', file=sys.stderr)
     sys.exit(1)
 
-if len(data) == 0:
-    print('FAIL: Decomposition array is empty', file=sys.stderr)
+if not isinstance(tasks, list):
+    print('FAIL: Decomposition tasks must be an array', file=sys.stderr)
+    sys.exit(1)
+
+if len(tasks) == 0:
+    print('FAIL: Decomposition tasks array is empty', file=sys.stderr)
     sys.exit(1)
 
 errors = []
 
 # Minimum child count
-if len(data) < 2:
-    errors.append('Decomposition must contain at least 2 child tasks (got %d). A single-task decomposition should not be an epic.' % len(data))
+if len(tasks) < 2:
+    errors.append('Decomposition must contain at least 2 child tasks (got %d). A single-task decomposition should not be an epic.' % len(tasks))
 
 # Build sets for depends_on validation
 all_titles = set()
-for i, entry in enumerate(data):
+for i, entry in enumerate(tasks):
     if isinstance(entry, dict):
         t = entry.get('title', '')
         if isinstance(t, str) and t.strip():
@@ -61,7 +73,7 @@ CROSS_REF_PHRASES = [
     'as outlined in the epic',
 ]
 
-for i, entry in enumerate(data):
+for i, entry in enumerate(tasks):
     if not isinstance(entry, dict):
         errors.append('Child %d: entry is not an object' % i)
         continue
@@ -104,8 +116,8 @@ for i, entry in enumerate(data):
                 elif isinstance(dep, int):
                     if dep == i:
                         errors.append(\"Child %d ('%s'): depends_on references itself\" % (i, title_label))
-                    elif dep < 0 or dep >= len(data):
-                        errors.append(\"Child %d ('%s'): dangling depends_on reference to index %d (valid range 0-%d)\" % (i, title_label, dep, len(data) - 1))
+                    elif dep < 0 or dep >= len(tasks):
+                        errors.append(\"Child %d ('%s'): dangling depends_on reference to index %d (valid range 0-%d)\" % (i, title_label, dep, len(tasks) - 1))
                 elif isinstance(dep, str):
                     if dep.strip() == title_label:
                         errors.append(\"Child %d ('%s'): depends_on references itself\" % (i, title_label))

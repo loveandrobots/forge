@@ -210,26 +210,21 @@ You are working on the project "{project_name}".
 {task_description}
 
 ## Your job
-Decompose this epic into concrete, actionable child tasks. Save the result to: _forge/epic-decompositions/{task_id}.json
+Decompose this epic into concrete, actionable child tasks. Your output is captured as structured JSON via --json-schema — do not save a file.
 
 Before decomposing:
 - Read the project's existing code and documentation to understand the current state.
 - Identify logical units of work that can each be completed in a single pipeline pass.
 - Keep each child task narrow and self-contained.
 
-The output file must contain a JSON array of task objects. Each object has:
-- `title` (string, required): A concise, descriptive title for the child task.
-- `description` (string, optional): What the task should accomplish, with enough detail for an agent to implement it without additional context.
-- `flow` (string, optional): Either `"standard"` (default — full spec/plan/implement/review pipeline) or `"quick"` (skip spec/plan, go straight to implement/review). Use `"quick"` only for simple, mechanical fixes.
-- `priority` (integer, optional): Higher numbers run first. Default is 0.
-
-Example output:
-```json
-[
-  {{"title": "Add user authentication endpoint", "description": "Create POST /auth/login ...", "flow": "standard", "priority": 2}},
-  {{"title": "Fix typo in README", "description": "Change 'recieve' to 'receive'", "flow": "quick", "priority": 0}}
-]
-```
+Your response must be a JSON object with these fields:
+- **tasks** (array, required): An array of task objects, each with:
+  - `title` (string, required): A concise, descriptive title for the child task.
+  - `description` (string, optional): What the task should accomplish, with enough detail for an agent to implement it without additional context.
+  - `flow` (string, optional): Either `"standard"` (default — full spec/plan/implement/review pipeline) or `"quick"` (skip spec/plan, go straight to implement/review). Use `"quick"` only for simple, mechanical fixes.
+  - `priority` (integer, optional): Higher numbers run first. Default is 0.
+- **rationale** (string, required): Explanation of how the epic was decomposed and why these tasks were chosen.
+- **content** (string, required): Full decomposition as markdown prose for human reading.
 
 Load the following skills for context:
 {skill_references}
@@ -263,13 +258,15 @@ You are working on the project "{project_name}".
 {git_diff}
 
 ## Your job
-Review the integrated result of all child tasks against the original epic intent. Save your review to: _forge/reviews/{task_id}.md
+Review the integrated result of all child tasks against the original epic intent. Your output is captured as structured JSON via --json-schema — do not save a review file.
 
-Your review must include:
-- **Verdict**: Either "PASS" or "ISSUES"
-- **Epic intent check**: Does the current state of the codebase satisfy what the epic set out to accomplish? Evaluate each child task's contribution.
-- **Integration check**: Do the child task results work together coherently? Look for inconsistencies, missing glue code, or gaps between individually-completed pieces.
-- **Issues found**: If verdict is ISSUES, list each issue with: what's wrong, where it is, and what should be done about it. Be specific — cite file paths and line numbers.
+Your response must be a JSON object with these fields:
+- **verdict** (string, required): Either "PASS" or "ISSUES".
+- **epic_intent_check** (string, required): Does the current state of the codebase satisfy what the epic set out to accomplish? Evaluate each child task's contribution.
+- **integration_check** (string, required): Do the child task results work together coherently? Look for inconsistencies, missing glue code, or gaps between individually-completed pieces.
+- **issues** (array, required): If verdict is ISSUES, list each issue as an object with `severity` (string), `description` (string), and optional `file` (string). Be specific — cite file paths and line numbers. Empty array if PASS.
+- **summary** (string, required): A concise overall summary of the review.
+- **content** (string, required): Full review as markdown prose for human reading.
 
 Your verdict must be one of:
 - PASS: The integrated result fully satisfies the original epic intent and all child tasks work together coherently.
