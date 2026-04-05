@@ -407,3 +407,113 @@ class TestLoadArtifactsFallback:
 
         with pytest.raises(RuntimeError, match="Spec file not found"):
             engine._load_artifacts(task, project, "plan", stage_run, conn)
+
+
+# ---------------------------------------------------------------------------
+# _load_artifacts flow gating
+# ---------------------------------------------------------------------------
+
+
+class TestLoadArtifactsFlowGating:
+    """Verify that _load_artifacts gates spec/plan loading on the task's flow."""
+
+    def test_quick_flow_implement_skips_spec_and_plan(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick flow implement does not attempt to load spec or plan files."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, flow="quick"
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="implement", attempt=1)
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        # No mocks for os.path.exists or load_artifact — they should never be
+        # called for spec/plan on a quick flow task.
+        artifacts = engine._load_artifacts(task, project, "implement", stage_run, conn)
+
+        assert "spec_content" not in artifacts
+        assert "plan_content" not in artifacts
+
+    def test_quick_flow_review_skips_spec(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick flow review does not attempt to load spec file."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, flow="quick"
+        )
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="feature/quick-task",
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="review", attempt=1)
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        with patch("forge.engine.get_git_diff", return_value="diff output"):
+            artifacts = engine._load_artifacts(
+                task, project, "review", stage_run, conn
+            )
+
+        assert "spec_content" not in artifacts
+        assert artifacts["git_diff"] == "diff output"
+
+    def test_standard_flow_implement_raises_when_spec_missing(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Standard flow implement raises RuntimeError when spec file is missing."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, flow="standard"
+        )
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        with pytest.raises(RuntimeError, match="Spec file not found"):
+            engine._load_artifacts(task, project, "implement", stage_run, conn)
+
+    def test_standard_flow_review_raises_when_spec_missing(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Standard flow review raises RuntimeError when spec file is missing."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1, flow="standard"
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="review", attempt=1)
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        with pytest.raises(RuntimeError, match="Spec file not found"):
+            engine._load_artifacts(task, project, "review", stage_run, conn)

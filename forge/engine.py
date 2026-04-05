@@ -1359,7 +1359,8 @@ class PipelineEngine:
             artifacts["git_diff"] = ""
         else:
             repo_path = project.get("repo_path", "")
-            if stage in ("plan", "implement", "review"):
+            flow_stages = FLOW_STAGES.get(flow, STAGES)
+            if stage in ("plan", "implement", "review") and "spec" in flow_stages:
                 spec_path = task.get("spec_path") or _artifact_path_for_stage(
                     repo_path,
                     task["id"],
@@ -1373,7 +1374,7 @@ class PipelineEngine:
                     )
                 artifacts["spec_content"] = load_artifact(spec_path)
 
-            if stage in ("implement",):
+            if stage in ("implement",) and "plan" in flow_stages:
                 plan_path = task.get("plan_path") or _artifact_path_for_stage(
                     repo_path,
                     task["id"],
