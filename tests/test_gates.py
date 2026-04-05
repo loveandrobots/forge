@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -279,289 +278,131 @@ class TestPostImplement:
 class TestPostReview:
     SCRIPT = "post-review.sh"
 
-    def test_passes_with_pass_verdict(self, tmp_path: Path) -> None:
+    def test_passes_with_pass_json_verdict(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict: PASS
-
-            All acceptance criteria met. Code is clean and well-tested.
-            """,
+        review = {"verdict": "PASS", "summary": "All good.", "issues": []}
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps(review))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
         )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 0
         assert "passed" in result.stdout
 
-    def test_fails_with_issues_verdict_and_actionable_items(
+    def test_fails_with_issues_verdict_and_nonempty_issues(
         self, tmp_path: Path
     ) -> None:
         repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict: ISSUES
-
-            - Fix error handling in widget.py line 42
-            - Add test for empty input case
-            """,
+        review = {
+            "verdict": "ISSUES",
+            "summary": "Problems found.",
+            "issues": [
+                {"description": "Fix error handling in widget.py line 42"},
+                {"description": "Add test for empty input case"},
+            ],
+        }
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps(review))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
         )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 1
-        assert "ISSUES" in result.stderr
-        assert "actionable" in result.stderr.lower()
-
-    def test_fails_when_review_missing(self, tmp_path: Path) -> None:
-        repo = str(tmp_path)
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 1
-        assert "not found" in result.stderr
-
-    def test_fails_when_no_verdict(self, tmp_path: Path) -> None:
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            "# Review\n\nSome notes about the code.\n",
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 1
-        assert "verdict" in result.stderr.lower()
-
-    def test_fails_with_issues_but_no_actionable_items(self, tmp_path: Path) -> None:
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review
-
-            ## Verdict: ISSUES
-
-            There are some problems but I won't say what they are.
-            """,
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 1
-        assert "actionable" in result.stderr.lower()
-
-    def test_passes_with_pass_verdict_no_issues_mentioned(
-        self, tmp_path: Path
-    ) -> None:
-        """A PASS-only review with no mention of ISSUES exits 0."""
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict: PASS
-
-            Everything looks good. All acceptance criteria met.
-            Code is clean and well-tested.
-            """,
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 0
-        assert "passed" in result.stdout
-
-    def test_passes_with_pass_verdict_containing_issues_word(
-        self, tmp_path: Path
-    ) -> None:
-        """A PASS verdict line that also contains the word 'issues' exits 0."""
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict: PASS (no issues found)
-
-            Everything looks good. All acceptance criteria met.
-            """,
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 0
-        assert "passed" in result.stdout
-
-    def test_fails_with_issues_verdict_stderr_message(
-        self, tmp_path: Path
-    ) -> None:
-        """Stderr includes human-readable message with ISSUES and Bouncing."""
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict: ISSUES
-
-            - Fix error handling in widget.py line 42
-            - Add test for empty input case
-            - Missing docstring on public API
-            """,
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 1
         assert "ISSUES" in result.stderr
         assert "Bouncing" in result.stderr
-        assert "actionable item(s)" in result.stderr
 
-    def test_pass_verdict_with_issues_keyword_in_body(
+    def test_fails_with_issues_verdict_but_empty_issues(
         self, tmp_path: Path
     ) -> None:
-        """AC 5: PASS verdict with the word 'issues' in the body text exits 0."""
         repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict: PASS
-
-            No issues found. All tests pass.
-            """,
+        review = {"verdict": "ISSUES", "summary": "Problems.", "issues": []}
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps(review))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
         )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 0
-        assert "passed" in result.stdout
-
-    def test_passes_with_multiline_pass_verdict(self, tmp_path: Path) -> None:
-        """Verdict heading on one line, PASS value on the next non-blank line."""
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict
-
-            **PASS**
-
-            All acceptance criteria met.
-            """,
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 0
-        assert "passed" in result.stdout
-
-    def test_fails_with_multiline_issues_verdict(self, tmp_path: Path) -> None:
-        """Verdict heading on one line, ISSUES value on next, with actionable items."""
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict
-
-            **ISSUES**
-
-            - Fix error handling in widget.py line 42
-            - Add test for empty input case
-            """,
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 1
-        assert "ISSUES" in result.stderr
+        assert "empty issues" in result.stderr.lower()
 
-    def test_verdict_not_confused_by_body_text(self, tmp_path: Path) -> None:
-        """Body text mentioning 'verdict' or 'ISSUES' doesn't override actual verdict."""
+    def test_fails_when_review_missing(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict: PASS
-
-            All acceptance criteria met.
-
-            | Criterion | Verdict |
-            |-----------|---------|
-            | Handles edge cases | verdict is ISSUES |
-            | Performance | an ISSUES verdict was considered |
-            """,
+        missing = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": missing},
+            repo,
         )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 0
-        assert "passed" in result.stdout
-
-    def test_bold_verdict_format(self, tmp_path: Path) -> None:
-        """Bold verdict with colon inside: **Verdict: PASS**."""
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            **Verdict: PASS**
-
-            All good.
-            """,
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
-        assert result.returncode == 0
-        assert "passed" in result.stdout
-
-    def test_bold_label_verdict_format(self, tmp_path: Path) -> None:
-        """Bold label with value outside: **Verdict**: ISSUES."""
-        repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            **Verdict**: ISSUES
-
-            - Fix the widget rendering
-            - Add missing tests
-            """,
-        )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
         assert result.returncode == 1
-        assert "ISSUES" in result.stderr
+        assert "not found" in result.stderr
 
-    def test_fails_with_unrecognized_verdict_keyword(self, tmp_path: Path) -> None:
-        """Gate fails when review contains a verdict header with an unrecognized keyword."""
+    def test_fails_with_invalid_json(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            ## Verdict: REJECTED
-
-            The implementation does not meet requirements.
-            """,
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, "NOT VALID JSON {{{")
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
         )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "not valid JSON" in result.stderr
+
+    def test_fails_with_missing_verdict_field(self, tmp_path: Path) -> None:
+        repo = str(tmp_path)
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps({"summary": "no verdict here"}))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
+        )
         assert result.returncode == 1
         assert "verdict" in result.stderr.lower()
 
-    def test_bold_label_colon_verdict_format(self, tmp_path: Path) -> None:
-        """Bold label with trailing colon: **Verdict:** PASS."""
+    def test_fails_with_unrecognized_verdict(self, tmp_path: Path) -> None:
         repo = str(tmp_path)
-        _write_file(
-            os.path.join(repo, "_forge/reviews/test-task-42.md"),
-            """\
-            # Review: Widget feature
-
-            **Verdict:** PASS
-
-            All good.
-            """,
+        review = {"verdict": "REJECTED", "issues": []}
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps(review))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": review_path},
+            repo,
         )
-        result = _run_gate(self.SCRIPT, {"FORGE_STAGE": "review"}, repo)
+        assert result.returncode == 1
+        assert "Unrecognized verdict" in result.stderr
+
+    def test_legacy_md_file_passes_with_warning(self, tmp_path: Path) -> None:
+        """Backward compatibility: .md review file warns and exits 0."""
+        repo = str(tmp_path)
+        md_path = os.path.join(repo, "_forge/reviews/test-task-42.md")
+        _write_file(md_path, "# Review\n\n## Verdict: PASS\n")
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_ARTIFACT_PATH": md_path},
+            repo,
+        )
+        assert result.returncode == 0
+        assert "legacy" in result.stderr.lower() or "legacy" in result.stdout.lower()
+
+    def test_uses_forge_review_path_fallback(self, tmp_path: Path) -> None:
+        """Falls back to FORGE_REVIEW_PATH when FORGE_ARTIFACT_PATH is unset."""
+        repo = str(tmp_path)
+        review = {"verdict": "PASS", "summary": "OK", "issues": []}
+        review_path = os.path.join(repo, "_forge/reviews/test-task-42.json")
+        _write_file(review_path, json.dumps(review))
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "review", "FORGE_REVIEW_PATH": review_path},
+            repo,
+        )
         assert result.returncode == 0
         assert "passed" in result.stdout
-
-
-# ---------------------------------------------------------------------------
-# parse_verdict.py (unit tests)
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -933,90 +774,6 @@ class TestPostEpicSpec:
         assert "Child 0" in result.stderr
         assert "Child 1" in result.stderr
         assert "Child 2" in result.stderr
-
-
-class TestParseVerdictScript:
-    SCRIPT = os.path.join(GATES_DIR, "parse_verdict.py")
-
-    def test_parse_verdict_script_pass(self, tmp_path: Path) -> None:
-        """Script prints PASS and exits 0 for a simple verdict."""
-        review = os.path.join(str(tmp_path), "review.md")
-        _write_file(review, "## Verdict: PASS\n\nAll good.\n")
-        result = subprocess.run(
-            ["python3", self.SCRIPT, review],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        assert result.returncode == 0
-        assert result.stdout.strip() == "PASS"
-
-    def test_parse_verdict_script_no_verdict(self, tmp_path: Path) -> None:
-        """Script exits 1 when no verdict is found."""
-        review = os.path.join(str(tmp_path), "review.md")
-        _write_file(review, "# Review\n\nSome notes.\n")
-        result = subprocess.run(
-            ["python3", self.SCRIPT, review],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        assert result.returncode == 1
-        assert "verdict" in result.stderr.lower()
-
-    def test_parse_verdict_script_unrecognized_keyword(self, tmp_path: Path) -> None:
-        """Script exits 1 when verdict header has an unrecognized keyword."""
-        review = os.path.join(str(tmp_path), "review.md")
-        _write_file(review, "## Verdict: APPROVED\n\nAll good.\n")
-        result = subprocess.run(
-            ["python3", self.SCRIPT, review],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        assert result.returncode == 1
-        assert "verdict" in result.stderr.lower()
-        assert result.stdout.strip() == ""
-
-    def test_parse_verdict_script_missing_file(self) -> None:
-        """Script exits 1 for a nonexistent file."""
-        result = subprocess.run(
-            ["python3", self.SCRIPT, "/tmp/nonexistent_review_file.md"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        assert result.returncode == 1
-
-
-# ---------------------------------------------------------------------------
-# parse_verdict() direct unit tests
-# ---------------------------------------------------------------------------
-
-
-def _load_parse_verdict() -> object:
-    """Import parse_verdict function from the gates script."""
-    spec = importlib.util.spec_from_file_location(
-        "parse_verdict", os.path.join(GATES_DIR, "parse_verdict.py")
-    )
-    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod.parse_verdict  # type: ignore[attr-defined]
-
-
-class TestParseVerdictUnit:
-    """Direct unit tests for the parse_verdict() function."""
-
-    parse_verdict = staticmethod(_load_parse_verdict())
-
-    def test_returns_none_for_unrecognized_keyword_approved(self) -> None:
-        assert self.parse_verdict("## Verdict: APPROVED\n\nAll good.\n") is None
-
-    def test_returns_none_for_unrecognized_keyword_fail(self) -> None:
-        assert self.parse_verdict("## Verdict: FAIL\n\nBad code.\n") is None
-
-    def test_returns_none_for_unrecognized_keyword_rejected(self) -> None:
-        assert self.parse_verdict("## Verdict: REJECTED\n\nNot acceptable.\n") is None
 
 
 # ---------------------------------------------------------------------------

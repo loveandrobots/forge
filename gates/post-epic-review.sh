@@ -18,15 +18,13 @@ if [ ! -f "$REVIEW_FILE" ]; then
     exit 1
 fi
 
-# Extract the verdict using the Python parser
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERDICT_ERR=$(mktemp /tmp/forge_verdict_err.XXXXXX)
-trap 'rm -f "$VERDICT_ERR"' EXIT
-VERDICT=$(python3 "$SCRIPT_DIR/parse_verdict.py" "$REVIEW_FILE" 2>"$VERDICT_ERR") || {
-    cat "$VERDICT_ERR" >&2
+# Extract the verdict using grep (supports markdown heading formats like ## Verdict: PASS)
+VERDICT=$(grep -oP '(?i)(?:^#{1,6}\s+|\*{1,2})Verdict\*{0,2}:?\s*\K(PASS|ISSUES)\b' "$REVIEW_FILE" | head -1) || true
+if [ -z "$VERDICT" ]; then
     echo "FAIL: Could not determine verdict from epic review file" >&2
     exit 1
-}
+fi
+VERDICT=$(echo "$VERDICT" | tr '[:lower:]' '[:upper:]')
 
 if [ "$VERDICT" = "PASS" ]; then
     echo "post-epic-review gate passed"
