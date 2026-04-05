@@ -4914,3 +4914,587 @@ class TestDatabaseMigrationStructuredOutput:
         db.migrate(c)
         db.migrate(c)  # Should not raise
         c.close()
+
+
+# ---------------------------------------------------------------------------
+# Review schema dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestReviewSchemaDispatch:
+    """Tests for review stage structured output / schema dispatch."""
+
+    async def _run_one_iteration(self, engine: PipelineEngine) -> None:
+        engine.running = True
+        loop_task = asyncio.create_task(engine.run_loop())
+        await asyncio.sleep(0.5)
+        engine.running = False
+        try:
+            await asyncio.wait_for(loop_task, timeout=3.0)
+        except asyncio.TimeoutError:
+            loop_task.cancel()
+
+    async def test_review_dispatch_passes_json_schema(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Review dispatch should pass json_schema to dispatch_claude."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="queued"
+        )
+
+        dispatch_result = DispatchResult(
+            output="review output",
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
+            structured_output={
+                "verdict": "PASS",
+                "issues": [],
+                "criteria_check": [],
+                "out_of_scope_changes": [],
+                "summary": "All good",
+                "content": "Review passed",
+            },
+        )
+        gate_result = GateResult(
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
+        )
+
+        mock_dispatch = AsyncMock(return_value=dispatch_result)
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", mock_dispatch),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+            patch.object(engine, "_load_artifacts", return_value={}),
+            patch("forge.engine.os.makedirs"),
+            patch("builtins.open", create=True),
+        ):
+            await self._run_one_iteration(engine)
+
+        # dispatch_claude should have been called with a json_schema argument
+        mock_dispatch.assert_called_once()
+        call_kwargs = mock_dispatch.call_args
+        assert call_kwargs.kwargs.get("json_schema") is not None
+        # Should be valid JSON containing "verdict"
+        schema = json.loads(call_kwargs.kwargs["json_schema"])
+        assert "verdict" in schema.get("properties", {})
+
+    async def test_structured_output_written_as_json(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Structured review output should be written as .json file."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        # Update project repo_path to tmp_path for file writing
+        conn.execute(
+            "UPDATE projects SET repo_path = ? WHERE id = ?",
+            (str(tmp_path), project_id),
+        )
+        conn.commit()
+
+        # Create spec file that _load_artifacts expects
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / f"{task_id}.md").write_text("# Spec\nDo things\n")
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="queued"
+        )
+
+        review_data = {
+            "verdict": "PASS",
+            "issues": [],
+            "criteria_check": [],
+            "out_of_scope_changes": [],
+            "summary": "All good",
+            "content": "Review passed",
+        }
+        dispatch_result = DispatchResult(
+            output="review output",
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
+            structured_output=review_data,
+        )
+        gate_result = GateResult(
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        # Review JSON should have been written
+        review_json_path = tmp_path / "_forge" / "reviews" / f"{task_id}.json"
+        assert review_json_path.exists()
+        written_data = json.loads(review_json_path.read_text())
+        assert written_data["verdict"] == "PASS"
+
+        # Task review_path should point to .json
+        task = db.get_task(conn, task_id)
+        assert task["review_path"].endswith(".json")
+
+    async def test_verdict_from_structured_output_pass(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When structured output has verdict=PASS, task should advance even if gate fails."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        conn.execute(
+            "UPDATE projects SET repo_path = ? WHERE id = ?",
+            (str(tmp_path), project_id),
+        )
+        conn.commit()
+
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / f"{task_id}.md").write_text("# Spec\n")
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="queued"
+        )
+
+        dispatch_result = DispatchResult(
+            output="review",
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
+            structured_output={
+                "verdict": "PASS",
+                "issues": [],
+                "criteria_check": [],
+                "out_of_scope_changes": [],
+                "summary": "All good",
+                "content": "ok",
+            },
+        )
+        # Gate fails, but structured verdict is PASS
+        gate_result = GateResult(
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="gate failed",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        # Stage run should be passed (verdict=PASS overrides gate)
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "passed"
+
+    async def test_verdict_issues_bounces(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When structured output has verdict=ISSUES, task should bounce to implement."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        conn.execute(
+            "UPDATE projects SET repo_path = ? WHERE id = ?",
+            (str(tmp_path), project_id),
+        )
+        conn.commit()
+
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / f"{task_id}.md").write_text("# Spec\n")
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="queued"
+        )
+
+        dispatch_result = DispatchResult(
+            output="review",
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
+            structured_output={
+                "verdict": "ISSUES",
+                "issues": [
+                    {"file": "foo.py", "severity": "critical", "description": "bug"}
+                ],
+                "criteria_check": [],
+                "out_of_scope_changes": [],
+                "summary": "Found issues",
+                "content": "needs fixes",
+            },
+        )
+        # Gate passes, but structured verdict is ISSUES
+        gate_result = GateResult(
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        # Stage run should be bounced (verdict=ISSUES overrides gate)
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "bounced"
+
+        # Task should bounce back to implement
+        task = db.get_task(conn, task_id)
+        assert task["current_stage"] == "implement"
+
+    def test_load_artifacts_json_review(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """_load_artifacts should handle .json review files with build_structured_review_feedback."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        review_data = {
+            "verdict": "ISSUES",
+            "issues": [
+                {"file": "foo.py", "severity": "major", "description": "missing test"}
+            ],
+            "criteria_check": [
+                {"criterion": "Tests pass", "satisfied": False, "evidence": "No tests"}
+            ],
+            "summary": "Needs work",
+        }
+        review_dir = tmp_path / "_forge" / "reviews"
+        review_dir.mkdir(parents=True)
+        review_json_path = review_dir / f"{task_id}.json"
+        review_json_path.write_text(json.dumps(review_data))
+
+        # Create spec and plan files needed by _load_artifacts for implement
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / f"{task_id}.md").write_text("# Spec\n")
+        plan_dir = tmp_path / "_forge" / "plans"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / f"{task_id}.md").write_text("# Plan\n")
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            review_path=str(review_json_path),
+        )
+        # Create a bounced review stage_run
+        db.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage="review",
+            attempt=1,
+            status="bounced",
+        )
+        # Create queued implement retry
+        sr_id = db.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage="implement",
+            attempt=2,
+            status="queued",
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        task = dict(db.get_task(conn, task_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        engine = PipelineEngine(settings, ":memory:")
+        artifacts = engine._load_artifacts(task, project, "implement", stage_run, conn)
+
+        assert "review_feedback" in artifacts
+        # Should contain structured review content
+        assert "ISSUES" in artifacts["review_feedback"]
+        assert "missing test" in artifacts["review_feedback"]
+
+    def test_load_artifacts_md_review_legacy(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """_load_artifacts should handle .md review files as plain text (legacy)."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        review_dir = tmp_path / "_forge" / "reviews"
+        review_dir.mkdir(parents=True)
+        review_md_path = review_dir / f"{task_id}.md"
+        review_md_path.write_text("# Review\nNeeds work\n")
+
+        # Create spec and plan files needed by _load_artifacts for implement
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / f"{task_id}.md").write_text("# Spec\n")
+        plan_dir = tmp_path / "_forge" / "plans"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / f"{task_id}.md").write_text("# Plan\n")
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            review_path=str(review_md_path),
+        )
+        db.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage="review",
+            attempt=1,
+            status="bounced",
+        )
+        sr_id = db.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage="implement",
+            attempt=2,
+            status="queued",
+        )
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+        task = dict(db.get_task(conn, task_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        engine = PipelineEngine(settings, ":memory:")
+        artifacts = engine._load_artifacts(task, project, "implement", stage_run, conn)
+
+        assert "review_feedback" in artifacts
+        assert "Needs work" in artifacts["review_feedback"]
+
+    async def test_bounce_feedback_uses_structured_review(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """After a review bounce with structured output, the implement retry should get structured feedback."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        conn.execute(
+            "UPDATE projects SET repo_path = ? WHERE id = ?",
+            (str(tmp_path), project_id),
+        )
+        conn.commit()
+
+        # Create spec file needed by _load_artifacts for review stage
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / f"{task_id}.md").write_text("# Spec\n")
+
+        review_data = {
+            "verdict": "ISSUES",
+            "issues": [
+                {"file": "foo.py", "severity": "critical", "description": "broken logic"}
+            ],
+            "criteria_check": [
+                {"criterion": "Tests pass", "satisfied": False, "evidence": "Tests fail"}
+            ],
+            "out_of_scope_changes": [],
+            "summary": "Fix the logic",
+            "content": "Details here",
+        }
+
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="review",
+            branch_name="forge/test-branch",
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="queued"
+        )
+
+        dispatch_result = DispatchResult(
+            output="review",
+            exit_code=0,
+            duration_seconds=5.0,
+            tokens_used=100,
+            structured_output=review_data,
+        )
+        gate_result = GateResult(
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+        ):
+            await self._run_one_iteration(engine)
+
+        # Task should have bounced to implement
+        task = db.get_task(conn, task_id)
+        assert task["current_stage"] == "implement"
+        assert task["review_path"].endswith(".json")
+
+        # Review JSON should exist on disk
+        review_json_path = tmp_path / "_forge" / "reviews" / f"{task_id}.json"
+        assert review_json_path.exists()
+
+        # Simulate loading artifacts for the implement retry
+        impl_runs = db.list_stage_runs(
+            conn, task_id=task_id, stage="implement", status="queued"
+        )
+        assert len(impl_runs) >= 1
+        impl_run = dict(impl_runs[0])
+
+        project = dict(db.get_project(conn, project_id))
+        task = dict(db.get_task(conn, task_id))
+
+        # Need spec file for implement stage
+        spec_dir = tmp_path / "_forge" / "specs"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_path = spec_dir / f"{task_id}.md"
+        spec_path.write_text("# Spec\nDo things\n")
+        # Need plan file for implement stage
+        plan_dir = tmp_path / "_forge" / "plans"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plan_dir / f"{task_id}.md"
+        plan_path.write_text("# Plan\nStep 1\n")
+
+        artifacts = engine._load_artifacts(task, project, "implement", impl_run, conn)
+        assert "review_feedback" in artifacts
+        assert "broken logic" in artifacts["review_feedback"]

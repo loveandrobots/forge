@@ -30,6 +30,7 @@ from forge.dispatcher import (
 )
 from forge.gate_runner import GateResult, build_gate_env, run_gate
 from forge.prompt_builder import build_prompt, get_git_diff, load_artifact
+from forge.schemas import get_schema
 
 logger = logging.getLogger(__name__)
 
@@ -383,12 +384,20 @@ class PipelineEngine:
                 stage_timeout = resolve_stage_timeout(
                     stage, proj_timeouts, self.settings.engine
                 )
+                # Resolve JSON schema for structured output dispatch
+                json_schema_str: str | None = None
+                if stage == "review":
+                    flow = task.get("flow", "standard")
+                    schema = get_schema("review", flow)
+                    if schema:
+                        json_schema_str = json.dumps(schema)
                 result: DispatchResult = await dispatch_claude(
                     prompt=prompt,
                     repo_path=project["repo_path"],
                     branch=branch_name,
                     timeout=stage_timeout,
                     headless_flags=self.settings.claude.headless_flags,
+                    json_schema=json_schema_str,
                 )
 
                 finished_at = _now()
@@ -448,6 +457,26 @@ class PipelineEngine:
                         structured_output=structured_json,
                     )
 
+                # Step 4c: Write review structured output as JSON artifact
+                if stage == "review" and structured is not None:
+                    repo_path = project.get("repo_path", "")
+                    review_dir = os.path.join(repo_path, "_forge", "reviews")
+                    os.makedirs(review_dir, exist_ok=True)
+                    review_json_path = os.path.join(
+                        review_dir, f"{task_id}.json"
+                    )
+                    with open(review_json_path, "w", encoding="utf-8") as rf:
+                        json.dump(structured, rf, indent=2)
+                    database.update_task(
+                        conn, task_id, review_path=review_json_path
+                    )
+                    task["review_path"] = review_json_path
+
+                # Step 4d: Extract verdict from structured review output
+                review_verdict: str | None = None
+                if stage == "review" and structured is not None:
+                    review_verdict = structured.get("verdict")
+
                 # Step 5: Run gate
                 # Write structured output to a temp file for gate scripts
                 artifact_file_path: str | None = None
@@ -503,8 +532,15 @@ class PipelineEngine:
                     gate_stderr=gate_result.stderr,
                 )
 
-                if gate_result.passed:
-                    # Gate passed
+                # Use structured verdict for review stages, gate for others
+                stage_passed = (
+                    review_verdict == "PASS"
+                    if review_verdict is not None
+                    else gate_result.passed
+                )
+
+                if stage_passed:
+                    # Stage passed
                     database.update_stage_run(
                         conn,
                         stage_run_id,
@@ -524,15 +560,20 @@ class PipelineEngine:
                         structured_output=structured,
                     )
                 else:
-                    # Gate failed — bounce
+                    # Stage failed — bounce
                     database.update_stage_run(
                         conn,
                         stage_run_id,
                         status="bounced",
                     )
+                    bounce_detail = (
+                        f"verdict={review_verdict}"
+                        if review_verdict is not None
+                        else gate_result.stderr
+                    )
                     self._log(
                         "warn",
-                        f"Stage {stage} bounced for task {task_id}: {gate_result.stderr}",
+                        f"Stage {stage} bounced for task {task_id}: {bounce_detail}",
                         task_id=task_id,
                         stage_run_id=stage_run_id,
                     )
