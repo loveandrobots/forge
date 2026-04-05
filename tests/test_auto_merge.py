@@ -252,6 +252,7 @@ class TestPostRebaseGateFailure:
             "stage": "implement",
             "attempt": 1,
             "status": "passed",
+            "structured_output": None,
         }
 
         settings = Settings()

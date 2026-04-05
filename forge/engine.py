@@ -449,11 +449,26 @@ class PipelineEngine:
                     )
 
                 # Step 5: Run gate
+                # Write structured output to a temp file for gate scripts
+                artifact_file_path: str | None = None
+                if structured_json is not None:
+                    repo_path = project.get("repo_path", "")
+                    artifact_dir = os.path.join(
+                        repo_path, "_forge", "artifacts"
+                    )
+                    os.makedirs(artifact_dir, exist_ok=True)
+                    artifact_file_path = os.path.join(
+                        artifact_dir, f"{task_id}_{stage}.json"
+                    )
+                    with open(artifact_file_path, "w", encoding="utf-8") as af:
+                        af.write(structured_json)
+
                 task_row = database.get_task(conn, task_id)
                 gate_env = build_gate_env(
                     task_row,
                     stage_runs[0],
                     project_row,
+                    artifact_path=artifact_file_path,
                 )
                 gate_dir = project["gate_dir"]
                 # Resolve relative gate_dir against repo_path
@@ -628,7 +643,17 @@ class PipelineEngine:
 
         project_row = database.get_project(conn, task["project_id"])
         task_row = database.get_task(conn, task_id)
-        gate_env = build_gate_env(task_row, implement_run, project_row)
+        # Check for structured artifact from the implement stage
+        impl_artifact_path: str | None = None
+        if implement_run and implement_run["structured_output"]:
+            artifact_candidate = os.path.join(
+                repo_path, "_forge", "artifacts", f"{task_id}_implement.json"
+            )
+            if os.path.exists(artifact_candidate):
+                impl_artifact_path = artifact_candidate
+        gate_env = build_gate_env(
+            task_row, implement_run, project_row, artifact_path=impl_artifact_path
+        )
         gate_result = await run_gate(gate_dir, "implement", gate_env)
 
         if not gate_result.passed:
@@ -1374,7 +1399,13 @@ class PipelineEngine:
                         f"Spec file not found: {spec_path}"
                         " — task may need to be reset to spec stage"
                     )
-                artifacts["spec_content"] = load_artifact(spec_path)
+                if spec_path.endswith(".json"):
+                    structured = load_structured_artifact(spec_path)
+                    artifacts["spec_content"] = (
+                        json.dumps(structured, indent=2) if structured else ""
+                    )
+                else:
+                    artifacts["spec_content"] = load_artifact(spec_path)
 
             if stage in ("implement",) and "plan" in flow_stages:
                 plan_path = task.get("plan_path") or _artifact_path_for_stage(
@@ -1388,7 +1419,13 @@ class PipelineEngine:
                         f"Plan file not found: {plan_path}"
                         " — task may need to be reset to plan stage"
                     )
-                artifacts["plan_content"] = load_artifact(plan_path)
+                if plan_path.endswith(".json"):
+                    structured = load_structured_artifact(plan_path)
+                    artifacts["plan_content"] = (
+                        json.dumps(structured, indent=2) if structured else ""
+                    )
+                else:
+                    artifacts["plan_content"] = load_artifact(plan_path)
 
             if stage == "review":
                 branch = task.get("branch_name", "")
@@ -1406,13 +1443,24 @@ class PipelineEngine:
                 status="bounced",
             )
             if bounced_reviews:
-                review_path = os.path.join(
+                review_path = task.get("review_path") or os.path.join(
                     project.get("repo_path", ""),
                     f"_forge/reviews/{task['id']}.md",
                 )
-                review_content = load_artifact(review_path)
-                if review_content:
-                    artifacts["review_feedback"] = review_content
+                if review_path.endswith(".json"):
+                    review_data = load_structured_artifact(review_path)
+                    if review_data:
+                        from forge.prompt_builder import (
+                            build_structured_review_feedback,
+                        )
+
+                        artifacts["review_feedback"] = (
+                            build_structured_review_feedback(review_data)
+                        )
+                else:
+                    review_content = load_artifact(review_path)
+                    if review_content:
+                        artifacts["review_feedback"] = review_content
 
         # Load previous gate stderr for retries
         if stage_run.get("attempt", 1) > 1:

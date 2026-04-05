@@ -410,6 +410,131 @@ class TestLoadArtifactsFallback:
 
 
 # ---------------------------------------------------------------------------
+# _load_artifacts JSON artifact handling
+# ---------------------------------------------------------------------------
+
+
+class TestLoadArtifactsJsonHandling:
+    """Verify that _load_artifacts uses load_structured_artifact for .json paths."""
+
+    def test_json_spec_path_parsed_as_structured(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When spec_path ends in .json, _load_artifacts parses it as JSON."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
+            spec_path="/tmp/repo/_forge/specs/test.json",
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1)
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        structured_data = {"title": "My spec", "description": "Details"}
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch(
+                "forge.engine.load_structured_artifact",
+                return_value=structured_data,
+            ) as mock_structured,
+            patch("forge.engine.load_artifact") as mock_load,
+        ):
+            artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
+
+        mock_structured.assert_called_once_with("/tmp/repo/_forge/specs/test.json")
+        mock_load.assert_not_called()
+        import json
+        assert artifacts["spec_content"] == json.dumps(structured_data, indent=2)
+
+    def test_json_plan_path_parsed_as_structured(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When plan_path ends in .json, _load_artifacts parses it as JSON."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            spec_path="/tmp/repo/_forge/specs/test.md",
+            plan_path="/tmp/repo/_forge/plans/test.json",
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        plan_data = {"steps": ["step1", "step2"]}
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch(
+                "forge.engine.load_structured_artifact",
+                return_value=plan_data,
+            ) as mock_structured,
+            patch("forge.engine.load_artifact", return_value="spec content"),
+        ):
+            artifacts = engine._load_artifacts(
+                task, project, "implement", stage_run, conn
+            )
+
+        mock_structured.assert_called_once_with("/tmp/repo/_forge/plans/test.json")
+        import json
+        assert artifacts["plan_content"] == json.dumps(plan_data, indent=2)
+        assert artifacts["spec_content"] == "spec content"
+
+    def test_md_paths_still_use_load_artifact(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Non-.json paths still use load_artifact as before."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="plan",
+            spec_path="/tmp/repo/_forge/specs/test.md",
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="plan", attempt=1)
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch(
+                "forge.engine.load_artifact", return_value="spec content"
+            ) as mock_load,
+            patch("forge.engine.load_structured_artifact") as mock_structured,
+        ):
+            artifacts = engine._load_artifacts(task, project, "plan", stage_run, conn)
+
+        mock_load.assert_called_once_with("/tmp/repo/_forge/specs/test.md")
+        mock_structured.assert_not_called()
+        assert artifacts["spec_content"] == "spec content"
+
+
+# ---------------------------------------------------------------------------
 # _load_artifacts flow gating
 # ---------------------------------------------------------------------------
 
