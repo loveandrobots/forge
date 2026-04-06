@@ -131,9 +131,19 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
         project_row = database.get_project(conn, task["project_id"])
         project = _row_to_dict(project_row) if project_row else {}
 
-        stage_runs = [
-            _row_to_dict(r) for r in database.list_stage_runs(conn, task_id=task_id)
-        ]
+        stage_runs = []
+        for r in database.list_stage_runs(conn, task_id=task_id):
+            d = _row_to_dict(r)
+            # Parse structured gate output from gate_stdout JSON
+            gate_stdout = d.get("gate_stdout")
+            if gate_stdout:
+                try:
+                    parsed = json.loads(gate_stdout)
+                    if isinstance(parsed, dict) and "passed" in parsed:
+                        d["gate_structured_output"] = parsed
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            stage_runs.append(d)
 
         flow_stages = FLOW_STAGES.get(
             task.get("flow", "standard"), FLOW_STAGES["standard"]

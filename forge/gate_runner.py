@@ -7,10 +7,11 @@ whether a pipeline stage passed or needs to bounce.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from sqlite3 import Row
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class GateResult:
     stderr: str
     gate_name: str
     duration_seconds: float
+    structured_output: dict | None = field(default=None)
 
 
 def build_gate_env(
@@ -57,6 +59,50 @@ def build_gate_env(
     if artifact_path:
         env["FORGE_ARTIFACT_PATH"] = artifact_path
     return env
+
+
+def _parse_structured_output(stdout: str) -> dict | None:
+    """Try to parse gate stdout as structured JSON output.
+
+    Returns the parsed dict if stdout is valid JSON containing at least a
+    ``passed`` boolean field.  Returns ``None`` otherwise (plain-text
+    stdout, invalid JSON, or missing ``passed`` key).
+    """
+    if not stdout:
+        return None
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if "passed" not in data or not isinstance(data["passed"], bool):
+        return None
+    return data
+
+
+def format_structured_bounce_context(structured_output: dict) -> str:
+    """Build a human-readable bounce message from structured gate output.
+
+    Uses the ``checks`` array when present, falling back to ``reason``.
+    """
+    parts: list[str] = []
+    checks = structured_output.get("checks")
+    if isinstance(checks, list) and checks:
+        for check in checks:
+            name = check.get("name", "unknown")
+            passed = check.get("passed", False)
+            status = "passed" if passed else "failed"
+            detail = check.get("detail", "")
+            if detail and not passed:
+                parts.append(f"{name} {status}: {detail}")
+            else:
+                parts.append(f"{name} {status}")
+        return "Gate failed: " + ", ".join(parts)
+    reason = structured_output.get("reason")
+    if reason:
+        return f"Gate failed: {reason}"
+    return "Gate failed (structured output provided no detail)"
 
 
 async def run_gate(
@@ -107,6 +153,9 @@ async def run_gate(
 
     passed = exit_code == 0
 
+    # Try to parse stdout as structured JSON gate output.
+    structured_output = _parse_structured_output(stdout_text)
+
     if passed:
         logger.info("Gate %s passed (%.1fs)", gate_name, duration)
     else:
@@ -125,4 +174,5 @@ async def run_gate(
         stderr=stderr_text,
         gate_name=gate_name,
         duration_seconds=duration,
+        structured_output=structured_output,
     )

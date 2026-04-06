@@ -518,6 +518,30 @@ body {
     font-size: 0.8125rem;
 }
 
+/* Gate checks */
+.gate-checks {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 0;
+}
+
+.gate-check {
+    padding: 0.25rem 0;
+    font-size: 0.875rem;
+}
+
+.check-pass .check-icon {
+    color: var(--success);
+}
+
+.check-fail .check-icon {
+    color: var(--error);
+}
+
+.check-detail {
+    color: #6b7280;
+}
+
 /* Details / Code blocks */
 details {
     margin-top: 0.5rem;

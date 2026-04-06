@@ -29,7 +29,12 @@ from forge.dispatcher import (
     ff_merge,
     rebase_branch,
 )
-from forge.gate_runner import GateResult, build_gate_env, run_gate
+from forge.gate_runner import (
+    GateResult,
+    build_gate_env,
+    format_structured_bounce_context,
+    run_gate,
+)
 from forge.prompt_builder import build_prompt, get_git_diff, load_artifact
 from forge.schemas import get_schema
 
@@ -627,11 +632,14 @@ class PipelineEngine:
                         stage_run_id,
                         status="bounced",
                     )
-                    bounce_detail = (
-                        f"verdict={review_verdict}"
-                        if review_verdict is not None
-                        else gate_result.stderr
-                    )
+                    if review_verdict is not None:
+                        bounce_detail = f"verdict={review_verdict}"
+                    elif gate_result.structured_output is not None:
+                        bounce_detail = format_structured_bounce_context(
+                            gate_result.structured_output
+                        )
+                    else:
+                        bounce_detail = gate_result.stderr
                     self._log(
                         "warn",
                         f"Stage {stage} bounced for task {task_id}: {bounce_detail}",
@@ -1639,7 +1647,7 @@ class PipelineEngine:
                     if review_content:
                         artifacts["review_feedback"] = review_content
 
-        # Load previous gate stderr for retries
+        # Load previous gate output for retries
         if stage_run.get("attempt", 1) > 1:
             prev_runs = database.list_stage_runs(
                 conn,
@@ -1648,9 +1656,22 @@ class PipelineEngine:
             )
             for prev in reversed(prev_runs):
                 prev_dict = _row_to_dict(prev)
-                if prev_dict["id"] != stage_run["id"] and prev_dict.get("gate_stderr"):
-                    artifacts["previous_gate_stderr"] = prev_dict["gate_stderr"]
-                    break
+                if prev_dict["id"] != stage_run["id"]:
+                    # Prefer structured gate output when available
+                    gate_stdout = prev_dict.get("gate_stdout", "")
+                    if gate_stdout:
+                        try:
+                            structured = json.loads(gate_stdout)
+                            if isinstance(structured, dict) and "passed" in structured:
+                                artifacts["previous_gate_structured"] = (
+                                    format_structured_bounce_context(structured)
+                                )
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                    if prev_dict.get("gate_stderr"):
+                        artifacts["previous_gate_stderr"] = prev_dict["gate_stderr"]
+                    if prev_dict.get("gate_stderr") or "previous_gate_structured" in artifacts:
+                        break
 
         return artifacts
 

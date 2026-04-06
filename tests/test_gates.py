@@ -275,6 +275,54 @@ class TestPostImplement:
         assert result.returncode == 1
         assert "Lint errors" in result.stderr
 
+    def test_structured_output_on_pass(self, tmp_path: Path) -> None:
+        """Verify structured JSON is emitted on stdout when all checks pass."""
+        repo = str(tmp_path)
+        _write_file(os.path.join(repo, "forge/__init__.py"), "")
+        _write_file(
+            os.path.join(repo, "tests/test_ok.py"),
+            "def test_ok():\n    assert True\n",
+        )
+        _write_file(os.path.join(repo, "pyproject.toml"), "[tool.ruff]\n")
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "implement"},
+            repo,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["passed"] is True
+        assert isinstance(data["checks"], list)
+        assert len(data["checks"]) >= 2
+        for check in data["checks"]:
+            assert check["passed"] is True
+            assert "name" in check
+
+    def test_structured_output_on_failure(self, tmp_path: Path) -> None:
+        """Verify structured JSON identifies which check failed."""
+        repo = str(tmp_path)
+        _write_file(os.path.join(repo, "forge/__init__.py"), "")
+        _write_file(
+            os.path.join(repo, "tests/test_fail.py"),
+            "def test_fail():\n    assert False\n",
+        )
+        _write_file(os.path.join(repo, "pyproject.toml"), "[tool.ruff]\n")
+        result = _run_gate(
+            self.SCRIPT,
+            {"FORGE_STAGE": "implement"},
+            repo,
+        )
+        assert result.returncode == 1
+        data = json.loads(result.stdout)
+        assert data["passed"] is False
+        # Tests failed, lint passed
+        checks_by_name = {c["name"]: c for c in data["checks"]}
+        assert "tests" in checks_by_name
+        assert checks_by_name["tests"]["passed"] is False
+        assert checks_by_name["tests"]["detail"]  # non-empty detail
+        assert "lint" in checks_by_name
+        assert checks_by_name["lint"]["passed"] is True
+
 
 # ---------------------------------------------------------------------------
 # post-review.sh

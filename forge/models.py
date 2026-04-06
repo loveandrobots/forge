@@ -170,6 +170,7 @@ class StageRunResponse(BaseModel):
     gate_exit_code: int | None = None
     gate_stdout: str | None = None
     gate_stderr: str | None = None
+    gate_structured_output: dict | None = None
     tokens_used: int | None = None
     error_message: str | None = None
 

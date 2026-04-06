@@ -79,6 +79,15 @@ def _row_to_stage_run(row) -> dict:
     d = dict(row)
     if isinstance(d.get("artifacts_produced"), str):
         d["artifacts_produced"] = json.loads(d["artifacts_produced"])
+    # Parse structured gate output from gate_stdout JSON when present
+    gate_stdout = d.get("gate_stdout")
+    if gate_stdout:
+        try:
+            parsed = json.loads(gate_stdout)
+            if isinstance(parsed, dict) and "passed" in parsed:
+                d["gate_structured_output"] = parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
     return d
 
 

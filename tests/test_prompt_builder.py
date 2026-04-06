@@ -100,6 +100,28 @@ class TestBuildRetryContext:
         assert "attempt 3" in result
         assert "tests failed" in result
 
+    def test_retry_context_with_structured_gate_output(self) -> None:
+        result = build_retry_context(
+            2,
+            "lint errors found",
+            "Gate failed: tests passed, lint failed: 3 errors",
+        )
+        assert "attempt 2" in result
+        assert "Structured gate result" in result
+        assert "Gate failed: tests passed, lint failed: 3 errors" in result
+        assert "lint errors found" in result
+
+    def test_retry_context_structured_only_no_stderr(self) -> None:
+        result = build_retry_context(
+            2,
+            "",
+            "Gate failed: tests failed: 2 failures",
+        )
+        assert "Structured gate result" in result
+        assert "Gate failed: tests failed: 2 failures" in result
+        # No stderr section when empty
+        assert "Gate failure reason" not in result
+
 
 # ---------------------------------------------------------------------------
 # get_git_diff

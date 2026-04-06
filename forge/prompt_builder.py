@@ -410,17 +410,26 @@ def build_review_feedback_context(review_content: str) -> str:
     )
 
 
-def build_retry_context(attempt: int, previous_gate_stderr: str) -> str:
+def build_retry_context(
+    attempt: int,
+    previous_gate_stderr: str,
+    previous_gate_structured: str = "",
+) -> str:
     """Format the retry section, only when attempt > 1."""
     if attempt <= 1:
         return ""
-    return (
+    parts = [
         f"## Previous attempt failed\n"
         f"This is attempt {attempt}. The previous attempt failed the gate check.\n"
-        f"Gate failure reason:\n"
-        f"{previous_gate_stderr}\n\n"
-        f"Fix the specific issues identified above. Do not start from scratch unless the problems are fundamental."
+    ]
+    if previous_gate_structured:
+        parts.append(f"Structured gate result:\n{previous_gate_structured}\n")
+    if previous_gate_stderr:
+        parts.append(f"Gate failure reason:\n{previous_gate_stderr}\n")
+    parts.append(
+        "Fix the specific issues identified above. Do not start from scratch unless the problems are fundamental."
     )
+    return "\n".join(parts)
 
 
 def get_git_diff(repo_path: str, branch: str, base_branch: str) -> str:
@@ -492,7 +501,10 @@ def build_prompt(
 
     attempt = stage_run.get("attempt", 1)
     previous_gate_stderr = artifacts.get("previous_gate_stderr", "")
-    retry_context = build_retry_context(attempt, previous_gate_stderr)
+    previous_gate_structured = artifacts.get("previous_gate_structured", "")
+    retry_context = build_retry_context(
+        attempt, previous_gate_stderr, previous_gate_structured
+    )
 
     review_feedback_content = artifacts.get("review_feedback", "")
     review_feedback = build_review_feedback_context(review_feedback_content)

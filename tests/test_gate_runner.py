@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 from pathlib import Path
 import textwrap
 
-from forge.gate_runner import GateResult, build_gate_env, run_gate
+from forge.gate_runner import (
+    GateResult,
+    _parse_structured_output,
+    build_gate_env,
+    format_structured_bounce_context,
+    run_gate,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -270,3 +277,188 @@ class TestRunGate:
         assert result.passed is False
         assert result.exit_code == 2
         assert "crashed" in result.stderr
+
+    async def test_structured_json_stdout_parsed(self, tmp_path: Path) -> None:
+        gate_dir = str(tmp_path)
+        output = json.dumps({
+            "passed": False,
+            "reason": "Lint failed",
+            "checks": [
+                {"name": "tests", "passed": True},
+                {"name": "lint", "passed": False, "detail": "3 errors found"},
+            ],
+        })
+        _write_gate_script(
+            gate_dir,
+            "implement",
+            f"""\
+            #!/bin/bash
+            echo '{output}'
+            exit 1
+        """,
+        )
+        env = _make_env(gate_dir, stage="implement")
+
+        result = await run_gate(gate_dir, "implement", env)
+
+        assert result.passed is False
+        assert result.structured_output is not None
+        assert result.structured_output["passed"] is False
+        assert result.structured_output["reason"] == "Lint failed"
+        assert len(result.structured_output["checks"]) == 2
+        assert result.structured_output["checks"][0]["name"] == "tests"
+        assert result.structured_output["checks"][0]["passed"] is True
+        assert result.structured_output["checks"][1]["name"] == "lint"
+        assert result.structured_output["checks"][1]["passed"] is False
+
+    async def test_non_json_stdout_no_structured_output(self, tmp_path: Path) -> None:
+        gate_dir = str(tmp_path)
+        _write_gate_script(
+            gate_dir,
+            "spec",
+            """\
+            #!/bin/bash
+            echo "all good, plain text"
+            exit 0
+        """,
+        )
+        env = _make_env(gate_dir, stage="spec")
+
+        result = await run_gate(gate_dir, "spec", env)
+
+        assert result.passed is True
+        assert result.structured_output is None
+        assert "all good, plain text" in result.stdout
+
+    async def test_structured_output_passing_gate(self, tmp_path: Path) -> None:
+        gate_dir = str(tmp_path)
+        output = json.dumps({
+            "passed": True,
+            "reason": "All checks passed",
+            "checks": [
+                {"name": "tests", "passed": True},
+                {"name": "lint", "passed": True},
+            ],
+        })
+        _write_gate_script(
+            gate_dir,
+            "implement",
+            f"""\
+            #!/bin/bash
+            echo '{output}'
+            exit 0
+        """,
+        )
+        env = _make_env(gate_dir, stage="implement")
+
+        result = await run_gate(gate_dir, "implement", env)
+
+        assert result.passed is True
+        assert result.structured_output is not None
+        assert result.structured_output["passed"] is True
+
+    async def test_exit_code_authoritative_over_structured_passed(
+        self, tmp_path: Path
+    ) -> None:
+        """Exit code is authoritative — structured passed field is informational."""
+        gate_dir = str(tmp_path)
+        # JSON says passed=True but exit code says failure
+        output = json.dumps({"passed": True, "reason": "Looks good"})
+        _write_gate_script(
+            gate_dir,
+            "spec",
+            f"""\
+            #!/bin/bash
+            echo '{output}'
+            exit 1
+        """,
+        )
+        env = _make_env(gate_dir, stage="spec")
+
+        result = await run_gate(gate_dir, "spec", env)
+
+        # Exit code wins
+        assert result.passed is False
+        # But structured output is still parsed
+        assert result.structured_output is not None
+        assert result.structured_output["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# _parse_structured_output
+# ---------------------------------------------------------------------------
+
+
+class TestParseStructuredOutput:
+    def test_valid_json_with_passed(self) -> None:
+        data = json.dumps({"passed": True, "reason": "ok"})
+        result = _parse_structured_output(data)
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_valid_json_without_passed_returns_none(self) -> None:
+        data = json.dumps({"reason": "ok"})
+        assert _parse_structured_output(data) is None
+
+    def test_invalid_json_returns_none(self) -> None:
+        assert _parse_structured_output("not json at all") is None
+
+    def test_empty_string_returns_none(self) -> None:
+        assert _parse_structured_output("") is None
+
+    def test_json_array_returns_none(self) -> None:
+        assert _parse_structured_output("[1, 2, 3]") is None
+
+    def test_passed_not_bool_returns_none(self) -> None:
+        assert _parse_structured_output('{"passed": "yes"}') is None
+
+    def test_full_structured_output(self) -> None:
+        data = json.dumps({
+            "passed": False,
+            "reason": "Tests failed",
+            "checks": [
+                {"name": "tests", "passed": False, "detail": "2 failures"},
+                {"name": "lint", "passed": True},
+            ],
+        })
+        result = _parse_structured_output(data)
+        assert result is not None
+        assert result["passed"] is False
+        assert len(result["checks"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# format_structured_bounce_context
+# ---------------------------------------------------------------------------
+
+
+class TestFormatStructuredBounceContext:
+    def test_with_checks(self) -> None:
+        output = {
+            "passed": False,
+            "checks": [
+                {"name": "tests", "passed": True},
+                {"name": "lint", "passed": False, "detail": "3 errors"},
+                {"name": "typecheck", "passed": True},
+            ],
+        }
+        result = format_structured_bounce_context(output)
+        assert "Gate failed:" in result
+        assert "tests passed" in result
+        assert "lint failed: 3 errors" in result
+        assert "typecheck passed" in result
+
+    def test_with_reason_no_checks(self) -> None:
+        output = {"passed": False, "reason": "Missing required files"}
+        result = format_structured_bounce_context(output)
+        assert result == "Gate failed: Missing required files"
+
+    def test_no_reason_no_checks(self) -> None:
+        output = {"passed": False}
+        result = format_structured_bounce_context(output)
+        assert "no detail" in result
+
+    def test_empty_checks_falls_back_to_reason(self) -> None:
+        output = {"passed": False, "reason": "Something broke", "checks": []}
+        result = format_structured_bounce_context(output)
+        assert result == "Gate failed: Something broke"

@@ -112,7 +112,22 @@
         {% if run.gate_exit_code is not none and run.gate_exit_code != 0 %}
         <div class="alert alert-warning">
             <strong>Gate failed</strong> (exit code {{ run.gate_exit_code }})
-            {% if run.gate_stderr %}
+            {% if run.gate_structured_output and run.gate_structured_output.checks %}
+            <ul class="gate-checks">
+                {% for check in run.gate_structured_output.checks %}
+                <li class="gate-check {{ 'check-pass' if check.passed else 'check-fail' }}">
+                    <span class="check-icon">{{ '✓' if check.passed else '✗' }}</span>
+                    <strong>{{ check.name }}</strong>
+                    {% if check.detail and not check.passed %}
+                    <span class="check-detail">— {{ check.detail }}</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% if run.gate_structured_output.reason %}
+            <p><em>{{ run.gate_structured_output.reason }}</em></p>
+            {% endif %}
+            {% elif run.gate_stderr %}
             <pre>{{ run.gate_stderr }}</pre>
             {% endif %}
         </div>
