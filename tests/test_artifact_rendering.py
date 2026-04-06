@@ -214,7 +214,10 @@ class TestSpecArtifactRendering:
     ) -> None:
         spec = {
             "overview": "Build a widget system.",
-            "acceptance_criteria": ["Widget renders", "Widget is responsive"],
+            "acceptance_criteria": [
+                {"id": 1, "text": "Widget renders"},
+                {"id": 2, "text": "Widget is responsive"},
+            ],
             "out_of_scope": ["Mobile app"],
             "dependencies": ["React 18"],
             "content": "Full spec markdown.",
@@ -245,13 +248,14 @@ class TestPlanArtifactRendering:
             "approach": "Incremental refactor of the renderer.",
             "acceptance_criteria_mapping": [
                 {
-                    "criterion": "Widget renders",
+                    "criterion_id": 1,
+                    "criterion_text": "Widget renders",
                     "implementation": "Add WidgetView component",
                 },
             ],
             "files_to_modify": ["src/widget.py", "tests/test_widget.py"],
             "test_plan": [
-                {"test": "test_widget_render", "description": "Verify widget output"},
+                {"criterion_id": 1, "description": "Verify widget output"},
             ],
             "risks": ["Breaking change in public API"],
             "content": "Full plan text.",
@@ -267,7 +271,7 @@ class TestPlanArtifactRendering:
         assert "Widget renders" in html
         assert "Add WidgetView component" in html
         assert "src/widget.py" in html
-        assert "test_widget_render" in html
+        assert "Verify widget output" in html
         assert "Breaking change in public API" in html
         assert "artifact-collapsible" in html
 
@@ -362,6 +366,145 @@ class TestMixedArtifacts:
         assert "verdict-pass" in html
         assert "Markdown spec content." in html
         assert "artifact-spec" not in html
+
+
+class TestReviewSeverityColorsDistinct:
+    """Severity tags must be color-coded and visually distinct (AC #5)."""
+
+    def test_all_four_severity_classes_present(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        """Each severity level uses a unique CSS class for color coding."""
+        review = {
+            "verdict": "ISSUES",
+            "issues": [
+                {"file": "a.py", "severity": "critical", "description": "d1"},
+                {"file": "b.py", "severity": "major", "description": "d2"},
+                {"file": "c.py", "severity": "minor", "description": "d3"},
+                {"file": "d.py", "severity": "nit", "description": "d4"},
+            ],
+            "criteria_check": [],
+            "out_of_scope_changes": [],
+            "summary": "",
+            "content": "",
+        }
+        path = tmp_path / "review.json"
+        path.write_text(json.dumps(review))
+        _set_artifact_path(task_id, "review_path", str(path))
+
+        resp = client.get(f"/tasks/{task_id}")
+        html = resp.text
+        # Each severity level maps to its own CSS class
+        assert 'class="severity-tag severity-critical"' in html
+        assert 'class="severity-tag severity-major"' in html
+        assert 'class="severity-tag severity-minor"' in html
+        assert 'class="severity-tag severity-nit"' in html
+
+
+class TestCollapsibleSectionsNative:
+    """Collapsible sections use native <details>/<summary> — no JS framework (AC #6)."""
+
+    def test_collapsible_uses_details_element(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        review = {
+            "verdict": "PASS",
+            "issues": [],
+            "criteria_check": [],
+            "out_of_scope_changes": [],
+            "summary": "",
+            "content": "Full review content for collapsing.",
+        }
+        path = tmp_path / "review.json"
+        path.write_text(json.dumps(review))
+        _set_artifact_path(task_id, "review_path", str(path))
+
+        resp = client.get(f"/tasks/{task_id}")
+        html = resp.text
+        assert "<details" in html
+        assert "<summary>" in html
+        assert "Full review content for collapsing." in html
+
+    def test_spec_collapsible_uses_details_element(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        spec = {
+            "overview": "Overview text.",
+            "acceptance_criteria": [{"id": 1, "text": "AC1"}],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "Full spec for collapsing.",
+        }
+        path = tmp_path / "spec.json"
+        path.write_text(json.dumps(spec))
+        _set_artifact_path(task_id, "spec_path", str(path))
+
+        resp = client.get(f"/tasks/{task_id}")
+        html = resp.text
+        assert "Full spec for collapsing." in html
+        assert "artifact-collapsible" in html
+
+
+class TestSpecAcceptanceCriteriaObjectFormat:
+    """Spec acceptance_criteria renders correctly with id+text object format."""
+
+    def test_object_format_renders_text_not_dict(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        spec = {
+            "overview": "Test spec.",
+            "acceptance_criteria": [
+                {"id": 1, "text": "First criterion"},
+                {"id": 2, "text": "Second criterion"},
+            ],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "",
+        }
+        path = tmp_path / "spec.json"
+        path.write_text(json.dumps(spec))
+        _set_artifact_path(task_id, "spec_path", str(path))
+
+        resp = client.get(f"/tasks/{task_id}")
+        html = resp.text
+        assert "First criterion" in html
+        assert "Second criterion" in html
+        # Must NOT render the raw dict representation
+        assert "&#39;id&#39;" not in html
+        assert "{'id'" not in html
+
+
+class TestPlanSchemaFieldNames:
+    """Plan template correctly uses schema field names (criterion_text, criterion_id)."""
+
+    def test_criterion_text_rendered_in_mapping_table(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        plan = {
+            "approach": "Direct approach.",
+            "acceptance_criteria_mapping": [
+                {
+                    "criterion_id": 1,
+                    "criterion_text": "Must handle edge cases",
+                    "implementation": "Add validation layer",
+                },
+            ],
+            "files_to_modify": [],
+            "test_plan": [
+                {"criterion_id": 1, "description": "Test edge case handling"},
+            ],
+            "risks": [],
+            "content": "",
+        }
+        path = tmp_path / "plan.json"
+        path.write_text(json.dumps(plan))
+        _set_artifact_path(task_id, "plan_path", str(path))
+
+        resp = client.get(f"/tasks/{task_id}")
+        html = resp.text
+        assert "Must handle edge cases" in html
+        assert "Add validation layer" in html
+        assert "Test edge case handling" in html
 
 
 class TestLoadArtifactHelper:

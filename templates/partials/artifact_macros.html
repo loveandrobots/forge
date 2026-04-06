@@ -109,7 +109,7 @@
         <h4>Acceptance Criteria</h4>
         <ol class="acceptance-criteria-list">
             {% for item in data.acceptance_criteria %}
-            <li>{{ item }}</li>
+            <li>{{ item.text if item is mapping else item }}</li>
             {% endfor %}
         </ol>
     </div>
@@ -166,7 +166,7 @@
             <tbody>
                 {% for item in data.acceptance_criteria_mapping %}
                 <tr>
-                    <td>{{ item.criterion }}</td>
+                    <td>{{ item.criterion_text if item.criterion_text is defined else item.criterion }}</td>
                     <td>{{ item.implementation }}</td>
                 </tr>
                 {% endfor %}
@@ -199,8 +199,8 @@
             <tbody>
                 {% for item in data.test_plan %}
                 <tr>
-                    <td>{{ item.test if item is mapping else item }}</td>
-                    <td>{{ item.description if item is mapping and item.description else '' }}</td>
+                    <td>{{ item.criterion_id if item is mapping and item.criterion_id is defined else (item.test if item is mapping else item) }}</td>
+                    <td>{{ item.description if item is mapping and item.description is defined else '' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
