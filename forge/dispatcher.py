@@ -172,10 +172,14 @@ async def dispatch_claude(
     try:
         extra_flags = shlex.split(headless_flags) if headless_flags else []
         if json_schema is not None:
-            extra_flags.extend([
-                "--output-format", "json",
-                "--json-schema", json_schema,
-            ])
+            extra_flags.extend(
+                [
+                    "--output-format",
+                    "json",
+                    "--json-schema",
+                    json_schema,
+                ]
+            )
         elif not any(f.startswith("--output-format") for f in extra_flags):
             extra_flags.extend(["--output-format", "stream-json"])
         proc = await asyncio.create_subprocess_exec(
@@ -196,11 +200,30 @@ async def dispatch_claude(
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
+            partial_out = ""
+            partial_err = ""
+            if proc.stdout:
+                try:
+                    partial_out = (
+                        await asyncio.wait_for(proc.stdout.read(), timeout=5.0)
+                    ).decode(errors="replace")
+                except asyncio.TimeoutError:
+                    pass
+            if proc.stderr:
+                try:
+                    partial_err = (
+                        await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
+                    ).decode(errors="replace")
+                except asyncio.TimeoutError:
+                    pass
+            error_msg = f"Claude Code session timed out after {timeout}s"
+            if partial_err:
+                error_msg += f"\nstderr: {partial_err.strip()}"
             return DispatchResult(
-                output="",
+                output=partial_out,
                 exit_code=-1,
                 duration_seconds=time.monotonic() - start,
-                error=f"Claude Code session timed out after {timeout}s",
+                error=error_msg,
             )
 
         raw_output = stdout_bytes.decode(errors="replace")
@@ -281,11 +304,30 @@ async def dispatch_generate(
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
+            partial_out = ""
+            partial_err = ""
+            if proc.stdout:
+                try:
+                    partial_out = (
+                        await asyncio.wait_for(proc.stdout.read(), timeout=5.0)
+                    ).decode(errors="replace")
+                except asyncio.TimeoutError:
+                    pass
+            if proc.stderr:
+                try:
+                    partial_err = (
+                        await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
+                    ).decode(errors="replace")
+                except asyncio.TimeoutError:
+                    pass
+            error_msg = f"Claude Code session timed out after {timeout}s"
+            if partial_err:
+                error_msg += f"\nstderr: {partial_err.strip()}"
             return DispatchResult(
-                output="",
+                output=partial_out,
                 exit_code=-1,
                 duration_seconds=time.monotonic() - start,
-                error=f"Claude Code session timed out after {timeout}s",
+                error=error_msg,
             )
 
         raw_output = stdout_bytes.decode(errors="replace")
@@ -457,7 +499,9 @@ async def checkout_and_pull(repo_path: str, branch: str) -> GitResult:
     """
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", "checkout", branch,
+            "git",
+            "checkout",
+            branch,
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -482,7 +526,9 @@ async def checkout_and_pull(repo_path: str, branch: str) -> GitResult:
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", "pull", "--ff-only",
+            "git",
+            "pull",
+            "--ff-only",
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -505,7 +551,10 @@ async def ff_merge(repo_path: str, branch: str) -> GitResult:
     """Fast-forward merge branch into the currently checked-out branch."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", "merge", "--ff-only", branch,
+            "git",
+            "merge",
+            "--ff-only",
+            branch,
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -529,7 +578,10 @@ async def delete_branch(repo_path: str, branch: str) -> GitResult:
     """Delete a local branch."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", "branch", "-d", branch,
+            "git",
+            "branch",
+            "-d",
+            branch,
             cwd=repo_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

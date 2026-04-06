@@ -473,6 +473,10 @@ class TestDispatchClaude:
                 mock_proc.kill = MagicMock()
                 mock_proc.wait = AsyncMock()
                 mock_proc.returncode = -9
+                mock_proc.stdout = AsyncMock()
+                mock_proc.stdout.read = AsyncMock(return_value=b"")
+                mock_proc.stderr = AsyncMock()
+                mock_proc.stderr.read = AsyncMock(return_value=b"")
             elif cmd == "git":
                 mock_proc.wait = AsyncMock(return_value=0)
                 mock_proc.returncode = 0
@@ -496,6 +500,93 @@ class TestDispatchClaude:
         assert result.exit_code == -1
         assert "timed out" in result.error
         assert result.duration_seconds > 0
+
+    async def test_timeout_preserves_partial_output(self, git_repo):
+        """Partial stdout buffered before timeout is captured in result.output."""
+        partial_lines = b'{"type":"system","session_id":"abc"}\n{"type":"assistant","message":{"content":[{"type":"text","text":"Working..."}]}}\n'
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            mock_proc = AsyncMock()
+            cmd = args[0] if args else ""
+            if cmd == "claude":
+                async def slow_communicate():
+                    await asyncio.sleep(10)
+                    return (b"", b"")
+
+                mock_proc.communicate = slow_communicate
+                mock_proc.kill = MagicMock()
+                mock_proc.wait = AsyncMock()
+                mock_proc.returncode = -9
+                mock_proc.stdout = AsyncMock()
+                mock_proc.stdout.read = AsyncMock(return_value=partial_lines)
+                mock_proc.stderr = AsyncMock()
+                mock_proc.stderr.read = AsyncMock(return_value=b"")
+            elif cmd == "git":
+                mock_proc.wait = AsyncMock(return_value=0)
+                mock_proc.returncode = 0
+                mock_proc.stdout = AsyncMock()
+                mock_proc.stdout.read = AsyncMock(return_value=b"")
+                mock_proc.stderr = AsyncMock()
+                mock_proc.stderr.read = AsyncMock(return_value=b"")
+            return mock_proc
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="Slow task",
+                repo_path=git_repo,
+                branch="main",
+                timeout=1,
+            )
+
+        assert result.exit_code == -1
+        assert "timed out" in result.error
+        assert result.output == partial_lines.decode()
+
+    async def test_timeout_stderr_appended_to_error(self, git_repo):
+        """stderr captured after timeout is appended to the error message."""
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            mock_proc = AsyncMock()
+            cmd = args[0] if args else ""
+            if cmd == "claude":
+                async def slow_communicate():
+                    await asyncio.sleep(10)
+                    return (b"", b"")
+
+                mock_proc.communicate = slow_communicate
+                mock_proc.kill = MagicMock()
+                mock_proc.wait = AsyncMock()
+                mock_proc.returncode = -9
+                mock_proc.stdout = AsyncMock()
+                mock_proc.stdout.read = AsyncMock(return_value=b"")
+                mock_proc.stderr = AsyncMock()
+                mock_proc.stderr.read = AsyncMock(return_value=b"rate limit exceeded")
+            elif cmd == "git":
+                mock_proc.wait = AsyncMock(return_value=0)
+                mock_proc.returncode = 0
+                mock_proc.stdout = AsyncMock()
+                mock_proc.stdout.read = AsyncMock(return_value=b"")
+                mock_proc.stderr = AsyncMock()
+                mock_proc.stderr.read = AsyncMock(return_value=b"")
+            return mock_proc
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="Slow task",
+                repo_path=git_repo,
+                branch="main",
+                timeout=1,
+            )
+
+        assert result.exit_code == -1
+        assert "timed out" in result.error
+        assert "rate limit exceeded" in result.error
 
     async def test_claude_cli_not_found(self, git_repo):
         """Test error handling when claude CLI is not in PATH."""
