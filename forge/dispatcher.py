@@ -50,6 +50,12 @@ def parse_json_output(raw: str) -> dict:
         logger.warning("Failed to parse JSON output from Claude CLI")
         return {"result": raw, "structured_output": None, "tokens": None}
 
+    if not isinstance(obj, dict):
+        logger.warning(
+            "Unexpected JSON root type from Claude CLI: %s", type(obj).__name__
+        )
+        return {"result": raw, "structured_output": None, "tokens": None}
+
     result_text = obj.get("result", "")
     structured_output = obj.get("structured_output", None)
 

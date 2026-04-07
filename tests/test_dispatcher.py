@@ -149,6 +149,14 @@ class TestParseJsonOutput:
         assert parsed["structured_output"] is None
         assert parsed["tokens"] is None
 
+    def test_json_array_root_returns_raw(self):
+        """Returns raw text when JSON root is an array, not an object."""
+        raw = json.dumps([{"result": "something"}])
+        parsed = parse_json_output(raw)
+        assert parsed["result"] == raw
+        assert parsed["structured_output"] is None
+        assert parsed["tokens"] is None
+
     def test_empty_string(self):
         """Handles empty string input."""
         parsed = parse_json_output("")
