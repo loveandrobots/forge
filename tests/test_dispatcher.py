@@ -101,6 +101,55 @@ class TestParseStreamJson:
         assert text == "done"
         assert tokens is None
 
+    def test_json_array_result_message(self):
+        """--verbose mode emits a JSON array; result message is found in it."""
+        data = json.dumps([
+            {"type": "system", "data": "init"},
+            {
+                "type": "result",
+                "result": "array output",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            },
+        ])
+        text, tokens = parse_stream_json(data)
+        assert text == "array output"
+        assert tokens == 15
+
+    def test_json_array_result_overrides_assistant_text(self):
+        """Array format: result message text takes precedence over assistant."""
+        data = json.dumps([
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "hello from array"}],
+                    "usage": {"input_tokens": 20, "output_tokens": 8},
+                },
+            },
+            {
+                "type": "result",
+                "result": "final",
+                "usage": {"input_tokens": 20, "output_tokens": 8},
+            },
+        ])
+        text, tokens = parse_stream_json(data)
+        assert text == "final"
+        assert tokens == 28
+
+    def test_json_array_no_result_falls_back_to_assistant(self):
+        """If no result message, assistant message text is returned."""
+        data = json.dumps([
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "assistant text"}],
+                    "usage": {"input_tokens": 5, "output_tokens": 3},
+                },
+            },
+        ])
+        text, tokens = parse_stream_json(data)
+        assert text == "assistant text"
+        assert tokens == 8
+
 
 # ---------------------------------------------------------------------------
 # parse_json_output tests

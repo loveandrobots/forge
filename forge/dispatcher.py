@@ -76,21 +76,45 @@ def parse_json_output(raw: str) -> dict:
 def parse_stream_json(raw: str) -> tuple[str, int | None]:
     """Parse stream-json output from Claude Code CLI.
 
-    Each line is a JSON object. We look for "result" type messages
-    to extract the final text, and "usage" or token info along the way.
+    With ``--verbose``, the CLI emits a JSON array of event objects.
+    Without ``--verbose``, it emits newline-delimited JSON objects.
+    Both formats are handled here.
+
+    We look for ``"type": "result"`` and ``"type": "assistant"`` messages
+    to extract the final text and token usage.
 
     Returns (final_text, tokens_used).
     """
     final_text = ""
     tokens_used: int | None = None
 
-    for line in raw.strip().splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    # Try to parse the whole output as a JSON array first (--verbose mode).
+    items: list | None = None
+    stripped = raw.strip()
+    if stripped.startswith("["):
         try:
-            obj = json.loads(line)
+            parsed = json.loads(stripped)
+            if isinstance(parsed, list):
+                items = parsed
         except json.JSONDecodeError:
+            pass
+
+    # Fall back to newline-delimited objects.
+    if items is None:
+        items = []
+        for line in stripped.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                if isinstance(obj, dict):
+                    items.append(obj)
+            except json.JSONDecodeError:
+                continue
+
+    for obj in items:
+        if not isinstance(obj, dict):
             continue
 
         msg_type = obj.get("type", "")
@@ -98,7 +122,6 @@ def parse_stream_json(raw: str) -> tuple[str, int | None]:
         # Collect assistant text from result message
         if msg_type == "result":
             final_text = obj.get("result", final_text)
-            # Token usage in result message
             usage = obj.get("usage", {})
             if usage:
                 input_tokens = usage.get("input_tokens", 0)
@@ -115,7 +138,6 @@ def parse_stream_json(raw: str) -> tuple[str, int | None]:
                     text_parts.append(block.get("text", ""))
             if text_parts:
                 final_text = "\n".join(text_parts)
-            # Token usage
             usage = message.get("usage", obj.get("usage", {}))
             if usage:
                 input_tokens = usage.get("input_tokens", 0)
