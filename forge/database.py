@@ -769,6 +769,27 @@ def get_implement_review_retry_count(conn: sqlite3.Connection, task_id: str) -> 
     return cur.fetchone()[0]
 
 
+def get_bounce_count(conn: sqlite3.Connection, task_id: str, stage: str) -> int:
+    """Count stage_runs for this task+stage with status = 'bounced' only."""
+    cur = conn.execute(
+        """SELECT COUNT(*) FROM stage_runs
+           WHERE task_id = ? AND stage = ? AND status = 'bounced'""",
+        (task_id, stage),
+    )
+    return cur.fetchone()[0]
+
+
+def get_implement_review_bounce_count(conn: sqlite3.Connection, task_id: str) -> int:
+    """Count bounced stage_runs across implement and review stages (excludes errors)."""
+    cur = conn.execute(
+        """SELECT COUNT(*) FROM stage_runs
+           WHERE task_id = ? AND stage IN ('implement', 'review')
+           AND status = 'bounced'""",
+        (task_id,),
+    )
+    return cur.fetchone()[0]
+
+
 # ---------------------------------------------------------------------------
 # Task links
 # ---------------------------------------------------------------------------

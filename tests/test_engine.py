@@ -3209,13 +3209,13 @@ class TestAutoEscalation:
         task = db.get_task(conn, task_id)
         assert task["status"] == "needs_human"
 
-    async def test_error_retry_escalates_quick_to_standard(
+    async def test_error_retry_does_not_escalate_quick_to_standard(
         self,
         conn: sqlite3.Connection,
         settings: Settings,
         project_id: str,
     ) -> None:
-        """Quick-flow task escalates via _handle_error_retry when retries exhausted."""
+        """Quick-flow task does NOT escalate via error retry — errors don't count toward escalation."""
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
             conn,
@@ -3234,14 +3234,9 @@ class TestAutoEscalation:
         await engine._handle_error_retry(conn, task, "implement", sr_id)
 
         task = db.get_task(conn, task_id)
-        assert task["flow"] == "standard"
-        assert task["current_stage"] == "spec"
-        assert task["escalated_from_quick"] == 1
-
-        queued = db.list_stage_runs(
-            conn, task_id=task_id, stage="spec", status="queued"
-        )
-        assert len(queued) == 1
+        assert task["status"] == "needs_human"
+        assert task["flow"] == "quick"
+        assert task["escalated_from_quick"] == 0
 
     async def test_error_retry_escalated_task_goes_to_needs_human(
         self,
@@ -3321,13 +3316,13 @@ class TestAutoEscalation:
         )
         assert len(queued) == 1
 
-    async def test_error_retry_review_escalates_quick_to_standard(
+    async def test_error_retry_review_does_not_escalate_quick(
         self,
         conn: sqlite3.Connection,
         settings: Settings,
         project_id: str,
     ) -> None:
-        """Quick-flow task escalates via _handle_error_retry at review stage."""
+        """Quick-flow task does NOT escalate via error retry at review stage."""
         engine = PipelineEngine(settings, ":memory:")
         task_id = db.insert_task(
             conn,
@@ -3338,7 +3333,7 @@ class TestAutoEscalation:
             flow="quick",
         )
         db.update_task(conn, task_id, status="active", current_stage="review")
-        # Exhaust the shared implement→review budget
+        # Exhaust the shared implement→review budget with errors only
         db.insert_stage_run(
             conn, task_id=task_id, stage="implement", attempt=1, status="error"
         )
@@ -3350,14 +3345,141 @@ class TestAutoEscalation:
         await engine._handle_error_retry(conn, task, "review", sr_id)
 
         task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        assert task["flow"] == "quick"
+        assert task["escalated_from_quick"] == 0
+
+    async def test_review_errors_do_not_escalate_quick_flow(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick-flow task with only review errors goes to needs_human, not escalated."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Quick review errors only",
+            priority=1,
+            max_retries=2,
+            flow="quick",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # Insert 3 error stage_runs across implement/review to exhaust budget
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="error"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="error"
+        )
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=2, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        await engine._handle_error_retry(conn, task, "review", sr_id)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        assert task["flow"] == "quick"
+        assert task["escalated_from_quick"] == 0
+
+        # No queued spec stage_run should exist
+        queued = db.list_stage_runs(
+            conn, task_id=task_id, stage="spec", status="queued"
+        )
+        assert len(queued) == 0
+
+    async def test_review_bounces_escalate_quick_flow(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick-flow task with enough review bounces DOES escalate to standard flow."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Quick review bounces",
+            priority=1,
+            max_retries=2,
+            flow="quick",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # Insert 2 bounced stage_runs (1 implement + 1 review) to exhaust budget with bounces
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="review issues",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        task = db.get_task(conn, task_id)
         assert task["flow"] == "standard"
         assert task["current_stage"] == "spec"
         assert task["escalated_from_quick"] == 1
+        assert task["status"] == "active"
 
         queued = db.list_stage_runs(
             conn, task_id=task_id, stage="spec", status="queued"
         )
         assert len(queued) == 1
+
+    async def test_mixed_errors_and_bounces_no_escalation(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Quick-flow task with mixed errors+bounces below bounce threshold goes to needs_human."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(
+            conn,
+            project_id=project_id,
+            title="Quick mixed",
+            priority=1,
+            max_retries=2,
+            flow="quick",
+        )
+        db.update_task(conn, task_id, status="active", current_stage="review")
+        # 1 bounced + 1 error = budget exhausted, but only 1 bounce (below threshold of 2)
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="bounced"
+        )
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="error"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        gate_result = GateResult(
+            passed=False,
+            exit_code=1,
+            stdout="",
+            stderr="review issues",
+            gate_name="post-review.sh",
+            duration_seconds=1.0,
+        )
+
+        await engine.bounce_task(conn, task, "review", gate_result)
+
+        task = db.get_task(conn, task_id)
+        assert task["status"] == "needs_human"
+        assert task["flow"] == "quick"
+        assert task["escalated_from_quick"] == 0
 
     async def test_standard_flow_not_affected_by_escalation(
         self,

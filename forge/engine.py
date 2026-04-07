@@ -1009,7 +1009,8 @@ class PipelineEngine:
             # Review bounces go back to implement with shared retry budget
             retry_count = database.get_implement_review_retry_count(conn, task_id)
             if retry_count >= max_retries:
-                if self._should_escalate(task):
+                bounce_count = database.get_implement_review_bounce_count(conn, task_id)
+                if bounce_count >= max_retries and self._should_escalate(task):
                     self._escalate_to_standard(conn, task)
                 else:
                     database.update_task(conn, task_id, status="needs_human")
@@ -1042,7 +1043,8 @@ class PipelineEngine:
             # Existing behavior for spec, plan, implement
             retry_count = database.get_retry_count(conn, task_id, stage)
             if retry_count >= max_retries:
-                if self._should_escalate(task):
+                bounce_count = database.get_bounce_count(conn, task_id, stage)
+                if bounce_count >= max_retries and self._should_escalate(task):
                     self._escalate_to_standard(conn, task)
                 else:
                     database.update_task(conn, task_id, status="needs_human")
@@ -1229,7 +1231,8 @@ class PipelineEngine:
             # Review errors use the shared implement→review budget
             shared_count = database.get_implement_review_retry_count(conn, task_id)
             if shared_count >= max_retries:
-                if self._should_escalate(task):
+                bounce_count = database.get_implement_review_bounce_count(conn, task_id)
+                if bounce_count >= max_retries and self._should_escalate(task):
                     self._escalate_to_standard(conn, task)
                 else:
                     database.update_task(conn, task_id, status="needs_human")
@@ -1260,7 +1263,8 @@ class PipelineEngine:
         else:
             retry_count = database.get_retry_count(conn, task_id, stage)
             if retry_count >= max_retries:
-                if self._should_escalate(task):
+                bounce_count = database.get_bounce_count(conn, task_id, stage)
+                if bounce_count >= max_retries and self._should_escalate(task):
                     self._escalate_to_standard(conn, task)
                 else:
                     database.update_task(conn, task_id, status="needs_human")
