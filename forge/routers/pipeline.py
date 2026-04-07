@@ -7,13 +7,12 @@ import json
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
-from forge.gate_runner import _parse_structured_output
-
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from forge import database
 from forge.config import DB_PATH
+from forge.gate_runner import _parse_structured_output
 from forge.models import (
     EngineStatus,
     PipelineStats,
