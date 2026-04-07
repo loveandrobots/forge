@@ -424,13 +424,17 @@ def update_task(
             updates["priority"] = priority
         if flow is not None:
             if flow not in VALID_FLOWS:
-                return {"error": f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}"}
+                return {
+                    "error": f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}"
+                }
             updates["flow"] = flow
         if epic_status is not None:
             updates["epic_status"] = epic_status
 
         if "flow" in updates and row["status"] != "backlog":
-            return {"error": "Cannot change flow on a task that is not in backlog status"}
+            return {
+                "error": "Cannot change flow on a task that is not in backlog status"
+            }
 
         if "epic_status" in updates:
             if updates["epic_status"] not in VALID_EPIC_STATUSES:
@@ -440,7 +444,9 @@ def update_task(
                 }
             effective_flow = updates.get("flow", row["flow"])
             if effective_flow != "epic":
-                return {"error": "epic_status can only be set on tasks with flow 'epic'"}
+                return {
+                    "error": "epic_status can only be set on tasks with flow 'epic'"
+                }
 
         if not updates:
             return _row_to_dict(row)
@@ -683,7 +689,9 @@ def cancel_task(task_id: str, reason: str | None = None, force: bool = False) ->
                     ],
                 }
             for child in active_children:
-                database.cancel_single_task(conn, child["id"], reason="Parent epic cancelled")
+                database.cancel_single_task(
+                    conn, child["id"], reason="Parent epic cancelled"
+                )
 
         database.cancel_single_task(conn, task_id, reason)
 

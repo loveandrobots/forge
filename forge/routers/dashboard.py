@@ -135,14 +135,15 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
             _row_to_dict(r) for r in database.list_stage_runs(conn, task_id=task_id)
         ]
 
-        flow_stages = FLOW_STAGES.get(task.get("flow", "standard"), FLOW_STAGES["standard"])
+        flow_stages = FLOW_STAGES.get(
+            task.get("flow", "standard"), FLOW_STAGES["standard"]
+        )
 
         # Fetch child tasks for epics
         child_tasks: list[dict] = []
         if task.get("flow") == "epic":
             child_tasks = [
-                _row_to_dict(c)
-                for c in database.get_child_tasks(conn, task_id)
+                _row_to_dict(c) for c in database.get_child_tasks(conn, task_id)
             ]
 
         # Fetch parent task for children

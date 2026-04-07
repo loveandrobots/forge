@@ -166,7 +166,9 @@ async def _log_event_stream(level: str | None) -> AsyncGenerator[str, None]:
         while True:
             await asyncio.sleep(2)
             new_rows = database.get_logs_since(
-                conn, since_id=last_id, level=level,
+                conn,
+                since_id=last_id,
+                level=level,
             )
             for row in new_rows:
                 entry = _row_to_log(row)

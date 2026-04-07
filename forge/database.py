@@ -103,7 +103,9 @@ def migrate(conn: sqlite3.Connection) -> None:
             "ALTER TABLE projects ADD COLUMN pause_after_completion INTEGER NOT NULL DEFAULT 0"
         )
         # Enable pause_after_completion for Forge's own project on first migration
-        conn.execute("UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'")
+        conn.execute(
+            "UPDATE projects SET pause_after_completion = 1 WHERE name = 'Forge'"
+        )
     except sqlite3.OperationalError:
         pass  # Column already exists
 
@@ -292,9 +294,7 @@ def insert_task_no_commit(
     from forge.config import VALID_FLOWS
 
     if flow not in VALID_FLOWS:
-        raise ValueError(
-            f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}"
-        )
+        raise ValueError(f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}")
     task_id = _new_id()
     now = _now()
     conn.execute(
@@ -406,9 +406,7 @@ def update_task(
 
     # Validate flow if provided
     if flow is not None and flow not in VALID_FLOWS:
-        raise ValueError(
-            f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}"
-        )
+        raise ValueError(f"Invalid flow: {flow!r}. Must be one of {VALID_FLOWS}")
 
     # Validate current_stage against the effective flow
     if current_stage is not None and current_stage != "":
@@ -483,9 +481,7 @@ def get_next_queued_task(conn: sqlite3.Connection) -> sqlite3.Row | None:
 # ---------------------------------------------------------------------------
 
 
-def get_child_tasks(
-    conn: sqlite3.Connection, parent_task_id: str
-) -> list[sqlite3.Row]:
+def get_child_tasks(conn: sqlite3.Connection, parent_task_id: str) -> list[sqlite3.Row]:
     """Return all child tasks for a given parent, ordered by priority DESC, created_at ASC."""
     cur = conn.execute(
         "SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY priority DESC, created_at ASC",
@@ -494,9 +490,7 @@ def get_child_tasks(
     return cur.fetchall()
 
 
-def get_parent_task(
-    conn: sqlite3.Connection, task_id: str
-) -> sqlite3.Row | None:
+def get_parent_task(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
     """Return the parent task for a given child task, or None."""
     cur = conn.execute(
         """SELECT parent.* FROM tasks child
@@ -743,7 +737,11 @@ def reset_task(
         conn.execute(
             """INSERT INTO run_log (timestamp, level, message, task_id)
                VALUES (?, 'info', ?, ?)""",
-            (now, f"Task '{task_title}' reset to {from_stage} stage. Previous stage_run history cleared.", task_id),
+            (
+                now,
+                f"Task '{task_title}' reset to {from_stage} stage. Previous stage_run history cleared.",
+                task_id,
+            ),
         )
         conn.commit()
         return sr_id
@@ -769,6 +767,7 @@ def get_implement_review_retry_count(conn: sqlite3.Connection, task_id: str) -> 
         (task_id,),
     )
     return cur.fetchone()[0]
+
 
 # ---------------------------------------------------------------------------
 # Task links

@@ -10,7 +10,14 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from forge import database, dispatcher
-from forge.config import CONFIG_PATH, DB_PATH, FLOW_STAGES, STAGES, VALID_EPIC_STATUSES, get_settings
+from forge.config import (
+    CONFIG_PATH,
+    DB_PATH,
+    FLOW_STAGES,
+    STAGES,
+    VALID_EPIC_STATUSES,
+    get_settings,
+)
 from forge.models import (
     BatchTaskCreate,
     CancelRequest,
@@ -131,7 +138,10 @@ def batch_create_tasks(body: BatchTaskCreate) -> list[dict]:
                         status_code=404,
                         detail="Parent task not found",
                     )
-            if task_input.epic_status is not None and task_input.epic_status not in VALID_EPIC_STATUSES:
+            if (
+                task_input.epic_status is not None
+                and task_input.epic_status not in VALID_EPIC_STATUSES
+            ):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid epic_status: {task_input.epic_status!r}. Must be one of {VALID_EPIC_STATUSES}",
@@ -609,12 +619,12 @@ def cancel_task(
                         for c in active_children
                     ],
                 )
-                return JSONResponse(
-                    status_code=409, content=warning.model_dump()
-                )
+                return JSONResponse(status_code=409, content=warning.model_dump())
             # Force-cancel: cancel all active children first
             for child in active_children:
-                database.cancel_single_task(conn, child["id"], reason="Parent epic cancelled")
+                database.cancel_single_task(
+                    conn, child["id"], reason="Parent epic cancelled"
+                )
 
         database.cancel_single_task(conn, task_id, reason)
 
