@@ -18,7 +18,6 @@ from forge.dispatcher import (
     delete_branch,
     dispatch_claude,
     ff_merge,
-    parse_json_output,
     parse_stream_json,
     rebase_branch,
 )
@@ -38,9 +37,10 @@ class TestParseStreamJson:
                 "usage": {"input_tokens": 100, "output_tokens": 50},
             }
         )
-        text, tokens = parse_stream_json(data)
+        text, tokens, structured = parse_stream_json(data)
         assert text == "Hello, world!"
         assert tokens == 150
+        assert structured is None
 
     def test_assistant_message(self):
         data = json.dumps(
@@ -52,9 +52,10 @@ class TestParseStreamJson:
                 },
             }
         )
-        text, tokens = parse_stream_json(data)
+        text, tokens, structured = parse_stream_json(data)
         assert text == "Some output"
         assert tokens == 300
+        assert structured is None
 
     def test_multi_line_stream(self):
         lines = [
@@ -75,14 +76,16 @@ class TestParseStreamJson:
                 }
             ),
         ]
-        text, tokens = parse_stream_json("\n".join(lines))
+        text, tokens, structured = parse_stream_json("\n".join(lines))
         assert text == "final answer"
         assert tokens == 15
+        assert structured is None
 
     def test_empty_input(self):
-        text, tokens = parse_stream_json("")
+        text, tokens, structured = parse_stream_json("")
         assert text == ""
         assert tokens is None
+        assert structured is None
 
     def test_invalid_json_lines_skipped(self):
         lines = "not json\n" + json.dumps(
@@ -91,15 +94,17 @@ class TestParseStreamJson:
                 "result": "ok",
             }
         )
-        text, tokens = parse_stream_json(lines)
+        text, tokens, structured = parse_stream_json(lines)
         assert text == "ok"
         assert tokens is None
+        assert structured is None
 
     def test_no_usage_info(self):
         data = json.dumps({"type": "result", "result": "done"})
-        text, tokens = parse_stream_json(data)
+        text, tokens, structured = parse_stream_json(data)
         assert text == "done"
         assert tokens is None
+        assert structured is None
 
     def test_json_array_result_message(self):
         """--verbose mode emits a JSON array; result message is found in it."""
@@ -111,9 +116,10 @@ class TestParseStreamJson:
                 "usage": {"input_tokens": 10, "output_tokens": 5},
             },
         ])
-        text, tokens = parse_stream_json(data)
+        text, tokens, structured = parse_stream_json(data)
         assert text == "array output"
         assert tokens == 15
+        assert structured is None
 
     def test_json_array_result_overrides_assistant_text(self):
         """Array format: result message text takes precedence over assistant."""
@@ -131,9 +137,10 @@ class TestParseStreamJson:
                 "usage": {"input_tokens": 20, "output_tokens": 8},
             },
         ])
-        text, tokens = parse_stream_json(data)
+        text, tokens, structured = parse_stream_json(data)
         assert text == "final"
         assert tokens == 28
+        assert structured is None
 
     def test_json_array_no_result_falls_back_to_assistant(self):
         """If no result message, assistant message text is returned."""
@@ -146,121 +153,26 @@ class TestParseStreamJson:
                 },
             },
         ])
-        text, tokens = parse_stream_json(data)
+        text, tokens, structured = parse_stream_json(data)
         assert text == "assistant text"
         assert tokens == 8
+        assert structured is None
 
-
-# ---------------------------------------------------------------------------
-# parse_json_output tests
-# ---------------------------------------------------------------------------
-
-
-class TestParseJsonOutput:
-    def test_valid_json_with_all_fields(self):
-        """Parses a complete JSON output with result, structured_output, and usage."""
-        raw = json.dumps({
-            "result": "Task completed",
-            "structured_output": {"spec_path": "_forge/specs/abc.md"},
-            "usage": {"input_tokens": 100, "output_tokens": 50},
-        })
-        parsed = parse_json_output(raw)
-        assert parsed["result"] == "Task completed"
-        assert parsed["structured_output"] == {"spec_path": "_forge/specs/abc.md"}
-        assert parsed["tokens"] == 150
-
-    def test_missing_structured_output(self):
-        """Returns None for structured_output when not present."""
-        raw = json.dumps({
-            "result": "Done",
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        })
-        parsed = parse_json_output(raw)
-        assert parsed["result"] == "Done"
-        assert parsed["structured_output"] is None
-        assert parsed["tokens"] == 15
-
-    def test_missing_usage(self):
-        """Returns None for tokens when usage not present."""
-        raw = json.dumps({
-            "result": "Done",
-            "structured_output": {"verdict": "PASS"},
-        })
-        parsed = parse_json_output(raw)
-        assert parsed["tokens"] is None
-        assert parsed["structured_output"] == {"verdict": "PASS"}
-
-    def test_invalid_json_returns_raw(self):
-        """Returns raw text as result when JSON is invalid."""
-        raw = "not valid json"
-        parsed = parse_json_output(raw)
-        assert parsed["result"] == raw
-        assert parsed["structured_output"] is None
-        assert parsed["tokens"] is None
-
-    def test_json_array_no_result_item_returns_raw(self):
-        """Returns raw text when JSON array has no type='result' item."""
-        raw = json.dumps([{"type": "assistant", "result": "something"}])
-        parsed = parse_json_output(raw)
-        assert parsed["result"] == raw
-        assert parsed["structured_output"] is None
-        assert parsed["tokens"] is None
-
-    def test_json_array_verbose_mode_extracts_structured_output(self):
-        """Verbose mode: extracts structured_output from type='result' array item."""
-        spec = {
-            "overview": "Adds widgets.",
-            "acceptance_criteria": [{"id": 1, "text": "Widget renders"}],
-            "out_of_scope": [],
-            "dependencies": [],
-            "content": "Full spec.",
-        }
-        raw = json.dumps([
-            {"type": "assistant", "message": {"content": [{"type": "text", "text": "thinking"}]}},
+    def test_result_with_structured_output(self):
+        """structured_output in result event is returned as third tuple element."""
+        data = json.dumps(
             {
                 "type": "result",
                 "result": "done",
-                "structured_output": spec,
-                "usage": {"input_tokens": 100, "output_tokens": 50},
-            },
-        ])
-        parsed = parse_json_output(raw)
-        assert parsed["result"] == "done"
-        assert parsed["structured_output"] == spec
-        assert parsed["tokens"] == 150
+                "structured_output": {"verdict": "PASS"},
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
+        text, tokens, structured = parse_stream_json(data)
+        assert text == "done"
+        assert tokens == 15
+        assert structured == {"verdict": "PASS"}
 
-    def test_json_array_result_item_no_structured_output(self):
-        """Array with type='result' item but no structured_output returns None."""
-        raw = json.dumps([
-            {"type": "result", "result": "plain text", "usage": {"input_tokens": 10, "output_tokens": 5}},
-        ])
-        parsed = parse_json_output(raw)
-        assert parsed["result"] == "plain text"
-        assert parsed["structured_output"] is None
-        assert parsed["tokens"] == 15
-
-    def test_empty_string(self):
-        """Handles empty string input."""
-        parsed = parse_json_output("")
-        assert parsed["result"] == ""
-        assert parsed["structured_output"] is None
-        assert parsed["tokens"] is None
-
-    def test_structured_output_with_nested_data(self):
-        """Handles complex nested structured output."""
-        raw = json.dumps({
-            "result": "Review done",
-            "structured_output": {
-                "verdict": "ISSUES",
-                "issues": ["Missing test", "Bad naming"],
-                "follow_ups": [{"title": "Fix typo", "flow": "quick"}],
-            },
-            "usage": {"input_tokens": 200, "output_tokens": 100},
-        })
-        parsed = parse_json_output(raw)
-        assert parsed["structured_output"]["verdict"] == "ISSUES"
-        assert len(parsed["structured_output"]["issues"]) == 2
-        assert parsed["tokens"] == 300
 
 
 # ---------------------------------------------------------------------------
@@ -501,10 +413,94 @@ class TestDeleteBranch:
 # ---------------------------------------------------------------------------
 
 
+def _make_readline_mock(lines_bytes: list[bytes]):
+    """Create an async readline that yields lines then returns b''."""
+    it = iter(lines_bytes + [b""])
+
+    async def readline():
+        return next(it)
+
+    return readline
+
+
+def _make_claude_proc_mock(
+    stdout_lines: list[bytes],
+    stderr: bytes = b"",
+    returncode: int = 0,
+    *,
+    hang_wait: bool = False,
+    hang_readline: bool = False,
+    pid: int | None = None,
+) -> MagicMock:
+    """Build a mock claude process using readline/wait (incremental drain)."""
+    mock_proc = MagicMock()
+    mock_proc.returncode = returncode
+    mock_proc.kill = MagicMock()
+    if pid is not None:
+        mock_proc.pid = pid
+
+    # stdout with readline
+    mock_proc.stdout = MagicMock()
+    if hang_readline:
+        # Yield lines, then block forever (simulates slow process)
+        call_count = 0
+
+        async def readline():
+            nonlocal call_count
+            if call_count < len(stdout_lines):
+                line = stdout_lines[call_count]
+                call_count += 1
+                return line
+            await asyncio.sleep(999)
+            return b""
+
+        mock_proc.stdout.readline = readline
+    else:
+        mock_proc.stdout.readline = _make_readline_mock(stdout_lines)
+
+    # stderr
+    mock_proc.stderr = MagicMock()
+    mock_proc.stderr.read = AsyncMock(return_value=stderr)
+
+    # wait
+    if hang_wait:
+        _killed = False
+        _orig_kill = mock_proc.kill
+
+        def _kill_side_effect():
+            nonlocal _killed
+            _killed = True
+
+        mock_proc.kill = MagicMock(side_effect=_kill_side_effect)
+
+        async def hanging_wait():
+            if not _killed:
+                await asyncio.sleep(999)
+            return returncode
+
+        mock_proc.wait = hanging_wait
+    else:
+        mock_proc.wait = AsyncMock(return_value=returncode)
+
+    return mock_proc
+
+
+def _make_git_proc_mock(returncode: int = 0) -> MagicMock:
+    """Build a mock git process."""
+    mock_proc = MagicMock()
+    mock_proc.wait = AsyncMock(return_value=returncode)
+    mock_proc.returncode = returncode
+    mock_proc.stdout = MagicMock()
+    mock_proc.stdout.read = AsyncMock(return_value=b"")
+    mock_proc.stderr = MagicMock()
+    mock_proc.stderr.read = AsyncMock(return_value=b"")
+    return mock_proc
+
+
 class TestDispatchClaude:
     async def test_successful_dispatch(self, git_repo):
         """Test successful dispatch with mocked claude CLI."""
-        result_json = json.dumps(
+        result_line = json.dumps(
             {
                 "type": "result",
                 "result": "Task completed successfully",
@@ -513,22 +509,12 @@ class TestDispatchClaude:
         )
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            mock_proc = AsyncMock()
             cmd = args[0] if args else ""
             if cmd == "claude":
-                mock_proc.communicate = AsyncMock(
-                    return_value=(result_json.encode(), b"")
+                return _make_claude_proc_mock(
+                    stdout_lines=[result_line.encode() + b"\n"],
                 )
-                mock_proc.returncode = 0
-                mock_proc.kill = MagicMock()
-            elif cmd == "git":
-                mock_proc.wait = AsyncMock(return_value=0)
-                mock_proc.returncode = 0
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            return mock_proc
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -551,30 +537,15 @@ class TestDispatchClaude:
         """Test that timeout kills the process and returns error."""
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            mock_proc = AsyncMock()
             cmd = args[0] if args else ""
             if cmd == "claude":
-                # Simulate a hang
-                async def slow_communicate():
-                    await asyncio.sleep(10)
-                    return (b"", b"")
-
-                mock_proc.communicate = slow_communicate
-                mock_proc.kill = MagicMock()
-                mock_proc.wait = AsyncMock()
-                mock_proc.returncode = -9
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            elif cmd == "git":
-                mock_proc.wait = AsyncMock(return_value=0)
-                mock_proc.returncode = 0
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            return mock_proc
+                return _make_claude_proc_mock(
+                    stdout_lines=[],
+                    returncode=-9,
+                    hang_wait=True,
+                    hang_readline=True,
+                )
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -593,32 +564,19 @@ class TestDispatchClaude:
 
     async def test_timeout_preserves_partial_output(self, git_repo):
         """Partial stdout buffered before timeout is captured in result.output."""
-        partial_lines = b'{"type":"system","session_id":"abc"}\n{"type":"assistant","message":{"content":[{"type":"text","text":"Working..."}]}}\n'
+        partial_line_1 = b'{"type":"system","session_id":"abc"}\n'
+        partial_line_2 = b'{"type":"assistant","message":{"content":[{"type":"text","text":"Working..."}]}}\n'
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            mock_proc = AsyncMock()
             cmd = args[0] if args else ""
             if cmd == "claude":
-                async def slow_communicate():
-                    await asyncio.sleep(10)
-                    return (b"", b"")
-
-                mock_proc.communicate = slow_communicate
-                mock_proc.kill = MagicMock()
-                mock_proc.wait = AsyncMock()
-                mock_proc.returncode = -9
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=partial_lines)
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            elif cmd == "git":
-                mock_proc.wait = AsyncMock(return_value=0)
-                mock_proc.returncode = 0
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            return mock_proc
+                return _make_claude_proc_mock(
+                    stdout_lines=[partial_line_1, partial_line_2],
+                    returncode=-9,
+                    hang_wait=True,
+                    hang_readline=True,
+                )
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -633,35 +591,23 @@ class TestDispatchClaude:
 
         assert result.exit_code == -1
         assert "timed out" in result.error
-        assert result.output == partial_lines.decode()
+        assert '{"type":"system"' in result.output
+        assert "Working..." in result.output
 
     async def test_timeout_stderr_appended_to_error(self, git_repo):
         """stderr captured after timeout is appended to the error message."""
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            mock_proc = AsyncMock()
             cmd = args[0] if args else ""
             if cmd == "claude":
-                async def slow_communicate():
-                    await asyncio.sleep(10)
-                    return (b"", b"")
-
-                mock_proc.communicate = slow_communicate
-                mock_proc.kill = MagicMock()
-                mock_proc.wait = AsyncMock()
-                mock_proc.returncode = -9
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"rate limit exceeded")
-            elif cmd == "git":
-                mock_proc.wait = AsyncMock(return_value=0)
-                mock_proc.returncode = 0
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            return mock_proc
+                return _make_claude_proc_mock(
+                    stdout_lines=[],
+                    stderr=b"rate limit exceeded",
+                    returncode=-9,
+                    hang_wait=True,
+                    hang_readline=True,
+                )
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -680,23 +626,12 @@ class TestDispatchClaude:
 
     async def test_claude_cli_not_found(self, git_repo):
         """Test error handling when claude CLI is not in PATH."""
-        call_count = 0
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            nonlocal call_count
             cmd = args[0] if args else ""
             if cmd == "claude":
                 raise FileNotFoundError("claude not found")
-            # git commands succeed
-            mock_proc = AsyncMock()
-            mock_proc.wait = AsyncMock(return_value=0)
-            mock_proc.returncode = 0
-            mock_proc.stdout = AsyncMock()
-            mock_proc.stdout.read = AsyncMock(return_value=b"")
-            mock_proc.stderr = AsyncMock()
-            mock_proc.stderr.read = AsyncMock(return_value=b"")
-            call_count += 1
-            return mock_proc
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -716,21 +651,14 @@ class TestDispatchClaude:
         """Test handling of non-zero exit code from claude."""
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            mock_proc = AsyncMock()
             cmd = args[0] if args else ""
             if cmd == "claude":
-                mock_proc.communicate = AsyncMock(
-                    return_value=(b"", b"Some error occurred")
+                return _make_claude_proc_mock(
+                    stdout_lines=[],
+                    stderr=b"Some error occurred",
+                    returncode=1,
                 )
-                mock_proc.returncode = 1
-            elif cmd == "git":
-                mock_proc.wait = AsyncMock(return_value=0)
-                mock_proc.returncode = 0
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            return mock_proc
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -751,7 +679,6 @@ class TestDispatchClaude:
         git_calls = []
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            mock_proc = AsyncMock()
             cmd = args[0] if args else ""
             if cmd == "git":
                 subcmd = args[1] if len(args) > 1 else ""
@@ -761,40 +688,21 @@ class TestDispatchClaude:
                     and len(args) > 2
                     and args[2] == "forge/new-branch"
                 ):
-                    # First checkout fails (branch doesn't exist)
-                    mock_proc.wait = AsyncMock(return_value=1)
-                    mock_proc.returncode = 1
-                    mock_proc.stdout = AsyncMock()
-                    mock_proc.stdout.read = AsyncMock(return_value=b"")
-                    mock_proc.stderr = AsyncMock()
+                    mock_proc = _make_git_proc_mock(returncode=1)
                     mock_proc.stderr.read = AsyncMock(return_value=b"error: pathspec")
+                    return mock_proc
                 elif subcmd == "checkout" and "-b" in args:
-                    # Branch creation succeeds
-                    mock_proc.wait = AsyncMock(return_value=0)
-                    mock_proc.returncode = 0
-                    mock_proc.stdout = AsyncMock()
-                    mock_proc.stdout.read = AsyncMock(return_value=b"")
-                    mock_proc.stderr = AsyncMock()
-                    mock_proc.stderr.read = AsyncMock(return_value=b"")
+                    return _make_git_proc_mock()
                 else:
-                    mock_proc.wait = AsyncMock(return_value=0)
-                    mock_proc.returncode = 0
-                    mock_proc.stdout = AsyncMock()
-                    mock_proc.stdout.read = AsyncMock(return_value=b"")
-                    mock_proc.stderr = AsyncMock()
-                    mock_proc.stderr.read = AsyncMock(return_value=b"")
+                    return _make_git_proc_mock()
             elif cmd == "claude":
-                result_json = json.dumps(
-                    {
-                        "type": "result",
-                        "result": "done",
-                    }
+                result_line = json.dumps(
+                    {"type": "result", "result": "done"}
                 )
-                mock_proc.communicate = AsyncMock(
-                    return_value=(result_json.encode(), b"")
+                return _make_claude_proc_mock(
+                    stdout_lines=[result_line.encode() + b"\n"],
                 )
-                mock_proc.returncode = 0
-            return mock_proc
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -816,9 +724,12 @@ class TestDispatchClaude:
 
 class TestDispatchClaudeJsonSchema:
     async def test_dispatch_with_json_schema(self, git_repo):
-        """dispatch_claude passes --output-format json --json-schema when schema provided."""
+        """dispatch_claude passes --output-format stream-json --json-schema when schema provided."""
         schema = '{"type": "object", "properties": {"verdict": {"type": "string"}}}'
-        json_response = json.dumps({
+        # stream-json: newline-delimited event objects
+        system_line = json.dumps({"type": "system", "session_id": "sess123"})
+        result_line = json.dumps({
+            "type": "result",
             "result": "Review complete",
             "structured_output": {"verdict": "PASS"},
             "usage": {"input_tokens": 50, "output_tokens": 25},
@@ -826,23 +737,16 @@ class TestDispatchClaudeJsonSchema:
         captured_args: list[list] = []
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            mock_proc = AsyncMock()
             cmd = args[0] if args else ""
             if cmd == "claude":
                 captured_args.append(list(args))
-                mock_proc.communicate = AsyncMock(
-                    return_value=(json_response.encode(), b"")
+                return _make_claude_proc_mock(
+                    stdout_lines=[
+                        system_line.encode() + b"\n",
+                        result_line.encode() + b"\n",
+                    ],
                 )
-                mock_proc.returncode = 0
-                mock_proc.kill = MagicMock()
-            elif cmd == "git":
-                mock_proc.wait = AsyncMock(return_value=0)
-                mock_proc.returncode = 0
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            return mock_proc
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -860,16 +764,16 @@ class TestDispatchClaudeJsonSchema:
         assert result.output == "Review complete"
         assert result.structured_output == {"verdict": "PASS"}
         assert result.tokens_used == 75
-        # Verify CLI flags included json schema args
+        # Verify CLI flags: stream-json + json-schema
         claude_args = captured_args[0]
         assert "--output-format" in claude_args
         fmt_idx = claude_args.index("--output-format")
-        assert claude_args[fmt_idx + 1] == "json"
+        assert claude_args[fmt_idx + 1] == "stream-json"
         assert "--json-schema" in claude_args
 
     async def test_dispatch_without_json_schema_uses_stream_json(self, git_repo):
         """dispatch_claude defaults to stream-json when no json_schema provided."""
-        result_json = json.dumps({
+        result_line = json.dumps({
             "type": "result",
             "result": "Done",
             "usage": {"input_tokens": 10, "output_tokens": 5},
@@ -877,23 +781,13 @@ class TestDispatchClaudeJsonSchema:
         captured_args: list[list] = []
 
         async def mock_create_subprocess_exec(*args, **kwargs):
-            mock_proc = AsyncMock()
             cmd = args[0] if args else ""
             if cmd == "claude":
                 captured_args.append(list(args))
-                mock_proc.communicate = AsyncMock(
-                    return_value=(result_json.encode(), b"")
+                return _make_claude_proc_mock(
+                    stdout_lines=[result_line.encode() + b"\n"],
                 )
-                mock_proc.returncode = 0
-                mock_proc.kill = MagicMock()
-            elif cmd == "git":
-                mock_proc.wait = AsyncMock(return_value=0)
-                mock_proc.returncode = 0
-                mock_proc.stdout = AsyncMock()
-                mock_proc.stdout.read = AsyncMock(return_value=b"")
-                mock_proc.stderr = AsyncMock()
-                mock_proc.stderr.read = AsyncMock(return_value=b"")
-            return mock_proc
+            return _make_git_proc_mock()
 
         with patch(
             "forge.dispatcher.asyncio.create_subprocess_exec",
@@ -1071,24 +965,18 @@ class TestDispatchClaudeCheckoutTimeout:
     async def test_pid_callback_called_with_process_pid(self, git_repo):
         """pid_callback is invoked with the claude subprocess PID."""
         received_pids: list[int] = []
-        call_count = 0
 
         async def mock_exec(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
             if args[0] == "git":
-                # Git checkout succeeds
-                mock_proc = MagicMock()
-                mock_proc.wait = AsyncMock(return_value=None)
-                mock_proc.returncode = 0
-                return mock_proc
+                return _make_git_proc_mock()
             else:
-                # Claude process — expose a known PID
-                mock_proc = MagicMock()
-                mock_proc.pid = 99999
-                mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-                mock_proc.returncode = 1
-                return mock_proc
+                # Claude process — expose a known PID, non-zero exit
+                return _make_claude_proc_mock(
+                    stdout_lines=[],
+                    stderr=b"error",
+                    returncode=1,
+                    pid=99999,
+                )
 
         with patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec):
             await dispatch_claude(

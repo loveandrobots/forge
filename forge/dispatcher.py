@@ -38,70 +38,8 @@ class DispatchResult:
     structured_output: dict | None = None
 
 
-def parse_json_output(raw: str) -> dict:
-    """Parse the --output-format json response from Claude CLI.
 
-    Extracts ``result`` (text), ``structured_output`` (parsed JSON from schema),
-    and ``tokens`` (usage info).  Returns a dict with these keys.
-
-    With ``--verbose``, the CLI emits a JSON array of event objects (same envelope
-    as stream-json).  In that case, ``structured_output`` lives inside the item
-    with ``"type": "result"``.  Without ``--verbose``, the CLI emits a single
-    JSON object with top-level ``result`` and ``structured_output`` keys.
-    """
-    try:
-        obj = json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Failed to parse JSON output from Claude CLI")
-        return {"result": raw, "structured_output": None, "tokens": None}
-
-    # Verbose mode: CLI emits a JSON array of event objects.
-    # structured_output lives inside the item with type "result".
-    if isinstance(obj, list):
-        for item in obj:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") == "result":
-                result_text = item.get("result", "")
-                structured_output = item.get("structured_output", None)
-                tokens: int | None = None
-                usage = item.get("usage", {})
-                if usage:
-                    tokens = usage.get("input_tokens", 0) + usage.get(
-                        "output_tokens", 0
-                    )
-                return {
-                    "result": result_text,
-                    "structured_output": structured_output,
-                    "tokens": tokens,
-                }
-        logger.warning("No 'result' item found in JSON array from Claude CLI")
-        return {"result": raw, "structured_output": None, "tokens": None}
-
-    if not isinstance(obj, dict):
-        logger.warning(
-            "Unexpected JSON root type from Claude CLI: %s", type(obj).__name__
-        )
-        return {"result": raw, "structured_output": None, "tokens": None}
-
-    result_text = obj.get("result", "")
-    structured_output = obj.get("structured_output", None)
-
-    tokens = None
-    usage = obj.get("usage", {})
-    if usage:
-        input_tokens = usage.get("input_tokens", 0)
-        output_tokens = usage.get("output_tokens", 0)
-        tokens = input_tokens + output_tokens
-
-    return {
-        "result": result_text,
-        "structured_output": structured_output,
-        "tokens": tokens,
-    }
-
-
-def parse_stream_json(raw: str) -> tuple[str, int | None]:
+def parse_stream_json(raw: str) -> tuple[str, int | None, dict | None]:
     """Parse stream-json output from Claude Code CLI.
 
     With ``--verbose``, the CLI emits a JSON array of event objects.
@@ -111,10 +49,11 @@ def parse_stream_json(raw: str) -> tuple[str, int | None]:
     We look for ``"type": "result"`` and ``"type": "assistant"`` messages
     to extract the final text and token usage.
 
-    Returns (final_text, tokens_used).
+    Returns (final_text, tokens_used, structured_output).
     """
     final_text = ""
     tokens_used: int | None = None
+    structured_output: dict | None = None
 
     # Try to parse the whole output as a JSON array first (--verbose mode).
     items: list | None = None
@@ -150,6 +89,7 @@ def parse_stream_json(raw: str) -> tuple[str, int | None]:
         # Collect assistant text from result message
         if msg_type == "result":
             final_text = obj.get("result", final_text)
+            structured_output = obj.get("structured_output")
             usage = obj.get("usage", {})
             if usage:
                 input_tokens = usage.get("input_tokens", 0)
@@ -172,7 +112,7 @@ def parse_stream_json(raw: str) -> tuple[str, int | None]:
                 output_tokens = usage.get("output_tokens", 0)
                 tokens_used = input_tokens + output_tokens
 
-    return final_text, tokens_used
+    return final_text, tokens_used, structured_output
 
 
 _GIT_CHECKOUT_TIMEOUT = 60.0
@@ -192,8 +132,9 @@ async def dispatch_claude(
     Checks out the given branch in repo_path, runs ``claude -p`` with
     the appropriate output format, and returns the parsed result.
 
-    When *json_schema* is provided, uses ``--output-format json --json-schema``
-    to get structured output.  Otherwise uses ``--output-format stream-json``.
+    When *json_schema* is provided, uses ``--output-format stream-json
+    --json-schema`` to get structured output in the result event.
+    Otherwise uses ``--output-format stream-json`` without a schema.
     """
     start = time.monotonic()
 
@@ -256,7 +197,7 @@ async def dispatch_claude(
             extra_flags.extend(
                 [
                     "--output-format",
-                    "json",
+                    "stream-json",
                     "--json-schema",
                     json_schema,
                 ]
@@ -275,41 +216,53 @@ async def dispatch_claude(
         if pid_callback is not None and proc.pid is not None:
             pid_callback(proc.pid)
 
+        # Incremental drain: read stdout line-by-line so partial output
+        # is preserved when the subprocess times out.
+        lines: list[bytes] = []
+
+        async def drain_stdout() -> None:
+            assert proc.stdout is not None
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                lines.append(line)
+
+        drain_task = asyncio.create_task(drain_stdout())
+
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout,
-            )
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            partial_out = ""
-            partial_err = ""
-            if proc.stdout:
-                try:
-                    partial_out = (
-                        await asyncio.wait_for(proc.stdout.read(), timeout=5.0)
-                    ).decode(errors="replace")
-                except asyncio.TimeoutError:
-                    pass
+            # Give drain task time to flush remaining buffer
+            try:
+                await asyncio.wait_for(drain_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                drain_task.cancel()
+            raw_output = b"".join(lines).decode(errors="replace")
+            stderr_text = ""
             if proc.stderr:
                 try:
-                    partial_err = (
+                    stderr_text = (
                         await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
                     ).decode(errors="replace")
                 except asyncio.TimeoutError:
                     pass
             error_msg = f"Claude Code session timed out after {timeout}s"
-            if partial_err:
-                error_msg += f"\nstderr: {partial_err.strip()}"
+            if stderr_text.strip():
+                error_msg += f"\nstderr: {stderr_text.strip()}"
             return DispatchResult(
-                output=partial_out,
+                output=raw_output,
                 exit_code=-1,
                 duration_seconds=time.monotonic() - start,
                 error=error_msg,
             )
 
-        raw_output = stdout_bytes.decode(errors="replace")
+        # Normal exit: await drain completion, read stderr
+        await drain_task
+        raw_output = b"".join(lines).decode(errors="replace")
+        stderr_bytes = await proc.stderr.read() if proc.stderr else b""
         exit_code = proc.returncode or 0
 
         if exit_code != 0:
@@ -321,23 +274,14 @@ async def dispatch_claude(
                 error=stderr_text or f"Claude exited with code {exit_code}",
             )
 
-        if json_schema is not None:
-            parsed = parse_json_output(raw_output)
-            return DispatchResult(
-                output=parsed["result"],
-                exit_code=exit_code,
-                duration_seconds=time.monotonic() - start,
-                tokens_used=parsed["tokens"],
-                structured_output=parsed["structured_output"],
-            )
-
-        final_text, tokens_used = parse_stream_json(raw_output)
+        final_text, tokens_used, structured_output = parse_stream_json(raw_output)
 
         return DispatchResult(
             output=final_text,
             exit_code=exit_code,
             duration_seconds=time.monotonic() - start,
             tokens_used=tokens_used,
+            structured_output=structured_output,
         )
 
     except FileNotFoundError:
@@ -379,41 +323,52 @@ async def dispatch_generate(
             stderr=asyncio.subprocess.PIPE,
         )
 
+        # Incremental drain: read stdout line-by-line so partial output
+        # is preserved when the subprocess times out.
+        lines: list[bytes] = []
+
+        async def drain_stdout() -> None:
+            assert proc.stdout is not None
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                lines.append(line)
+
+        drain_task = asyncio.create_task(drain_stdout())
+
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout,
-            )
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            partial_out = ""
-            partial_err = ""
-            if proc.stdout:
-                try:
-                    partial_out = (
-                        await asyncio.wait_for(proc.stdout.read(), timeout=5.0)
-                    ).decode(errors="replace")
-                except asyncio.TimeoutError:
-                    pass
+            try:
+                await asyncio.wait_for(drain_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                drain_task.cancel()
+            raw_output = b"".join(lines).decode(errors="replace")
+            stderr_text = ""
             if proc.stderr:
                 try:
-                    partial_err = (
+                    stderr_text = (
                         await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
                     ).decode(errors="replace")
                 except asyncio.TimeoutError:
                     pass
             error_msg = f"Claude Code session timed out after {timeout}s"
-            if partial_err:
-                error_msg += f"\nstderr: {partial_err.strip()}"
+            if stderr_text.strip():
+                error_msg += f"\nstderr: {stderr_text.strip()}"
             return DispatchResult(
-                output=partial_out,
+                output=raw_output,
                 exit_code=-1,
                 duration_seconds=time.monotonic() - start,
                 error=error_msg,
             )
 
-        raw_output = stdout_bytes.decode(errors="replace")
+        # Normal exit: await drain completion, read stderr
+        await drain_task
+        raw_output = b"".join(lines).decode(errors="replace")
+        stderr_bytes = await proc.stderr.read() if proc.stderr else b""
         exit_code = proc.returncode or 0
 
         if exit_code != 0:
@@ -425,13 +380,14 @@ async def dispatch_generate(
                 error=stderr_text or f"Claude exited with code {exit_code}",
             )
 
-        final_text, tokens_used = parse_stream_json(raw_output)
+        final_text, tokens_used, structured_output = parse_stream_json(raw_output)
 
         return DispatchResult(
             output=final_text,
             exit_code=exit_code,
             duration_seconds=time.monotonic() - start,
             tokens_used=tokens_used,
+            structured_output=structured_output,
         )
 
     except FileNotFoundError:
