@@ -38,7 +38,6 @@ class DispatchResult:
     structured_output: dict | None = None
 
 
-
 def parse_stream_json(raw: str) -> tuple[str, int | None, dict | None]:
     """Parse stream-json output from Claude Code CLI.
 

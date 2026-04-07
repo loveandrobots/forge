@@ -174,7 +174,6 @@ class TestParseStreamJson:
         assert structured == {"verdict": "PASS"}
 
 
-
 # ---------------------------------------------------------------------------
 # Git helpers with real repos (tmpdir)
 # ---------------------------------------------------------------------------
@@ -465,7 +464,6 @@ def _make_claude_proc_mock(
     # wait
     if hang_wait:
         _killed = False
-        _orig_kill = mock_proc.kill
 
         def _kill_side_effect():
             nonlocal _killed
