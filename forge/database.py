@@ -400,6 +400,7 @@ def update_task(
     flow: str | None = None,
     escalated_from_quick: int | None = None,
     epic_status: str | None = None,
+    max_retries: int | None = None,
 ) -> bool:
     """Update only the provided fields. Always sets updated_at. Returns True if modified."""
     from forge.config import FLOW_STAGES, STAGES, VALID_FLOWS
@@ -441,6 +442,7 @@ def update_task(
         ("flow", flow, None),
         ("escalated_from_quick", escalated_from_quick, None),
         ("epic_status", epic_status, None),
+        ("max_retries", max_retries, None),
     ]:
         if val is not None:
             fields.append(f"{col} = ?")

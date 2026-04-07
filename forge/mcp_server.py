@@ -176,10 +176,12 @@ def create_task(
     priority: int = 0,
     flow: str = "standard",
     depends_on: list[str] | None = None,
+    max_retries: int | None = None,
 ) -> dict:
     """Create a single task. Returns the created task dict, or an error dict on failure.
 
     depends_on is an optional list of existing task IDs that block this task.
+    max_retries overrides the configured default_max_retries when provided.
     """
     conn = database.get_connection()
     try:
@@ -212,6 +214,12 @@ def create_task(
         # Insert task and links atomically
         conn.execute("BEGIN")
         try:
+            settings = config.get_settings(config.CONFIG_PATH)
+            effective_retries = (
+                max_retries
+                if max_retries is not None
+                else settings.engine.default_max_retries
+            )
             task_id = database.insert_task_no_commit(
                 conn,
                 project_id=project_id,
@@ -219,6 +227,7 @@ def create_task(
                 description=description,
                 priority=priority,
                 flow=flow,
+                max_retries=effective_retries,
             )
 
             if depends_on:
@@ -250,7 +259,8 @@ def create_task_batch(
 
     tasks is a JSON string encoding a list of objects, each with keys:
       title (str, required), description (str), priority (int), flow (str),
-      depends_on (list of UUIDs or titles referencing other tasks in this batch).
+      depends_on (list of UUIDs or titles referencing other tasks in this batch),
+      max_retries (int, optional — overrides default_max_retries when provided).
     """
     # Parse JSON
     try:
@@ -346,6 +356,7 @@ def create_task_batch(
             return {"error": "Circular dependency detected among batch tasks"}
 
         # All validation passed — insert atomically
+        settings = config.get_settings(config.CONFIG_PATH)
         conn.execute("BEGIN")
         try:
             created_ids: list[str] = []
@@ -353,6 +364,12 @@ def create_task_batch(
 
             # First pass: insert all tasks
             for task_obj in task_list:
+                task_max = task_obj.get("max_retries")
+                effective_retries = (
+                    task_max
+                    if task_max is not None
+                    else settings.engine.default_max_retries
+                )
                 task_id = database.insert_task_no_commit(
                     conn,
                     project_id=project_id,
@@ -360,6 +377,7 @@ def create_task_batch(
                     description=task_obj.get("description", ""),
                     priority=task_obj.get("priority", 0),
                     flow=task_obj.get("flow", "standard"),
+                    max_retries=effective_retries,
                 )
                 created_ids.append(task_id)
                 title_to_id[task_obj["title"]] = task_id
@@ -401,11 +419,13 @@ def update_task(
     priority: int | None = None,
     flow: str | None = None,
     epic_status: str | None = None,
+    max_retries: int | None = None,
 ) -> dict:
     """Update task metadata. Returns the updated task dict, or an error dict on failure.
 
     Cannot change status via this tool — use activate, pause, resume, retry, or cancel instead.
     Flow can only be changed on backlog tasks. epic_status can only be set on epic-flow tasks.
+    max_retries sets the maximum number of retry attempts for the task.
     """
     conn = database.get_connection()
     try:
@@ -430,6 +450,8 @@ def update_task(
             updates["flow"] = flow
         if epic_status is not None:
             updates["epic_status"] = epic_status
+        if max_retries is not None:
+            updates["max_retries"] = max_retries
 
         if "flow" in updates and row["status"] != "backlog":
             return {

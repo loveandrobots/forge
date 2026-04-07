@@ -293,14 +293,18 @@ class TestGetTaskHistory:
                 conn, task_id=task_id, stage="spec", attempt=1, status="passed"
             )
             database.update_stage_run(
-                conn, sr2, started_at="2026-01-01T01:00:00Z",
+                conn,
+                sr2,
+                started_at="2026-01-01T01:00:00Z",
                 finished_at="2026-01-01T01:05:00Z",
             )
             sr3 = database.insert_stage_run(
                 conn, task_id=task_id, stage="plan", attempt=1, status="passed"
             )
             database.update_stage_run(
-                conn, sr3, started_at="2026-01-01T02:00:00Z",
+                conn,
+                sr3,
+                started_at="2026-01-01T02:00:00Z",
                 finished_at="2026-01-01T02:10:00Z",
             )
         finally:
@@ -320,9 +324,16 @@ class TestGetTaskHistory:
         assert len(result) >= 1
         run = result[0]
         expected_fields = {
-            "id", "stage", "status", "attempt", "started_at",
-            "finished_at", "duration_seconds", "gate_name",
-            "gate_exit_code", "error_message",
+            "id",
+            "stage",
+            "status",
+            "attempt",
+            "started_at",
+            "finished_at",
+            "duration_seconds",
+            "gate_name",
+            "gate_exit_code",
+            "error_message",
         }
         assert set(run.keys()) == expected_fields
 
@@ -796,9 +807,7 @@ class TestCreateTaskBatch:
         finally:
             conn.close()
 
-        tasks_json = json.dumps(
-            [{"title": "Task A", "depends_on": [other_task_id]}]
-        )
+        tasks_json = json.dumps([{"title": "Task A", "depends_on": [other_task_id]}])
         result = create_task_batch(project_id=project_id, tasks=tasks_json)
         assert isinstance(result, dict)
         assert "error" in result
@@ -884,7 +893,10 @@ class TestReprioritizeTask:
 
     def test_reprioritize_only_changes_priority(self, project_id):
         task = create_task(
-            project_id=project_id, title="Original Title", description="Desc", priority=3
+            project_id=project_id,
+            title="Original Title",
+            description="Desc",
+            priority=3,
         )
         result = reprioritize_task(task_id=task["id"], priority=8)
         assert result["priority"] == 8
@@ -1148,9 +1160,7 @@ class TestCancelTask:
         self, project_id: str, child_statuses: list[str]
     ) -> tuple[str, list[str]]:
         """Create an epic-flow task with children in the given statuses."""
-        epic = create_task(
-            project_id=project_id, title="Epic task", flow="epic"
-        )
+        epic = create_task(project_id=project_id, title="Epic task", flow="epic")
         epic_id = epic["id"]
         conn = database.get_connection()
         child_ids = []
@@ -1170,18 +1180,14 @@ class TestCancelTask:
         return epic_id, child_ids
 
     def test_cancel_epic_without_children(self, project_id):
-        epic = create_task(
-            project_id=project_id, title="Epic no kids", flow="epic"
-        )
+        epic = create_task(project_id=project_id, title="Epic no kids", flow="epic")
         result = cancel_task(task_id=epic["id"])
         assert result["status"] == "cancelled"
 
     def test_cancel_epic_with_active_children_without_force_returns_warning(
         self, project_id
     ):
-        epic_id, child_ids = self._create_epic_with_children(
-            project_id, ["active"]
-        )
+        epic_id, child_ids = self._create_epic_with_children(project_id, ["active"])
         result = cancel_task(task_id=epic_id)
         assert "warning" in result
         assert "active_children" in result
@@ -1215,9 +1221,7 @@ class TestCancelTask:
         result = cancel_task(task_id=epic_id)
         assert result["status"] == "cancelled"
 
-    def test_cancel_epic_with_failed_children_succeeds_without_force(
-        self, project_id
-    ):
+    def test_cancel_epic_with_failed_children_succeeds_without_force(self, project_id):
         epic_id, _child_ids = self._create_epic_with_children(
             project_id, ["done", "failed"]
         )
@@ -1394,7 +1398,9 @@ class TestUpdateProject:
         assert result["gate_dir"] == "new-gates"
 
     def test_update_skill_refs(self, project_id):
-        result = update_project(project_id=project_id, skill_refs=["skill-a.md", "skill-b.md"])
+        result = update_project(
+            project_id=project_id, skill_refs=["skill-a.md", "skill-b.md"]
+        )
         assert result["skill_refs"] == ["skill-a.md", "skill-b.md"]
 
     def test_update_config(self, project_id):
@@ -1637,3 +1643,82 @@ class TestTransportAndPort:
         args = parser.parse_args(["--transport", "sse"])
         kwargs = build_run_kwargs(args)
         assert kwargs["port"] == 8390
+
+
+class TestMaxRetries:
+    """Tests for max_retries support in MCP create_task and update_task."""
+
+    def test_create_task_with_explicit_max_retries(self, project_id):
+        """create_task should accept and persist a custom max_retries value."""
+        result = create_task(
+            project_id=project_id, title="Custom retries", max_retries=7
+        )
+        assert result["max_retries"] == 7
+        conn = database.get_connection()
+        try:
+            row = database.get_task(conn, result["id"])
+            assert row["max_retries"] == 7
+        finally:
+            conn.close()
+
+    def test_create_task_default_max_retries_from_config(
+        self, project_id, tmp_path, monkeypatch
+    ):
+        """When max_retries is omitted, it should use settings.engine.default_max_retries."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("engine:\n  default_max_retries: 10\n")
+        monkeypatch.setattr("forge.mcp_server.config.CONFIG_PATH", config_file)
+
+        result = create_task(project_id=project_id, title="Config default task")
+        assert result["max_retries"] == 10
+
+    def test_create_task_batch_with_max_retries(
+        self, project_id, tmp_path, monkeypatch
+    ):
+        """Batch-created tasks should respect per-task max_retries and config default."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("engine:\n  default_max_retries: 5\n")
+        monkeypatch.setattr("forge.mcp_server.config.CONFIG_PATH", config_file)
+
+        tasks_json = json.dumps(
+            [
+                {"title": "Task with custom", "max_retries": 8},
+                {"title": "Task with default"},
+            ]
+        )
+        result = create_task_batch(project_id=project_id, tasks=tasks_json)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0]["max_retries"] == 8
+        assert result[1]["max_retries"] == 5
+
+    def test_update_task_max_retries(self, project_id):
+        """update_task should persist a new max_retries value."""
+        task = create_task(project_id=project_id, title="Task", max_retries=3)
+        assert task["max_retries"] == 3
+
+        updated = update_task(task_id=task["id"], max_retries=6)
+        assert updated["max_retries"] == 6
+
+        # Verify persisted in database
+        conn = database.get_connection()
+        try:
+            row = database.get_task(conn, updated["id"])
+            assert row["max_retries"] == 6
+        finally:
+            conn.close()
+
+    def test_config_change_affects_new_tasks(self, project_id, tmp_path, monkeypatch):
+        """Changing default_max_retries in config changes the default for new tasks."""
+        config_file = tmp_path / "config.yaml"
+
+        # First config value
+        config_file.write_text("engine:\n  default_max_retries: 4\n")
+        monkeypatch.setattr("forge.mcp_server.config.CONFIG_PATH", config_file)
+        task1 = create_task(project_id=project_id, title="Task with 4")
+        assert task1["max_retries"] == 4
+
+        # Change config value
+        config_file.write_text("engine:\n  default_max_retries: 9\n")
+        task2 = create_task(project_id=project_id, title="Task with 9")
+        assert task2["max_retries"] == 9
