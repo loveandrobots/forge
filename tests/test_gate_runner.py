@@ -10,7 +10,7 @@ import textwrap
 
 from forge.gate_runner import (
     GateResult,
-    _parse_structured_output,
+    parse_structured_output,
     build_gate_env,
     format_structured_bounce_context,
     run_gate,
@@ -385,32 +385,32 @@ class TestRunGate:
 
 
 # ---------------------------------------------------------------------------
-# _parse_structured_output
+# parse_structured_output
 # ---------------------------------------------------------------------------
 
 
 class TestParseStructuredOutput:
     def test_valid_json_with_passed(self) -> None:
         data = json.dumps({"passed": True, "reason": "ok"})
-        result = _parse_structured_output(data)
+        result = parse_structured_output(data)
         assert result is not None
         assert result["passed"] is True
 
     def test_valid_json_without_passed_returns_none(self) -> None:
         data = json.dumps({"reason": "ok"})
-        assert _parse_structured_output(data) is None
+        assert parse_structured_output(data) is None
 
     def test_invalid_json_returns_none(self) -> None:
-        assert _parse_structured_output("not json at all") is None
+        assert parse_structured_output("not json at all") is None
 
     def test_empty_string_returns_none(self) -> None:
-        assert _parse_structured_output("") is None
+        assert parse_structured_output("") is None
 
     def test_json_array_returns_none(self) -> None:
-        assert _parse_structured_output("[1, 2, 3]") is None
+        assert parse_structured_output("[1, 2, 3]") is None
 
     def test_passed_not_bool_returns_none(self) -> None:
-        assert _parse_structured_output('{"passed": "yes"}') is None
+        assert parse_structured_output('{"passed": "yes"}') is None
 
     def test_full_structured_output(self) -> None:
         data = json.dumps({
@@ -421,7 +421,7 @@ class TestParseStructuredOutput:
                 {"name": "lint", "passed": True},
             ],
         })
-        result = _parse_structured_output(data)
+        result = parse_structured_output(data)
         assert result is not None
         assert result["passed"] is False
         assert len(result["checks"]) == 2

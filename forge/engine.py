@@ -31,7 +31,7 @@ from forge.dispatcher import (
 )
 from forge.gate_runner import (
     GateResult,
-    _parse_structured_output,
+    parse_structured_output,
     build_gate_env,
     format_structured_bounce_context,
     run_gate,
@@ -1665,7 +1665,7 @@ class PipelineEngine:
                     # Prefer structured gate output when available
                     gate_stdout = prev_dict.get("gate_stdout", "")
                     if gate_stdout:
-                        structured = _parse_structured_output(gate_stdout)
+                        structured = parse_structured_output(gate_stdout)
                         if structured is not None:
                             artifacts["previous_gate_structured"] = (
                                 format_structured_bounce_context(structured)

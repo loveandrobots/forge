@@ -61,7 +61,7 @@ def build_gate_env(
     return env
 
 
-def _parse_structured_output(stdout: str) -> dict | None:
+def parse_structured_output(stdout: str) -> dict | None:
     """Try to parse gate stdout as structured JSON output.
 
     Returns the parsed dict if stdout is valid JSON containing at least a
@@ -154,7 +154,7 @@ async def run_gate(
     passed = exit_code == 0
 
     # Try to parse stdout as structured JSON gate output.
-    structured_output = _parse_structured_output(stdout_text)
+    structured_output = parse_structured_output(stdout_text)
 
     if passed:
         logger.info("Gate %s passed (%.1fs)", gate_name, duration)

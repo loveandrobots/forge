@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from forge import database
 from forge.config import DB_PATH
-from forge.gate_runner import _parse_structured_output
+from forge.gate_runner import parse_structured_output
 from forge.models import (
     EngineStatus,
     PipelineStats,
@@ -83,7 +83,7 @@ def _row_to_stage_run(row) -> dict:
     # Parse structured gate output from gate_stdout JSON when present
     gate_stdout = d.get("gate_stdout")
     if gate_stdout:
-        structured = _parse_structured_output(gate_stdout)
+        structured = parse_structured_output(gate_stdout)
         if structured is not None:
             d["gate_structured_output"] = structured
     return d
