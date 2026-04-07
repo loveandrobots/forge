@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import signal
 import sqlite3
 from datetime import datetime, timezone
 
@@ -189,23 +190,29 @@ class PipelineEngine:
         self.running: bool = False
         self.current_task_id: str | None = None
         self._loop_task: asyncio.Task | None = None
+        self._timeout_task: asyncio.Task | None = None
+        self._current_dispatch_task: asyncio.Task | None = None
+        self._current_dispatch_pid: int | None = None
 
     async def start(self) -> None:
         """Set running=True and begin the loop."""
         self.running = True
         self._loop_task = asyncio.create_task(self.run_loop())
+        self._timeout_task = asyncio.create_task(self._timeout_loop())
         self._log("info", "Engine started")
 
     async def pause(self) -> None:
-        """Set running=False, then wait for the loop task to finish."""
+        """Set running=False, then wait for both background tasks to finish."""
         self.running = False
-        if self._loop_task is not None:
-            self._loop_task.cancel()
-            try:
-                await self._loop_task
-            except asyncio.CancelledError:
-                pass
-            self._loop_task = None
+        for attr in ("_timeout_task", "_loop_task"):
+            task = getattr(self, attr)
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                setattr(self, attr, None)
         self._log("info", "Engine paused")
 
     async def run_loop(self) -> None:
@@ -411,14 +418,29 @@ class PipelineEngine:
                 schema = get_schema(stage, flow)
                 if schema:
                     json_schema_str = json.dumps(schema)
-                result: DispatchResult = await dispatch_claude(
-                    prompt=prompt,
-                    repo_path=project["repo_path"],
-                    branch=branch_name,
-                    timeout=stage_timeout,
-                    headless_flags=self.settings.claude.headless_flags,
-                    json_schema=json_schema_str,
+                self._current_dispatch_task = asyncio.create_task(
+                    dispatch_claude(
+                        prompt=prompt,
+                        repo_path=project["repo_path"],
+                        branch=branch_name,
+                        timeout=stage_timeout,
+                        headless_flags=self.settings.claude.headless_flags,
+                        json_schema=json_schema_str,
+                        pid_callback=self._set_dispatch_pid,
+                    )
                 )
+                try:
+                    result: DispatchResult = await self._current_dispatch_task
+                except asyncio.CancelledError:
+                    # handle_timeout cancelled this dispatch; DB was already updated
+                    conn.close()
+                    self.current_task_id = None
+                    self._current_dispatch_task = None
+                    self._current_dispatch_pid = None
+                    continue
+                finally:
+                    self._current_dispatch_task = None
+                    self._current_dispatch_pid = None
 
                 finished_at = _now()
 
@@ -487,42 +509,30 @@ class PipelineEngine:
                     else:
                         spec_dir = os.path.join(repo_path, "_forge", "specs")
                     os.makedirs(spec_dir, exist_ok=True)
-                    spec_json_path = os.path.join(
-                        spec_dir, f"{task_id}.json"
-                    )
+                    spec_json_path = os.path.join(spec_dir, f"{task_id}.json")
                     with open(spec_json_path, "w", encoding="utf-8") as sf:
                         json.dump(structured, sf, indent=2)
-                    database.update_task(
-                        conn, task_id, spec_path=spec_json_path
-                    )
+                    database.update_task(conn, task_id, spec_path=spec_json_path)
                     task["spec_path"] = spec_json_path
 
                 if stage == "plan" and structured is not None:
                     repo_path = project.get("repo_path", "")
                     plan_dir = os.path.join(repo_path, "_forge", "plans")
                     os.makedirs(plan_dir, exist_ok=True)
-                    plan_json_path = os.path.join(
-                        plan_dir, f"{task_id}.json"
-                    )
+                    plan_json_path = os.path.join(plan_dir, f"{task_id}.json")
                     with open(plan_json_path, "w", encoding="utf-8") as pf:
                         json.dump(structured, pf, indent=2)
-                    database.update_task(
-                        conn, task_id, plan_path=plan_json_path
-                    )
+                    database.update_task(conn, task_id, plan_path=plan_json_path)
                     task["plan_path"] = plan_json_path
 
                 if stage == "review" and structured is not None:
                     repo_path = project.get("repo_path", "")
                     review_dir = os.path.join(repo_path, "_forge", "reviews")
                     os.makedirs(review_dir, exist_ok=True)
-                    review_json_path = os.path.join(
-                        review_dir, f"{task_id}.json"
-                    )
+                    review_json_path = os.path.join(review_dir, f"{task_id}.json")
                     with open(review_json_path, "w", encoding="utf-8") as rf:
                         json.dump(structured, rf, indent=2)
-                    database.update_task(
-                        conn, task_id, review_path=review_json_path
-                    )
+                    database.update_task(conn, task_id, review_path=review_json_path)
                     task["review_path"] = review_json_path
 
                 # Step 4d: Extract verdict from structured review output
@@ -535,9 +545,7 @@ class PipelineEngine:
                 artifact_file_path: str | None = None
                 if structured_json is not None:
                     repo_path = project.get("repo_path", "")
-                    artifact_dir = os.path.join(
-                        repo_path, "_forge", "artifacts"
-                    )
+                    artifact_dir = os.path.join(repo_path, "_forge", "artifacts")
                     os.makedirs(artifact_dir, exist_ok=True)
                     artifact_file_path = os.path.join(
                         artifact_dir, f"{task_id}_{stage}.json"
@@ -1052,6 +1060,10 @@ class PipelineEngine:
                     task_id=task_id,
                 )
 
+    def _set_dispatch_pid(self, pid: int) -> None:
+        """Store the PID of the currently running dispatch subprocess."""
+        self._current_dispatch_pid = pid
+
     async def handle_timeout(
         self,
         conn: sqlite3.Connection,
@@ -1061,6 +1073,20 @@ class PipelineEngine:
         sr_id = stage_run["id"]
         task_id = stage_run["task_id"]
         stage = stage_run["stage"]
+
+        # Kill the dispatch subprocess and cancel the dispatch task so the engine
+        # loop unblocks immediately rather than waiting for the next poll cycle.
+        if self._current_dispatch_pid is not None:
+            try:
+                os.kill(self._current_dispatch_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            self._current_dispatch_pid = None
+        if (
+            self._current_dispatch_task is not None
+            and not self._current_dispatch_task.done()
+        ):
+            self._current_dispatch_task.cancel()
 
         database.update_stage_run(
             conn,
@@ -1093,6 +1119,22 @@ class PipelineEngine:
                 await self._handle_error_retry(
                     conn, _row_to_dict(task_row), stage, sr_id, project=project
                 )
+
+    async def _timeout_loop(self) -> None:
+        """Background task: check for timed-out stage runs every 30 seconds.
+
+        Runs independently of the main dispatch loop so that timeouts are
+        detected even while ``dispatch_claude`` is blocking on I/O.
+        """
+        while self.running:
+            await asyncio.sleep(30)
+            if not self.running:
+                break
+            conn = database.get_connection(self.db_path)
+            try:
+                await self._check_timeouts(conn)
+            finally:
+                conn.close()
 
     async def _check_timeouts(
         self,
@@ -1493,7 +1535,11 @@ class PipelineEngine:
                     flow=flow,
                 )
                 # Fallback: if .json path doesn't exist, try .md
-                if spec_path and not os.path.exists(spec_path) and spec_path.endswith(".json"):
+                if (
+                    spec_path
+                    and not os.path.exists(spec_path)
+                    and spec_path.endswith(".json")
+                ):
                     md_fallback = spec_path.rsplit(".json", 1)[0] + ".md"
                     if os.path.exists(md_fallback):
                         spec_path = md_fallback
@@ -1514,7 +1560,10 @@ class PipelineEngine:
                 # For plan stage: inject spec criteria list
                 if stage == "plan" and spec_structured:
                     from forge.prompt_builder import format_spec_criteria_list
-                    artifacts["spec_criteria_list"] = format_spec_criteria_list(spec_structured)
+
+                    artifacts["spec_criteria_list"] = format_spec_criteria_list(
+                        spec_structured
+                    )
 
             plan_structured = None
             if stage in ("implement",) and "plan" in flow_stages:
@@ -1525,7 +1574,11 @@ class PipelineEngine:
                     flow=flow,
                 )
                 # Fallback: if .json path doesn't exist, try .md
-                if plan_path and not os.path.exists(plan_path) and plan_path.endswith(".json"):
+                if (
+                    plan_path
+                    and not os.path.exists(plan_path)
+                    and plan_path.endswith(".json")
+                ):
                     md_fallback = plan_path.rsplit(".json", 1)[0] + ".md"
                     if os.path.exists(md_fallback):
                         plan_path = md_fallback
@@ -1545,7 +1598,10 @@ class PipelineEngine:
             # For implement stage: format structured artifacts as organized context
             if stage == "implement" and spec_structured and plan_structured:
                 from forge.prompt_builder import format_structured_implement_context
-                ctx = format_structured_implement_context(spec_structured, plan_structured)
+
+                ctx = format_structured_implement_context(
+                    spec_structured, plan_structured
+                )
                 artifacts.update(ctx)
 
             if stage == "review":
@@ -1575,8 +1631,8 @@ class PipelineEngine:
                             build_structured_review_feedback,
                         )
 
-                        artifacts["review_feedback"] = (
-                            build_structured_review_feedback(review_data)
+                        artifacts["review_feedback"] = build_structured_review_feedback(
+                            review_data
                         )
                 else:
                     review_content = load_artifact(review_path)

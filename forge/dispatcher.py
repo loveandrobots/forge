@@ -10,6 +10,7 @@ import json
 import logging
 import shlex
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,9 @@ def parse_stream_json(raw: str) -> tuple[str, int | None]:
     return final_text, tokens_used
 
 
+_GIT_CHECKOUT_TIMEOUT = 60.0
+
+
 async def dispatch_claude(
     prompt: str,
     repo_path: str,
@@ -125,6 +129,7 @@ async def dispatch_claude(
     timeout: int,
     headless_flags: str = "",
     json_schema: str | None = None,
+    pid_callback: Callable[[int], None] | None = None,
 ) -> DispatchResult:
     """Spawn a Claude Code CLI session and capture output.
 
@@ -145,7 +150,17 @@ async def dispatch_claude(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    await checkout_proc.wait()
+    try:
+        await asyncio.wait_for(checkout_proc.wait(), timeout=_GIT_CHECKOUT_TIMEOUT)
+    except asyncio.TimeoutError:
+        checkout_proc.kill()
+        await checkout_proc.wait()
+        return DispatchResult(
+            output="",
+            exit_code=1,
+            duration_seconds=time.monotonic() - start,
+            error=f"Git checkout timed out after {_GIT_CHECKOUT_TIMEOUT:.0f}s",
+        )
     if checkout_proc.returncode != 0:
         create_proc = await asyncio.create_subprocess_exec(
             "git",
@@ -156,7 +171,17 @@ async def dispatch_claude(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await create_proc.wait()
+        try:
+            await asyncio.wait_for(create_proc.wait(), timeout=_GIT_CHECKOUT_TIMEOUT)
+        except asyncio.TimeoutError:
+            create_proc.kill()
+            await create_proc.wait()
+            return DispatchResult(
+                output="",
+                exit_code=1,
+                duration_seconds=time.monotonic() - start,
+                error=f"Git checkout -b timed out after {_GIT_CHECKOUT_TIMEOUT:.0f}s",
+            )
         if create_proc.returncode != 0:
             stderr_bytes = (
                 await create_proc.stderr.read() if create_proc.stderr else b""
@@ -191,6 +216,8 @@ async def dispatch_claude(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        if pid_callback is not None and proc.pid is not None:
+            pid_callback(proc.pid)
 
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(

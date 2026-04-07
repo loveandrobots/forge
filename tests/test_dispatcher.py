@@ -899,3 +899,115 @@ class TestRebaseAbortFailure:
         assert result.success is False
         assert "(abort also failed:" in result.stderr
         assert "abort failed: lock held" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# dispatch_claude: git checkout timeout and pid_callback
+# ---------------------------------------------------------------------------
+
+
+class TestDispatchClaudeCheckoutTimeout:
+    async def test_checkout_timeout_returns_error(self, git_repo):
+        """If git checkout hangs, dispatch_claude returns a timeout DispatchResult."""
+
+        async def _hanging_wait():
+            await asyncio.sleep(999)
+
+        original_exec = asyncio.create_subprocess_exec
+
+        async def mock_exec(*args, **kwargs):
+            if args[0] == "git" and "checkout" in args:
+                mock_proc = MagicMock()
+                mock_proc.wait = _hanging_wait
+                mock_proc.kill = MagicMock()
+                # wait() after kill must be a no-op coroutine
+                mock_proc.wait = AsyncMock(side_effect=[asyncio.TimeoutError(), None])
+                return mock_proc
+            return await original_exec(*args, **kwargs)
+
+        with (
+            patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec),
+            patch("forge.dispatcher._GIT_CHECKOUT_TIMEOUT", 0.01),
+        ):
+            result = await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="main",
+                timeout=900,
+            )
+
+        assert result.error is not None
+        assert "timed out" in result.error.lower()
+        assert result.exit_code == 1
+
+    async def test_checkout_branch_create_timeout_returns_error(self, git_repo):
+        """If 'git checkout -b' hangs, dispatch_claude returns a timeout DispatchResult."""
+        call_count = 0
+        original_exec = asyncio.create_subprocess_exec
+
+        async def mock_exec(*args, **kwargs):
+            nonlocal call_count
+            if args[0] == "git" and "checkout" in args:
+                call_count += 1
+                if call_count == 1:
+                    # First checkout fails (branch doesn't exist yet)
+                    mock_proc = MagicMock()
+                    mock_proc.wait = AsyncMock(return_value=None)
+                    mock_proc.returncode = 1
+                    return mock_proc
+                else:
+                    # Second checkout (-b) hangs
+                    mock_proc = MagicMock()
+                    mock_proc.wait = AsyncMock(side_effect=[asyncio.TimeoutError(), None])
+                    mock_proc.kill = MagicMock()
+                    return mock_proc
+            return await original_exec(*args, **kwargs)
+
+        with (
+            patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec),
+            patch("forge.dispatcher._GIT_CHECKOUT_TIMEOUT", 0.01),
+        ):
+            result = await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="new-nonexistent-branch",
+                timeout=900,
+            )
+
+        assert result.error is not None
+        assert "timed out" in result.error.lower()
+        assert result.exit_code == 1
+
+    async def test_pid_callback_called_with_process_pid(self, git_repo):
+        """pid_callback is invoked with the claude subprocess PID."""
+        received_pids: list[int] = []
+        call_count = 0
+
+        async def mock_exec(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if args[0] == "git":
+                # Git checkout succeeds
+                mock_proc = MagicMock()
+                mock_proc.wait = AsyncMock(return_value=None)
+                mock_proc.returncode = 0
+                return mock_proc
+            else:
+                # Claude process — expose a known PID
+                mock_proc = MagicMock()
+                mock_proc.pid = 99999
+                mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+                mock_proc.returncode = 1
+                return mock_proc
+
+        with patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec):
+            await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="main",
+                timeout=10,
+                pid_callback=received_pids.append,
+            )
+
+        # pid_callback should have been called once (for the claude process, not git)
+        assert 99999 in received_pids

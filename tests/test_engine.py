@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -2883,6 +2884,235 @@ class TestGuardRetryAfterResetFailure:
         assert task["status"] == "needs_human"
         # Engine should NOT be paused since project was None (no auto-pause possible)
         assert engine.running is True
+
+
+# ---------------------------------------------------------------------------
+# handle_timeout subprocess/task killing
+# ---------------------------------------------------------------------------
+
+
+class TestHandleTimeoutKillsDispatch:
+    async def test_handle_timeout_kills_current_dispatch_subprocess(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """handle_timeout sends SIGKILL to _current_dispatch_pid if set."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        old_time = (
+            datetime.now(timezone.utc) - timedelta(seconds=9999)
+        ).isoformat()
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        engine._current_dispatch_pid = 54321
+
+        with patch("forge.engine.os.kill") as mock_kill:
+            await engine._check_timeouts(conn)
+
+        mock_kill.assert_called_once_with(54321, signal.SIGKILL)
+        assert engine._current_dispatch_pid is None
+
+    async def test_handle_timeout_cancels_current_dispatch_task(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """handle_timeout calls cancel() on the running dispatch task."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        old_time = (
+            datetime.now(timezone.utc) - timedelta(seconds=9999)
+        ).isoformat()
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        engine._current_dispatch_task = mock_task
+
+        await engine._check_timeouts(conn)
+
+        mock_task.cancel.assert_called_once()
+
+    async def test_handle_timeout_ignores_missing_pid(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """handle_timeout does not crash when _current_dispatch_pid is None."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        old_time = (
+            datetime.now(timezone.utc) - timedelta(seconds=9999)
+        ).isoformat()
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        # No PID or task set — should complete without error
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+
+    async def test_handle_timeout_handles_dead_process(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """handle_timeout ignores ProcessLookupError if the process already exited."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        old_time = (
+            datetime.now(timezone.utc) - timedelta(seconds=9999)
+        ).isoformat()
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        engine._current_dispatch_pid = 12345
+
+        with patch("forge.engine.os.kill", side_effect=ProcessLookupError):
+            # Should not raise
+            await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+
+
+class TestRunLoopDispatchCancelledByTimeout:
+    async def test_run_loop_continues_after_dispatch_cancelled(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When dispatch is cancelled by handle_timeout, run_loop continues cleanly."""
+        task_id = db.insert_task(
+            conn, project_id=project_id, title="T", priority=1
+        )
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        db.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            status="queued",
+        )
+
+        safe_conn = _UnclosableConnection(conn)
+        engine = PipelineEngine(settings, ":memory:")
+
+        dispatch_started = asyncio.Event()
+
+        async def mock_dispatch(*args, **kwargs):
+            dispatch_started.set()
+            # Simulate a long-running dispatch that gets cancelled
+            await asyncio.sleep(999)
+            return DispatchResult(output="", exit_code=0, duration_seconds=0)
+
+        with (
+            patch("forge.engine.database.get_connection", return_value=safe_conn),
+            patch("forge.engine.dispatch_claude", side_effect=mock_dispatch),
+            patch("forge.engine.build_prompt", return_value="test prompt"),
+            patch("forge.engine.create_branch", return_value=GitResult(success=True)),
+        ):
+            await engine.start()
+            # Wait for dispatch to start, then cancel the dispatch task
+            await asyncio.wait_for(dispatch_started.wait(), timeout=3.0)
+            # Simulate handle_timeout cancelling the dispatch task
+            if engine._current_dispatch_task is not None:
+                engine._current_dispatch_task.cancel()
+
+            # Give the loop a moment to handle the cancellation and continue
+            await asyncio.sleep(0.1)
+            await engine.pause()
+
+        # The task should still be active (loop continued without crashing)
+        task = db.get_task(conn, task_id)
+        assert task is not None
+
+
+class TestTimeoutLoop:
+    async def test_timeout_loop_calls_check_timeouts(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """_timeout_loop calls _check_timeouts each time it wakes up."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        check_count = 0
+
+        async def mock_check_timeouts(_conn):
+            nonlocal check_count
+            check_count += 1
+            # Stop after first check so the loop exits naturally
+            engine.running = False
+
+        sleep_call_count = 0
+
+        async def mock_sleep(seconds):
+            nonlocal sleep_call_count
+            sleep_call_count += 1
+
+        with (
+            patch.object(engine, "_check_timeouts", side_effect=mock_check_timeouts),
+            patch("forge.engine.asyncio.sleep", side_effect=mock_sleep),
+            patch(
+                "forge.engine.database.get_connection",
+                return_value=_UnclosableConnection(conn),
+            ),
+        ):
+            # Run the loop; it should exit after one _check_timeouts call
+            await engine._timeout_loop()
+
+        assert sleep_call_count >= 1
+        assert check_count == 1
+
+    async def test_timeout_loop_started_by_engine_start(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+    ) -> None:
+        """start() creates both _loop_task and _timeout_task."""
+        engine = PipelineEngine(settings, ":memory:")
+        safe_conn = _UnclosableConnection(conn)
+
+        with patch("forge.engine.database.get_connection", return_value=safe_conn):
+            await engine.start()
+            assert engine._loop_task is not None
+            assert engine._timeout_task is not None
+            await engine.pause()
+
+        assert engine._loop_task is None
+        assert engine._timeout_task is None
 
 
 # ---------------------------------------------------------------------------
