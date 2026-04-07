@@ -7,6 +7,8 @@ import json
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
+from forge.gate_runner import _parse_structured_output
+
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
@@ -82,12 +84,9 @@ def _row_to_stage_run(row) -> dict:
     # Parse structured gate output from gate_stdout JSON when present
     gate_stdout = d.get("gate_stdout")
     if gate_stdout:
-        try:
-            parsed = json.loads(gate_stdout)
-            if isinstance(parsed, dict) and "passed" in parsed:
-                d["gate_structured_output"] = parsed
-        except (json.JSONDecodeError, ValueError):
-            pass
+        structured = _parse_structured_output(gate_stdout)
+        if structured is not None:
+            d["gate_structured_output"] = structured
     return d
 
 

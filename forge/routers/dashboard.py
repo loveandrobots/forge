@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from forge import database
 from forge.config import DB_PATH, FLOW_STAGES, STAGES
 from forge.engine import load_structured_artifact
+from forge.gate_runner import _parse_structured_output
 from forge.routers.pipeline import _get_engine
 from forge.utils import relative_time
 
@@ -156,12 +157,9 @@ def task_detail_page(request: Request, task_id: str) -> HTMLResponse:
             # Parse structured gate output from gate_stdout JSON
             gate_stdout = d.get("gate_stdout")
             if gate_stdout:
-                try:
-                    parsed = json.loads(gate_stdout)
-                    if isinstance(parsed, dict) and "passed" in parsed:
-                        d["gate_structured_output"] = parsed
-                except (json.JSONDecodeError, ValueError):
-                    pass
+                structured = _parse_structured_output(gate_stdout)
+                if structured is not None:
+                    d["gate_structured_output"] = structured
             stage_runs.append(d)
 
         flow_stages = FLOW_STAGES.get(
