@@ -1633,9 +1633,11 @@ class PipelineEngine:
                 status="bounced",
             )
             if bounced_reviews:
-                review_path = task.get("review_path") or os.path.join(
+                review_path = task.get("review_path") or _artifact_path_for_stage(
                     project.get("repo_path", ""),
-                    f"_forge/reviews/{task['id']}.md",
+                    task["id"],
+                    "review",
+                    flow=task.get("flow", "standard"),
                 )
                 if review_path.endswith(".json"):
                     review_data = load_structured_artifact(review_path)

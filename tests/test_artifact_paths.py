@@ -785,6 +785,95 @@ class TestLoadArtifactsLegacyFallback:
         artifacts = engine._load_artifacts(task, project, "implement", stage_run, conn)
         assert "Legacy plan" in artifacts["plan_content"]
 
+    def test_review_feedback_falls_back_to_conventional_review_path(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When review_path is null, review feedback loading uses _artifact_path_for_stage."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            spec_path="/tmp/repo/_forge/specs/test.md",
+            plan_path="/tmp/repo/_forge/plans/test.md",
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="implement", attempt=1)
+        # Insert a bounced review run so the feedback loading block is triggered
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        assert task["review_path"] is None
+
+        expected_review_path = f"/tmp/repo/_forge/reviews/{task_id}.md"
+
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch("forge.engine.load_artifact") as mock_load,
+        ):
+            mock_load.return_value = "review feedback content"
+            artifacts = engine._load_artifacts(
+                task, project, "implement", stage_run, conn
+            )
+
+        # Verify load_artifact was called with the conventional path from
+        # _artifact_path_for_stage, not a hardcoded os.path.join
+        assert any(
+            call.args == (expected_review_path,) for call in mock_load.call_args_list
+        ), f"Expected load_artifact to be called with {expected_review_path}"
+        assert artifacts["review_feedback"] == "review feedback content"
+
+    def test_review_feedback_uses_explicit_review_path(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """When review_path is set on the task, review feedback uses it directly."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        custom_review = "/custom/path/review.md"
+        db.update_task(
+            conn,
+            task_id,
+            status="active",
+            current_stage="implement",
+            spec_path="/tmp/repo/_forge/specs/test.md",
+            plan_path="/tmp/repo/_forge/plans/test.md",
+            review_path=custom_review,
+        )
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="implement", attempt=1)
+        db.insert_stage_run(
+            conn, task_id=task_id, stage="review", attempt=1, status="bounced"
+        )
+
+        task = dict(db.get_task(conn, task_id))
+        project = dict(db.get_project(conn, project_id))
+        stage_run = dict(db.get_stage_run(conn, sr_id))
+
+        with (
+            patch("forge.engine.os.path.exists", return_value=True),
+            patch("forge.engine.load_artifact") as mock_load,
+        ):
+            mock_load.return_value = "custom review feedback"
+            artifacts = engine._load_artifacts(
+                task, project, "implement", stage_run, conn
+            )
+
+        assert any(
+            call.args == (custom_review,) for call in mock_load.call_args_list
+        ), f"Expected load_artifact to be called with {custom_review}"
+        assert artifacts["review_feedback"] == "custom review feedback"
+
     def test_load_artifacts_formats_spec_criteria_for_plan_stage(
         self,
         conn: sqlite3.Connection,
