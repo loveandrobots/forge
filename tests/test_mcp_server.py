@@ -9,6 +9,9 @@ import pytest
 from fastmcp import FastMCP
 
 from forge import database
+from forge.config import Settings
+from forge.engine import PipelineEngine
+from forge.gate_runner import GateResult
 from forge.mcp_server import (
     activate_task,
     cancel_task,
@@ -1705,6 +1708,62 @@ class TestMaxRetries:
         try:
             row = database.get_task(conn, updated["id"])
             assert row["max_retries"] == 6
+        finally:
+            conn.close()
+
+    @pytest.mark.asyncio
+    async def test_update_task_max_retries_respected_by_engine(self, project_id):
+        """Engine should respect max_retries updated via MCP update_task."""
+        # Create task with max_retries=1 via MCP
+        task = create_task(
+            project_id=project_id, title="Engine retry test", max_retries=1
+        )
+        task_id = task["id"]
+
+        conn = database.get_connection()
+        try:
+            # Set up task as active on spec stage with 1 bounced attempt
+            database.update_task(conn, task_id, status="active", current_stage="spec")
+            database.insert_stage_run(
+                conn,
+                task_id=task_id,
+                stage="spec",
+                attempt=1,
+                status="bounced",
+            )
+
+            # With max_retries=1, bouncing should mark needs_human
+            settings = Settings()
+            engine = PipelineEngine(settings, ":memory:")
+            task_row = dict(database.get_task(conn, task_id))
+            gate_result = GateResult(
+                passed=False,
+                exit_code=1,
+                stdout="",
+                stderr="failing",
+                gate_name="post-spec.sh",
+                duration_seconds=1.0,
+            )
+            await engine.bounce_task(conn, task_row, "spec", gate_result)
+            assert database.get_task(conn, task_id)["status"] == "needs_human"
+
+            # Now update max_retries to 5 via MCP update_task
+            update_task(task_id=task_id, max_retries=5)
+
+            # Reset task to active so we can bounce again
+            database.update_task(conn, task_id, status="active")
+            task_row = dict(database.get_task(conn, task_id))
+
+            # With max_retries=5 and only 1 bounced attempt, engine should
+            # queue a retry instead of marking needs_human
+            await engine.bounce_task(conn, task_row, "spec", gate_result)
+            task_after = database.get_task(conn, task_id)
+            assert task_after["status"] == "active"
+            # A new queued stage_run should exist
+            queued = database.list_stage_runs(
+                conn, task_id=task_id, stage="spec", status="queued"
+            )
+            assert len(queued) == 1
         finally:
             conn.close()
 
