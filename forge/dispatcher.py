@@ -43,11 +43,39 @@ def parse_json_output(raw: str) -> dict:
 
     Extracts ``result`` (text), ``structured_output`` (parsed JSON from schema),
     and ``tokens`` (usage info).  Returns a dict with these keys.
+
+    With ``--verbose``, the CLI emits a JSON array of event objects (same envelope
+    as stream-json).  In that case, ``structured_output`` lives inside the item
+    with ``"type": "result"``.  Without ``--verbose``, the CLI emits a single
+    JSON object with top-level ``result`` and ``structured_output`` keys.
     """
     try:
         obj = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         logger.warning("Failed to parse JSON output from Claude CLI")
+        return {"result": raw, "structured_output": None, "tokens": None}
+
+    # Verbose mode: CLI emits a JSON array of event objects.
+    # structured_output lives inside the item with type "result".
+    if isinstance(obj, list):
+        for item in obj:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "result":
+                result_text = item.get("result", "")
+                structured_output = item.get("structured_output", None)
+                tokens: int | None = None
+                usage = item.get("usage", {})
+                if usage:
+                    tokens = usage.get("input_tokens", 0) + usage.get(
+                        "output_tokens", 0
+                    )
+                return {
+                    "result": result_text,
+                    "structured_output": structured_output,
+                    "tokens": tokens,
+                }
+        logger.warning("No 'result' item found in JSON array from Claude CLI")
         return {"result": raw, "structured_output": None, "tokens": None}
 
     if not isinstance(obj, dict):
@@ -59,7 +87,7 @@ def parse_json_output(raw: str) -> dict:
     result_text = obj.get("result", "")
     structured_output = obj.get("structured_output", None)
 
-    tokens: int | None = None
+    tokens = None
     usage = obj.get("usage", {})
     if usage:
         input_tokens = usage.get("input_tokens", 0)

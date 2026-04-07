@@ -198,13 +198,46 @@ class TestParseJsonOutput:
         assert parsed["structured_output"] is None
         assert parsed["tokens"] is None
 
-    def test_json_array_root_returns_raw(self):
-        """Returns raw text when JSON root is an array, not an object."""
-        raw = json.dumps([{"result": "something"}])
+    def test_json_array_no_result_item_returns_raw(self):
+        """Returns raw text when JSON array has no type='result' item."""
+        raw = json.dumps([{"type": "assistant", "result": "something"}])
         parsed = parse_json_output(raw)
         assert parsed["result"] == raw
         assert parsed["structured_output"] is None
         assert parsed["tokens"] is None
+
+    def test_json_array_verbose_mode_extracts_structured_output(self):
+        """Verbose mode: extracts structured_output from type='result' array item."""
+        spec = {
+            "overview": "Adds widgets.",
+            "acceptance_criteria": [{"id": 1, "text": "Widget renders"}],
+            "out_of_scope": [],
+            "dependencies": [],
+            "content": "Full spec.",
+        }
+        raw = json.dumps([
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "thinking"}]}},
+            {
+                "type": "result",
+                "result": "done",
+                "structured_output": spec,
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+            },
+        ])
+        parsed = parse_json_output(raw)
+        assert parsed["result"] == "done"
+        assert parsed["structured_output"] == spec
+        assert parsed["tokens"] == 150
+
+    def test_json_array_result_item_no_structured_output(self):
+        """Array with type='result' item but no structured_output returns None."""
+        raw = json.dumps([
+            {"type": "result", "result": "plain text", "usage": {"input_tokens": 10, "output_tokens": 5}},
+        ])
+        parsed = parse_json_output(raw)
+        assert parsed["result"] == "plain text"
+        assert parsed["structured_output"] is None
+        assert parsed["tokens"] == 15
 
     def test_empty_string(self):
         """Handles empty string input."""
