@@ -31,9 +31,9 @@ from forge.dispatcher import (
 )
 from forge.gate_runner import (
     GateResult,
-    parse_structured_output,
     build_gate_env,
     format_structured_bounce_context,
+    parse_structured_output,
     run_gate,
 )
 from forge.prompt_builder import build_prompt, get_git_diff, load_artifact
