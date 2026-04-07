@@ -563,15 +563,15 @@ def pause_task(task_id: str) -> dict:
 
 @mcp.tool()
 def resume_task(task_id: str) -> dict:
-    """Resume a needs_human task. Returns the updated task dict or error dict."""
+    """Resume a needs_human or paused task. Returns the updated task dict or error dict."""
     conn = database.get_connection()
     try:
         row = database.get_task(conn, task_id)
         if row is None:
             return {"error": "Task not found"}
-        if row["status"] != "needs_human":
+        if row["status"] not in ("needs_human", "paused"):
             return {
-                "error": "Only needs_human tasks can be resumed "
+                "error": "Only needs_human or paused tasks can be resumed "
                 "(cancelled tasks cannot be resumed)"
             }
 

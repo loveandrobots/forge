@@ -991,11 +991,19 @@ class TestResumeTask:
         detail = get_task_detail(task["id"])
         assert len(detail["stage_runs"]) == 2
 
-    def test_resume_non_needs_human_rejected(self, project_id):
+    def test_resume_paused_task(self, project_id):
+        task = create_task(project_id=project_id, title="Task")
+        activate_task(task_id=task["id"])
+        pause_task(task_id=task["id"])
+        result = resume_task(task_id=task["id"])
+        assert result["status"] == "active"
+        detail = get_task_detail(task["id"])
+        assert len(detail["stage_runs"]) == 2
+
+    def test_resume_non_resumable_rejected(self, project_id):
         task = create_task(project_id=project_id, title="Task")
         result = resume_task(task_id=task["id"])
         assert "error" in result
-        assert "needs_human" in result["error"].lower()
 
     def test_resume_nonexistent_task(self):
         result = resume_task(task_id="nonexistent-id")

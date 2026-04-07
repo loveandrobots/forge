@@ -30,7 +30,7 @@
         </div>
     </div>
     <div class="task-actions">
-        {% if task.status == 'needs_human' %}
+        {% if task.status in ('needs_human', 'paused') %}
         <button class="btn btn-primary" hx-post="/api/tasks/{{ task.id }}/resume" hx-swap="none" hx-on::after-request="window.location.reload()">Resume</button>
         {% endif %}
         {% if task.status == 'active' %}

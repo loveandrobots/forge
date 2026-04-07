@@ -447,16 +447,16 @@ def activate_task(task_id: str) -> dict:
 
 @router.post("/{task_id}/resume", response_model=TaskResponse)
 def resume_task(task_id: str) -> dict:
-    """Resume a needs_human task by creating a new stage_run for its current stage."""
+    """Resume a needs_human or paused task by creating a new stage_run for its current stage."""
     conn = database.get_connection(str(DB_PATH))
     try:
         row = database.get_task(conn, task_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Task not found")
-        if row["status"] != "needs_human":
+        if row["status"] not in ("needs_human", "paused"):
             raise HTTPException(
                 status_code=400,
-                detail="Only needs_human tasks can be resumed (cancelled tasks cannot be resumed)",
+                detail="Only needs_human or paused tasks can be resumed (cancelled tasks cannot be resumed)",
             )
 
         stage = row["current_stage"]

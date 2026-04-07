@@ -181,7 +181,23 @@ class TestResumeTask:
         assert resp.status_code == 200
         assert resp.json()["status"] == "active"
 
-    def test_resume_non_needs_human(self, client: TestClient, task_id: str) -> None:
+    def test_resume_paused(
+        self, client: TestClient, task_id: str, tmp_path
+    ) -> None:
+        db_path = tmp_path / "test.db"
+        conn = database.get_connection(str(db_path))
+        try:
+            database.update_task(
+                conn, task_id, status="paused", current_stage="plan"
+            )
+        finally:
+            conn.close()
+
+        resp = client.post(f"/api/tasks/{task_id}/resume")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "active"
+
+    def test_resume_non_resumable(self, client: TestClient, task_id: str) -> None:
         resp = client.post(f"/api/tasks/{task_id}/resume")
         assert resp.status_code == 400
 

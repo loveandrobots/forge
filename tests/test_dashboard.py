@@ -354,6 +354,26 @@ class TestTaskDetail:
         resp = client.get(f"/tasks/{tid}")
         assert "Resume" in resp.text
 
+    def test_shows_resume_button_for_paused(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Paused task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="paused", current_stage="spec")
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert "Resume" in resp.text
+
     def test_task_detail_shows_flow(
         self,
         tmp_path,
