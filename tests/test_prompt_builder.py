@@ -869,6 +869,86 @@ class TestBuildPromptEpicFlow:
         # Contains follow-ups file instruction (follow-ups remain manual)
         assert f"_forge/follow-ups/{epic_task['id']}.json" in prompt
 
+    def test_epic_spec_includes_priority_tier_table(
+        self,
+        epic_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """Epic decomposition prompt includes the priority tier table."""
+        prompt = build_prompt(
+            "spec", epic_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "Priority tiers" in prompt
+        assert "Critical" in prompt
+        assert "100" in prompt
+        assert "Blocking" in prompt
+        assert "80-99" in prompt
+        assert "Active" in prompt
+        assert "60-79" in prompt
+        assert "Queued" in prompt
+        assert "40-59" in prompt
+        assert "Background" in prompt
+        assert "20-39" in prompt
+        assert "Someday" in prompt
+        assert "1-19" in prompt
+
+    def test_epic_spec_includes_child_task_priority_rule(
+        self,
+        epic_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """Epic decomposition prompt includes the child task priority rule."""
+        prompt = build_prompt(
+            "spec", epic_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "inherit the parent epic's priority tier" in prompt
+        assert "count down by twos" in prompt
+        assert "tier ceiling" in prompt
+
+    def test_epic_spec_includes_parent_priority_value(
+        self,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """Parent epic's priority value is rendered in the decomposition prompt."""
+        epic_task_with_priority = {
+            "id": "epic-002",
+            "title": "Refactor pipeline",
+            "description": "Break up the monolith.",
+            "branch_name": "",
+            "spec_path": "",
+            "plan_path": "",
+            "skill_overrides": None,
+            "flow": "epic",
+            "priority": 65,
+        }
+        prompt = build_prompt(
+            "spec",
+            epic_task_with_priority,
+            sample_project,
+            sample_stage_run,
+            empty_artifacts,
+        )
+        assert "parent epic's priority is **65**" in prompt
+
+    def test_epic_spec_parent_priority_defaults_to_zero(
+        self,
+        epic_task: dict,
+        sample_project: dict,
+        sample_stage_run: dict,
+        empty_artifacts: dict,
+    ) -> None:
+        """When task has no priority field, parent_priority defaults to 0."""
+        prompt = build_prompt(
+            "spec", epic_task, sample_project, sample_stage_run, empty_artifacts
+        )
+        assert "parent epic's priority is **0**" in prompt
+
 
 # ---------------------------------------------------------------------------
 # build_prompt — output protocol sections

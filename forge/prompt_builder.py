@@ -222,9 +222,22 @@ Your response must be a JSON object with these fields:
   - `title` (string, required): A concise, descriptive title for the child task.
   - `description` (string, optional): What the task should accomplish, with enough detail for an agent to implement it without additional context.
   - `flow` (string, optional): Either `"standard"` (default — full spec/plan/implement/review pipeline) or `"quick"` (skip spec/plan, go straight to implement/review). Use `"quick"` only for simple, mechanical fixes.
-  - `priority` (integer, optional): Higher numbers run first. Default is 0.
+  - `priority` (integer, required): Higher numbers run first. See priority tier guidance below.
 - **rationale** (string, required): Explanation of how the epic was decomposed and why these tasks were chosen.
 - **content** (string, required): Full decomposition as markdown prose for human reading.
+
+## Priority tiers
+
+| Tier | Range | Meaning |
+|------|-------|---------|
+| Critical | 100 | Pipeline is broken |
+| Blocking | 80-99 | Fixes blocking an in-progress epic |
+| Active | 60-79 | Sub-tasks of current focus area |
+| Queued | 40-59 | Next batch of work |
+| Background | 20-39 | Polish and refactors |
+| Someday | 1-19 | Parked ideas |
+
+The parent epic's priority is **{parent_priority}**. Child tasks should inherit the parent epic's priority tier. Start near the tier ceiling and count down by twos for sequential tasks (e.g., for a parent at priority 65 in the Active tier: 79, 77, 75, 73...). Tasks that must run first get higher numbers.
 
 Load the following skills for context:
 {skill_references}
@@ -523,4 +536,5 @@ def build_prompt(
         review_feedback=review_feedback,
         spec_criteria_list=artifacts.get("spec_criteria_list", ""),
         structured_context=artifacts.get("structured_context", ""),
+        parent_priority=task.get("priority", 0),
     )
