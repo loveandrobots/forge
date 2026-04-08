@@ -993,7 +993,9 @@ class PipelineEngine:
         if flow == "epic" and stage == "review":
             if project is not None:
                 self._process_follow_ups(
-                    conn, task_id, project,
+                    conn,
+                    task_id,
+                    project,
                     parent_task_id=task_id,
                     parent_priority=task.get("priority", 0),
                 )
@@ -1110,6 +1112,7 @@ class PipelineEngine:
             status="error",
             finished_at=_now(),
             error_message="Stage run timed out",
+            termination_reason="wall_clock_timeout",
         )
         self._log(
             "error",
@@ -1682,7 +1685,10 @@ class PipelineEngine:
                             )
                     if prev_dict.get("gate_stderr"):
                         artifacts["previous_gate_stderr"] = prev_dict["gate_stderr"]
-                    if prev_dict.get("gate_stderr") or "previous_gate_structured" in artifacts:
+                    if (
+                        prev_dict.get("gate_stderr")
+                        or "previous_gate_structured" in artifacts
+                    ):
                         break
 
         return artifacts

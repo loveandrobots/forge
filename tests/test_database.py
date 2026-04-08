@@ -132,6 +132,134 @@ class TestMigrate:
         ).fetchone()
         assert row[0] == 0
 
+    def test_fresh_db_has_new_columns(self, conn: sqlite3.Connection) -> None:
+        """Fresh DB has termination_reason, progress_timeout_seconds, max_token_budget."""
+        sr_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(stage_runs)").fetchall()
+        }
+        assert "termination_reason" in sr_cols
+
+        proj_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(projects)").fetchall()
+        }
+        assert "progress_timeout_seconds" in proj_cols
+        assert "max_token_budget" in proj_cols
+
+    def test_migrate_adds_termination_reason_and_project_config_columns(self) -> None:
+        """Migration adds new columns to an existing DB without losing data."""
+        c = db.get_connection(":memory:")
+        # Create old schema without the new columns
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                repo_path TEXT NOT NULL,
+                default_branch TEXT NOT NULL DEFAULT 'main',
+                gate_dir TEXT NOT NULL DEFAULT 'gates',
+                skill_refs TEXT,
+                created_at TEXT NOT NULL,
+                config TEXT,
+                pause_after_completion INTEGER NOT NULL DEFAULT 0,
+                stage_timeouts TEXT
+            );
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id),
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                priority INTEGER NOT NULL DEFAULT 0,
+                current_stage TEXT,
+                status TEXT NOT NULL DEFAULT 'backlog',
+                branch_name TEXT,
+                spec_path TEXT,
+                plan_path TEXT,
+                review_path TEXT,
+                skill_overrides TEXT,
+                max_retries INTEGER NOT NULL DEFAULT 3,
+                flow TEXT NOT NULL DEFAULT 'standard',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                escalated_from_quick INTEGER NOT NULL DEFAULT 0,
+                parent_task_id TEXT REFERENCES tasks(id),
+                epic_status TEXT
+            );
+            CREATE TABLE IF NOT EXISTS stage_runs (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL REFERENCES tasks(id),
+                stage TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                prompt_sent TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_seconds REAL,
+                claude_output TEXT,
+                artifacts_produced TEXT,
+                gate_name TEXT,
+                gate_exit_code INTEGER,
+                gate_stdout TEXT,
+                gate_stderr TEXT,
+                tokens_used INTEGER,
+                error_message TEXT,
+                structured_output TEXT
+            );
+            CREATE TABLE IF NOT EXISTS task_links (
+                id TEXT PRIMARY KEY,
+                source_task_id TEXT NOT NULL REFERENCES tasks(id),
+                target_task_id TEXT NOT NULL REFERENCES tasks(id),
+                link_type TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS run_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                level TEXT NOT NULL,
+                message TEXT NOT NULL,
+                task_id TEXT,
+                stage_run_id TEXT,
+                metadata TEXT
+            );
+        """)
+        # Insert data with old schema
+        c.execute(
+            "INSERT INTO projects (id, name, repo_path, created_at) VALUES ('p1', 'Old', '/tmp', '2025-01-01')"
+        )
+        c.execute(
+            """INSERT INTO tasks (id, project_id, title, created_at, updated_at)
+               VALUES ('t1', 'p1', 'Task1', '2025-01-01', '2025-01-01')"""
+        )
+        c.execute(
+            """INSERT INTO stage_runs (id, task_id, stage, attempt, status)
+               VALUES ('sr1', 't1', 'spec', 1, 'queued')"""
+        )
+        c.commit()
+
+        # Run migrate
+        db.migrate(c)
+
+        # Verify new columns exist
+        sr_cols = {
+            row[1]
+            for row in c.execute("PRAGMA table_info(stage_runs)").fetchall()
+        }
+        assert "termination_reason" in sr_cols
+
+        proj_cols = {
+            row[1]
+            for row in c.execute("PRAGMA table_info(projects)").fetchall()
+        }
+        assert "progress_timeout_seconds" in proj_cols
+        assert "max_token_budget" in proj_cols
+
+        # Verify old data is intact
+        proj = c.execute("SELECT * FROM projects WHERE id = 'p1'").fetchone()
+        assert proj is not None
+        sr = c.execute("SELECT * FROM stage_runs WHERE id = 'sr1'").fetchone()
+        assert sr is not None
+
 
 # ---------------------------------------------------------------------------
 # Projects
@@ -214,6 +342,48 @@ class TestProjects:
         db.update_project(conn, pid, pause_after_completion=False)
         row = db.get_project(conn, pid)
         assert row["pause_after_completion"] == 0
+
+    def test_insert_project_with_progress_timeout_and_token_budget(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        pid = db.insert_project(
+            conn,
+            name="WithBudget",
+            repo_path="/tmp",
+            progress_timeout_seconds=120,
+            max_token_budget=500_000,
+        )
+        row = db.get_project(conn, pid)
+        assert row["progress_timeout_seconds"] == 120
+        assert row["max_token_budget"] == 500_000
+
+    def test_insert_project_default_timeout_and_budget_are_none(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        pid = db.insert_project(conn, name="NoOverrides", repo_path="/tmp")
+        row = db.get_project(conn, pid)
+        assert row["progress_timeout_seconds"] is None
+        assert row["max_token_budget"] is None
+
+    def test_update_project_progress_timeout_and_token_budget(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        pid = db.insert_project(conn, name="Updatable", repo_path="/tmp")
+        # Set values
+        db.update_project(conn, pid, progress_timeout_seconds=60)
+        row = db.get_project(conn, pid)
+        assert row["progress_timeout_seconds"] == 60
+        # Clear to None
+        db.update_project(conn, pid, progress_timeout_seconds=None)
+        row = db.get_project(conn, pid)
+        assert row["progress_timeout_seconds"] is None
+        # Set and clear max_token_budget
+        db.update_project(conn, pid, max_token_budget=1_000_000)
+        row = db.get_project(conn, pid)
+        assert row["max_token_budget"] == 1_000_000
+        db.update_project(conn, pid, max_token_budget=None)
+        row = db.get_project(conn, pid)
+        assert row["max_token_budget"] is None
 
     def test_skill_refs_and_config(self, conn: sqlite3.Connection) -> None:
         pid = db.insert_project(
@@ -439,6 +609,38 @@ class TestStageRuns:
         )
         assert db.get_stage_run_count(conn, task_id, "implement") == 4
         assert db.get_stage_run_count(conn, other_task_id, "implement") == 2
+
+    def test_insert_with_termination_reason(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
+        sr_id = db.insert_stage_run(
+            conn,
+            task_id=task_id,
+            stage="spec",
+            attempt=1,
+            termination_reason="wall_clock_timeout",
+        )
+        row = db.get_stage_run(conn, sr_id)
+        assert row["termination_reason"] == "wall_clock_timeout"
+
+    def test_insert_default_termination_reason_is_none(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
+        row = db.get_stage_run(conn, sr_id)
+        assert row["termination_reason"] is None
+
+    def test_update_stage_run_set_termination_reason(
+        self, conn: sqlite3.Connection, task_id: str
+    ) -> None:
+        sr_id = db.insert_stage_run(conn, task_id=task_id, stage="spec", attempt=1)
+        db.update_stage_run(conn, sr_id, termination_reason="progress_stall")
+        row = db.get_stage_run(conn, sr_id)
+        assert row["termination_reason"] == "progress_stall"
+        # Clear to None explicitly
+        db.update_stage_run(conn, sr_id, termination_reason=None)
+        row = db.get_stage_run(conn, sr_id)
+        assert row["termination_reason"] is None
 
     def test_update_with_artifacts(
         self, conn: sqlite3.Connection, task_id: str

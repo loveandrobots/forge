@@ -15,8 +15,11 @@ from forge.config import (
     STAGE_RUN_STATUSES,
     STAGES,
     TASK_STATUSES,
+    EngineSettings,
     Settings,
     get_settings,
+    resolve_progress_timeout,
+    resolve_token_budget,
 )
 
 
@@ -101,3 +104,25 @@ def test_log_levels_constant() -> None:
 def test_epic_flow_stages() -> None:
     """Epic flow should have spec and review stages."""
     assert FLOW_STAGES["epic"] == ["spec", "review"]
+
+
+def test_engine_settings_has_progress_timeout_and_token_budget() -> None:
+    engine = EngineSettings()
+    assert engine.progress_timeout_seconds == 300
+    assert engine.max_token_budget == 2_000_000
+
+
+def test_resolve_progress_timeout_with_project_value() -> None:
+    assert resolve_progress_timeout(120, EngineSettings()) == 120
+
+
+def test_resolve_progress_timeout_uses_engine_default() -> None:
+    assert resolve_progress_timeout(None, EngineSettings()) == 300
+
+
+def test_resolve_token_budget_with_project_value() -> None:
+    assert resolve_token_budget(500_000, EngineSettings()) == 500_000
+
+
+def test_resolve_token_budget_uses_engine_default() -> None:
+    assert resolve_token_budget(None, EngineSettings()) == 2_000_000

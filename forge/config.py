@@ -68,6 +68,8 @@ class EngineSettings(BaseModel):
     stage_timeout_seconds: int = 600
     stage_timeouts: dict[str, int] = Field(default_factory=lambda: {"implement": 900})
     default_max_retries: int = 3
+    progress_timeout_seconds: int = 300
+    max_token_budget: int = 2_000_000
 
 
 def resolve_stage_timeout(
@@ -81,6 +83,20 @@ def resolve_stage_timeout(
     if engine.stage_timeouts and stage in engine.stage_timeouts:
         return engine.stage_timeouts[stage]
     return engine.stage_timeout_seconds
+
+
+def resolve_progress_timeout(project_value: int | None, engine: EngineSettings) -> int:
+    """Return project override if set, otherwise the engine default."""
+    if project_value is not None:
+        return project_value
+    return engine.progress_timeout_seconds
+
+
+def resolve_token_budget(project_value: int | None, engine: EngineSettings) -> int:
+    """Return project override if set, otherwise the engine default."""
+    if project_value is not None:
+        return project_value
+    return engine.max_token_budget
 
 
 class ClaudeSettings(BaseModel):

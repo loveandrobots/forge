@@ -27,6 +27,8 @@ class ProjectUpdate(BaseModel):
     gate_dir: str | None = None
     skill_refs: list[str] | None = None
     config: dict | None = None
+    progress_timeout_seconds: int | None = None
+    max_token_budget: int | None = None
 
 
 class ProjectResponse(BaseModel):
@@ -38,6 +40,8 @@ class ProjectResponse(BaseModel):
     skill_refs: list[str] | None = None
     config: dict | None = None
     created_at: datetime
+    progress_timeout_seconds: int | None = None
+    max_token_budget: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +177,7 @@ class StageRunResponse(BaseModel):
     gate_structured_output: dict | None = None
     tokens_used: int | None = None
     error_message: str | None = None
+    termination_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------

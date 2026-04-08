@@ -34,7 +34,9 @@ def migrate(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             config TEXT,
             pause_after_completion INTEGER NOT NULL DEFAULT 0,
-            stage_timeouts TEXT
+            stage_timeouts TEXT,
+            progress_timeout_seconds INTEGER,
+            max_token_budget INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS tasks (
@@ -75,7 +77,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             gate_stderr TEXT,
             tokens_used INTEGER,
             error_message TEXT,
-            structured_output TEXT
+            structured_output TEXT,
+            termination_reason TEXT
         );
 
         CREATE TABLE IF NOT EXISTS task_links (
@@ -145,6 +148,21 @@ def migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    try:
+        conn.execute("ALTER TABLE stage_runs ADD COLUMN termination_reason TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        conn.execute("ALTER TABLE projects ADD COLUMN progress_timeout_seconds INTEGER")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        conn.execute("ALTER TABLE projects ADD COLUMN max_token_budget INTEGER")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.commit()
 
 
@@ -184,12 +202,14 @@ def insert_project(
     config: dict | None = None,
     pause_after_completion: bool = False,
     stage_timeouts: dict[str, int] | None = None,
+    progress_timeout_seconds: int | None = None,
+    max_token_budget: int | None = None,
 ) -> str:
     """Insert a new project. Returns the project id."""
     project_id = _new_id()
     conn.execute(
-        """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config, pause_after_completion, stage_timeouts)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO projects (id, name, repo_path, default_branch, gate_dir, skill_refs, created_at, config, pause_after_completion, stage_timeouts, progress_timeout_seconds, max_token_budget)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             project_id,
             name,
@@ -201,6 +221,8 @@ def insert_project(
             _json_encode(config),
             int(pause_after_completion),
             _json_encode(stage_timeouts),
+            progress_timeout_seconds,
+            max_token_budget,
         ),
     )
     conn.commit()
@@ -240,6 +262,8 @@ def update_project(
     config: dict | None = None,
     pause_after_completion: bool | None = _SENTINEL,
     stage_timeouts: dict[str, int] | None = _SENTINEL,
+    progress_timeout_seconds: int | None = _SENTINEL,
+    max_token_budget: int | None = _SENTINEL,
 ) -> bool:
     """Update only the provided fields. Returns True if a row was modified."""
     fields: list[str] = []
@@ -261,6 +285,12 @@ def update_project(
     if stage_timeouts is not _SENTINEL:
         fields.append("stage_timeouts = ?")
         values.append(_json_encode(stage_timeouts))
+    if progress_timeout_seconds is not _SENTINEL:
+        fields.append("progress_timeout_seconds = ?")
+        values.append(progress_timeout_seconds)
+    if max_token_budget is not _SENTINEL:
+        fields.append("max_token_budget = ?")
+        values.append(max_token_budget)
     if not fields:
         return False
     values.append(project_id)
@@ -572,13 +602,14 @@ def insert_stage_run(
     attempt: int,
     status: str = "queued",
     prompt_sent: str | None = None,
+    termination_reason: str | None = None,
 ) -> str:
     """Insert a new stage run. Returns the stage_run id."""
     sr_id = _new_id()
     conn.execute(
-        """INSERT INTO stage_runs (id, task_id, stage, attempt, status, prompt_sent)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (sr_id, task_id, stage, attempt, status, prompt_sent),
+        """INSERT INTO stage_runs (id, task_id, stage, attempt, status, prompt_sent, termination_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (sr_id, task_id, stage, attempt, status, prompt_sent, termination_reason),
     )
     conn.commit()
     return sr_id
@@ -635,6 +666,7 @@ def update_stage_run(
     tokens_used: int | None = None,
     error_message: str | None = None,
     structured_output: str | None = None,
+    termination_reason: str | None = _SENTINEL,
 ) -> bool:
     """Update only the provided fields. Returns True if modified."""
     fields: list[str] = []
@@ -658,6 +690,9 @@ def update_stage_run(
         if val is not None:
             fields.append(f"{col} = ?")
             values.append(encoder(val) if encoder else val)
+    if termination_reason is not _SENTINEL:
+        fields.append("termination_reason = ?")
+        values.append(termination_reason)
     if not fields:
         return False
     values.append(stage_run_id)

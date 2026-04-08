@@ -788,6 +788,8 @@ def get_project_config(project_id: str) -> dict:
             "pause_after_completion": d["pause_after_completion"],
             "stage_timeouts": d.get("stage_timeouts"),
             "config": d.get("config"),
+            "progress_timeout_seconds": d.get("progress_timeout_seconds"),
+            "max_token_budget": d.get("max_token_budget"),
         }
     finally:
         conn.close()
@@ -804,6 +806,8 @@ def update_project(
     config: dict | None = None,
     pause_after_completion: bool | None = None,
     stage_timeouts: dict | None = None,
+    progress_timeout_seconds: int | None = None,
+    max_token_budget: int | None = None,
 ) -> dict:
     """Update project configuration. Returns the updated project dict or an error dict.
 
@@ -835,6 +839,10 @@ def update_project(
             kwargs["pause_after_completion"] = pause_after_completion
         if stage_timeouts is not None:
             kwargs["stage_timeouts"] = stage_timeouts
+        if progress_timeout_seconds is not None:
+            kwargs["progress_timeout_seconds"] = progress_timeout_seconds
+        if max_token_budget is not None:
+            kwargs["max_token_budget"] = max_token_budget
 
         if not kwargs:
             return _row_to_dict(project)
