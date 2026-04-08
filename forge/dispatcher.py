@@ -258,8 +258,13 @@ async def dispatch_claude(
                 error=error_msg,
             )
 
-        # Normal exit: await drain completion, read stderr
-        await drain_task
+        # Normal exit: await drain completion, read stderr.
+        # Use a timeout so that orphaned grandchild processes that inherited the
+        # stdout pipe fd cannot block us indefinitely after claude has exited.
+        try:
+            await asyncio.wait_for(drain_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            drain_task.cancel()
         raw_output = b"".join(lines).decode(errors="replace")
         stderr_bytes = await proc.stderr.read() if proc.stderr else b""
         exit_code = proc.returncode or 0
@@ -364,8 +369,13 @@ async def dispatch_generate(
                 error=error_msg,
             )
 
-        # Normal exit: await drain completion, read stderr
-        await drain_task
+        # Normal exit: await drain completion, read stderr.
+        # Use a timeout so that orphaned grandchild processes that inherited the
+        # stdout pipe fd cannot block us indefinitely after claude has exited.
+        try:
+            await asyncio.wait_for(drain_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            drain_task.cancel()
         raw_output = b"".join(lines).decode(errors="replace")
         stderr_bytes = await proc.stderr.read() if proc.stderr else b""
         exit_code = proc.returncode or 0
