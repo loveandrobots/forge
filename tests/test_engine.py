@@ -2121,6 +2121,119 @@ class TestFollowUpMaxRetries:
         assert new_tasks[0]["max_retries"] == 3
 
 
+class TestFollowUpPriority:
+    """Follow-up tasks inherit priority from parent task minus 1, floored at 1."""
+
+    async def test_follow_up_priority_parent_minus_one(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Follow-up priority is set to parent priority - 1."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=10)
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [{"title": "Child task", "description": "Should get priority 9"}]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project, parent_priority=10)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Child task"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["priority"] == 9
+
+    async def test_follow_up_priority_floor_at_one(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """Follow-up priority is clamped to a minimum of 1."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [{"title": "Floor task", "description": "Should get priority 1"}]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project, parent_priority=1)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Floor task"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["priority"] == 1
+
+    async def test_follow_up_priority_floor_when_parent_zero(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+        tmp_path,
+    ) -> None:
+        """When parent priority is 0, follow-up priority is clamped to 1."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=0)
+
+        follow_ups_dir = tmp_path / "_forge" / "follow-ups"
+        follow_ups_dir.mkdir(parents=True)
+        follow_ups_file = follow_ups_dir / f"{task_id}.json"
+        entries = [{"title": "Zero parent", "description": "Should get priority 1"}]
+        follow_ups_file.write_text(json.dumps(entries))
+
+        project = dict(db.get_project(conn, project_id))
+        project["repo_path"] = str(tmp_path)
+
+        engine._process_follow_ups(conn, task_id, project, parent_priority=0)
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Zero parent"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["priority"] == 1
+
+    async def test_follow_up_priority_with_structured_output(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """Follow-up priority works with structured output (not just filesystem JSON)."""
+        engine = PipelineEngine(settings, ":memory:")
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=5)
+        project = dict(db.get_project(conn, project_id))
+
+        structured_output = {
+            "follow_ups": [
+                {"title": "Structured child", "description": "From structured output"},
+            ]
+        }
+
+        engine._process_follow_ups(
+            conn, task_id, project,
+            structured_output=structured_output,
+            parent_priority=5,
+        )
+
+        backlog = db.list_tasks(conn, status="backlog")
+        new_tasks = [t for t in backlog if t["title"] == "Structured child"]
+        assert len(new_tasks) == 1
+        assert new_tasks[0]["priority"] == 4
+
+
 class TestEpicDecompositionMaxRetries:
     """Epic child tasks should inherit max_retries from configured default_max_retries."""
 

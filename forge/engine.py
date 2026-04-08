@@ -879,6 +879,7 @@ class PipelineEngine:
                     task_id,
                     project,
                     structured_output=structured_output,
+                    parent_priority=task_row["priority"] if task_row else 0,
                 )
 
             # Epic review pass: complete the epic
@@ -991,7 +992,11 @@ class PipelineEngine:
         # Epic review bounce: create follow-up tasks and reset epic to decomposed
         if flow == "epic" and stage == "review":
             if project is not None:
-                self._process_follow_ups(conn, task_id, project, parent_task_id=task_id)
+                self._process_follow_ups(
+                    conn, task_id, project,
+                    parent_task_id=task_id,
+                    parent_priority=task.get("priority", 0),
+                )
             database.update_task(
                 conn,
                 task_id,
@@ -1432,6 +1437,7 @@ class PipelineEngine:
         project: dict,
         parent_task_id: str | None = None,
         structured_output: dict | None = None,
+        parent_priority: int = 0,
     ) -> None:
         """Create backlog tasks from follow-ups in structured output or filesystem JSON."""
         repo_path = project.get("repo_path", "")
@@ -1484,12 +1490,14 @@ class PipelineEngine:
                     entry,
                 )
                 continue
+            follow_up_priority = max(parent_priority - 1, 1)
             new_task_id = database.insert_task(
                 conn,
                 project_id=project["id"],
                 title=title,
                 description=description,
                 flow=flow,
+                priority=follow_up_priority,
                 parent_task_id=parent_task_id,
                 max_retries=self.settings.engine.default_max_retries,
             )
