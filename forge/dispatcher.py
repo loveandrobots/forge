@@ -212,8 +212,10 @@ async def dispatch_claude(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        if pid_callback is not None and proc.pid is not None:
-            pid_callback(proc.pid)
+        pid = proc.pid
+        logger.info("dispatch_claude: spawned pid=%s", pid)
+        if pid_callback is not None and pid is not None:
+            pid_callback(pid)
 
         # Incremental drain: read stdout line-by-line so partial output
         # is preserved when the subprocess times out.
@@ -229,9 +231,11 @@ async def dispatch_claude(
 
         drain_task = asyncio.create_task(drain_stdout())
 
+        logger.info("dispatch_claude: pid=%s waiting for proc.wait() (timeout=%ss)", pid, timeout)
         try:
             await asyncio.wait_for(proc.wait(), timeout=timeout)
         except asyncio.TimeoutError:
+            logger.info("dispatch_claude: pid=%s proc.wait() timed out — killing", pid)
             proc.kill()
             await proc.wait()
             # Give drain task time to flush remaining buffer
@@ -258,22 +262,31 @@ async def dispatch_claude(
                 error=error_msg,
             )
 
+        logger.info(
+            "dispatch_claude: pid=%s proc exited (returncode=%s), draining stdout",
+            pid, proc.returncode,
+        )
         # Normal exit: await drain completion, read stderr.
         # Use timeouts on both reads so that orphaned grandchild processes that
         # inherited the stdout/stderr pipe fds cannot block us indefinitely
         # after claude has exited.
         try:
             await asyncio.wait_for(drain_task, timeout=5.0)
+            logger.info("dispatch_claude: pid=%s drain_task done, lines=%s", pid, len(lines))
         except asyncio.TimeoutError:
+            logger.info("dispatch_claude: pid=%s drain_task timed out, lines so far=%s", pid, len(lines))
             drain_task.cancel()
         raw_output = b"".join(lines).decode(errors="replace")
+        logger.info("dispatch_claude: pid=%s reading stderr", pid)
         stderr_bytes = b""
         if proc.stderr:
             try:
                 stderr_bytes = await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
+                logger.info("dispatch_claude: pid=%s stderr read done (%s bytes)", pid, len(stderr_bytes))
             except asyncio.TimeoutError:
-                pass
+                logger.info("dispatch_claude: pid=%s stderr read timed out", pid)
         exit_code = proc.returncode or 0
+        logger.info("dispatch_claude: pid=%s returning exit_code=%s output_len=%s", pid, exit_code, len(raw_output))
 
         if exit_code != 0:
             stderr_text = stderr_bytes.decode(errors="replace").strip()
