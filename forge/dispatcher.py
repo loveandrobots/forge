@@ -259,14 +259,20 @@ async def dispatch_claude(
             )
 
         # Normal exit: await drain completion, read stderr.
-        # Use a timeout so that orphaned grandchild processes that inherited the
-        # stdout pipe fd cannot block us indefinitely after claude has exited.
+        # Use timeouts on both reads so that orphaned grandchild processes that
+        # inherited the stdout/stderr pipe fds cannot block us indefinitely
+        # after claude has exited.
         try:
             await asyncio.wait_for(drain_task, timeout=5.0)
         except asyncio.TimeoutError:
             drain_task.cancel()
         raw_output = b"".join(lines).decode(errors="replace")
-        stderr_bytes = await proc.stderr.read() if proc.stderr else b""
+        stderr_bytes = b""
+        if proc.stderr:
+            try:
+                stderr_bytes = await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
         exit_code = proc.returncode or 0
 
         if exit_code != 0:
@@ -370,14 +376,20 @@ async def dispatch_generate(
             )
 
         # Normal exit: await drain completion, read stderr.
-        # Use a timeout so that orphaned grandchild processes that inherited the
-        # stdout pipe fd cannot block us indefinitely after claude has exited.
+        # Use timeouts on both reads so that orphaned grandchild processes that
+        # inherited the stdout/stderr pipe fds cannot block us indefinitely
+        # after claude has exited.
         try:
             await asyncio.wait_for(drain_task, timeout=5.0)
         except asyncio.TimeoutError:
             drain_task.cancel()
         raw_output = b"".join(lines).decode(errors="replace")
-        stderr_bytes = await proc.stderr.read() if proc.stderr else b""
+        stderr_bytes = b""
+        if proc.stderr:
+            try:
+                stderr_bytes = await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
         exit_code = proc.returncode or 0
 
         if exit_code != 0:
