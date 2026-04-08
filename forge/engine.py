@@ -444,6 +444,26 @@ class PipelineEngine:
                     self._current_dispatch_task = None
                     self._current_dispatch_pid = None
                     continue
+                except Exception as exc:
+                    # Unexpected dispatcher error — record it and let retry logic handle it
+                    self._log(
+                        "error",
+                        f"Unexpected dispatcher exception for task {task_id}: {exc}",
+                        task_id=task_id,
+                        stage_run_id=stage_run_id,
+                    )
+                    database.update_stage_run(
+                        conn,
+                        stage_run_id,
+                        status="error",
+                        finished_at=_now(),
+                        error_message=f"Dispatcher exception: {exc}",
+                    )
+                    conn.close()
+                    self.current_task_id = None
+                    self._current_dispatch_task = None
+                    self._current_dispatch_pid = None
+                    continue
                 finally:
                     self._current_dispatch_task = None
                     self._current_dispatch_pid = None

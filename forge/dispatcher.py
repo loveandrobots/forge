@@ -224,10 +224,10 @@ async def dispatch_claude(
         async def drain_stdout() -> None:
             assert proc.stdout is not None
             while True:
-                line = await proc.stdout.readline()
-                if not line:
+                chunk = await proc.stdout.read(65536)
+                if not chunk:
                     break
-                lines.append(line)
+                lines.append(chunk)
 
         drain_task = asyncio.create_task(drain_stdout())
 
@@ -353,10 +353,10 @@ async def dispatch_generate(
         async def drain_stdout() -> None:
             assert proc.stdout is not None
             while True:
-                line = await proc.stdout.readline()
-                if not line:
+                chunk = await proc.stdout.read(65536)
+                if not chunk:
                     break
-                lines.append(line)
+                lines.append(chunk)
 
         drain_task = asyncio.create_task(drain_stdout())
 
