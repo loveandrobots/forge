@@ -6,8 +6,6 @@ import asyncio
 import os
 import subprocess
 
-import pytest
-
 from forge import database as db
 from forge.config import Settings
 from forge.engine import PipelineEngine, reset_repo_state
