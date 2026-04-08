@@ -397,3 +397,105 @@ class TestResetTaskDashboard:
         resp = client.get(f"/tasks/{task_id}")
         assert resp.status_code == 200
         assert "reset-stage-" not in resp.text
+
+    def test_task_detail_reset_button_has_json_enc(
+        self, client, project_id, task_id, tmp_path
+    ):
+        _make_needs_human(client, task_id, tmp_path)
+        resp = client.get(f"/tasks/{task_id}")
+        assert resp.status_code == 200
+        assert 'hx-ext="json-enc"' in resp.text
+
+    def test_task_detail_json_enc_extension_loaded(
+        self, client, project_id, task_id, tmp_path
+    ):
+        _make_needs_human(client, task_id, tmp_path)
+        resp = client.get(f"/tasks/{task_id}")
+        assert resp.status_code == 200
+        assert "htmx-ext-json-enc" in resp.text
+
+    def test_task_detail_action_buttons_success_only_reload(
+        self, client, project_id, task_id, tmp_path
+    ):
+        """All action buttons use event.detail.successful before reloading."""
+        _make_needs_human(client, task_id, tmp_path)
+        resp = client.get(f"/tasks/{task_id}")
+        assert resp.status_code == 200
+        html = resp.text
+        # No bare window.location.reload() without the success check
+        assert 'hx-on::after-request="window.location.reload()"' not in html
+        # All after-request handlers should check successful
+        assert "event.detail.successful" in html
+
+
+# ---------------------------------------------------------------------------
+# JSON body end-to-end API tests
+# ---------------------------------------------------------------------------
+
+
+class TestResetTaskJSONBody:
+    def test_reset_api_json_body_paused_task(self, client, project_id, task_id, tmp_path):
+        """POST with JSON body from_stage resets a paused task and verifies full state."""
+        _pause(client, task_id)
+        resp = client.post(
+            f"/api/tasks/{task_id}/reset",
+            json={"from_stage": "spec"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "active"
+        assert data["current_stage"] == "spec"
+
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            runs = database.list_stage_runs(conn, task_id=task_id)
+            assert len(runs) == 1
+            assert runs[0]["stage"] == "spec"
+            assert runs[0]["status"] == "queued"
+            assert runs[0]["attempt"] == 1
+        finally:
+            conn.close()
+
+    def test_reset_api_json_body_failed_task(self, client, project_id, task_id, tmp_path):
+        """POST with JSON body from_stage resets a failed task and verifies full state."""
+        _make_failed(client, task_id, tmp_path)
+        resp = client.post(
+            f"/api/tasks/{task_id}/reset",
+            json={"from_stage": "spec"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "active"
+        assert data["current_stage"] == "spec"
+
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            runs = database.list_stage_runs(conn, task_id=task_id)
+            assert len(runs) == 1
+            assert runs[0]["stage"] == "spec"
+            assert runs[0]["status"] == "queued"
+            assert runs[0]["attempt"] == 1
+        finally:
+            conn.close()
+
+    def test_reset_api_json_body_needs_human_task(self, client, project_id, task_id, tmp_path):
+        """POST with JSON body from_stage resets a needs_human task and verifies full state."""
+        _make_needs_human(client, task_id, tmp_path)
+        resp = client.post(
+            f"/api/tasks/{task_id}/reset",
+            json={"from_stage": "spec"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "active"
+        assert data["current_stage"] == "spec"
+
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            runs = database.list_stage_runs(conn, task_id=task_id)
+            assert len(runs) == 1
+            assert runs[0]["stage"] == "spec"
+            assert runs[0]["status"] == "queued"
+            assert runs[0]["attempt"] == 1
+        finally:
+            conn.close()

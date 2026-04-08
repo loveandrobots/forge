@@ -31,16 +31,16 @@
     </div>
     <div class="task-actions">
         {% if task.status in ('needs_human', 'paused') %}
-        <button class="btn btn-primary" hx-post="/api/tasks/{{ task.id }}/resume" hx-swap="none" hx-on::after-request="window.location.reload()">Resume</button>
+        <button class="btn btn-primary" hx-post="/api/tasks/{{ task.id }}/resume" hx-swap="none" hx-on::after-request="if(event.detail.successful) window.location.reload()">Resume</button>
         {% endif %}
         {% if task.status == 'active' %}
-        <button class="btn btn-secondary" hx-post="/api/tasks/{{ task.id }}/pause" hx-swap="none" hx-on::after-request="window.location.reload()">Pause</button>
+        <button class="btn btn-secondary" hx-post="/api/tasks/{{ task.id }}/pause" hx-swap="none" hx-on::after-request="if(event.detail.successful) window.location.reload()">Pause</button>
         {% endif %}
         {% if task.status in ('active', 'needs_human') %}
-        <button class="btn" hx-post="/api/tasks/{{ task.id }}/retry" hx-swap="none" hx-on::after-request="window.location.reload()">Retry</button>
+        <button class="btn" hx-post="/api/tasks/{{ task.id }}/retry" hx-swap="none" hx-on::after-request="if(event.detail.successful) window.location.reload()">Retry</button>
         {% endif %}
         {% if task.status in ('backlog', 'active', 'paused', 'needs_human') %}
-        <button class="btn btn-danger" hx-post="/api/tasks/{{ task.id }}/cancel" hx-swap="none" hx-on::after-request="window.location.reload()">Cancel</button>
+        <button class="btn btn-danger" hx-post="/api/tasks/{{ task.id }}/cancel" hx-swap="none" hx-on::after-request="if(event.detail.successful) window.location.reload()">Cancel</button>
         {% endif %}
         {% if task.status in ('needs_human', 'failed', 'paused') %}
         <div class="reset-group">
@@ -51,9 +51,10 @@
             </select>
             <button class="btn btn-warning"
                 hx-post="/api/tasks/{{ task.id }}/reset"
+                hx-ext="json-enc"
                 hx-vals='js:{"from_stage": document.getElementById("reset-stage-{{ task.id }}").value}'
                 hx-swap="none"
-                hx-on::after-request="window.location.reload()">
+                hx-on::after-request="if(event.detail.successful) window.location.reload()">
                 Reset
             </button>
         </div>
