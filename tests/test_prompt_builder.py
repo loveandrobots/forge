@@ -978,6 +978,29 @@ class TestReviewTemplatesCleanedUp:
 
         assert "forge-output" not in QUICK_REVIEW_TEMPLATE
 
+    def test_epic_review_template_no_save_instruction(self) -> None:
+        from forge.prompt_builder import EPIC_REVIEW_TEMPLATE
+
+        assert "Save your review to" not in EPIC_REVIEW_TEMPLATE
+
+    def test_epic_review_template_no_forge_output(self) -> None:
+        from forge.prompt_builder import EPIC_REVIEW_TEMPLATE
+
+        assert "forge-output" not in EPIC_REVIEW_TEMPLATE
+
+    def test_epic_review_template_references_json_schema(self) -> None:
+        from forge.prompt_builder import EPIC_REVIEW_TEMPLATE
+
+        assert "--json-schema" in EPIC_REVIEW_TEMPLATE
+
+    def test_epic_review_template_still_has_review_guidance(self) -> None:
+        from forge.prompt_builder import EPIC_REVIEW_TEMPLATE
+
+        assert "PASS" in EPIC_REVIEW_TEMPLATE
+        assert "ISSUES" in EPIC_REVIEW_TEMPLATE
+        assert "epic_intent_check" in EPIC_REVIEW_TEMPLATE
+        assert "integration_check" in EPIC_REVIEW_TEMPLATE
+
     def test_review_template_still_has_review_guidance(self) -> None:
         """Templates still describe what to evaluate even without formatting instructions."""
         from forge.prompt_builder import REVIEW_TEMPLATE
