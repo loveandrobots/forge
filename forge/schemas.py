@@ -76,6 +76,7 @@ PLAN_SCHEMA: dict = {
             "type": "array",
             "items": {"type": "string"},
         },
+        "content": {"type": "string"},
     },
     "required": [
         "approach",
@@ -83,6 +84,7 @@ PLAN_SCHEMA: dict = {
         "files_to_modify",
         "test_plan",
         "risks",
+        "content",
     ],
 }
 

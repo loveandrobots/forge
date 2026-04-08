@@ -151,7 +151,7 @@ class TestPlanSchema:
     def test_plan_schema_has_required_fields(self) -> None:
         schema = get_schema("plan")
         required = set(schema["required"])
-        assert required == {"approach", "acceptance_criteria_mapping", "files_to_modify", "test_plan", "risks"}
+        assert required == {"approach", "acceptance_criteria_mapping", "files_to_modify", "test_plan", "risks", "content"}
 
     def test_plan_schema_mapping_structure(self) -> None:
         schema = get_schema("plan")
@@ -160,6 +160,12 @@ class TestPlanSchema:
         assert mapping_items["properties"]["criterion_text"]["type"] == "string"
         assert mapping_items["properties"]["implementation"]["type"] == "string"
         assert set(mapping_items["required"]) == {"criterion_id", "criterion_text", "implementation"}
+
+    def test_plan_schema_content_field(self) -> None:
+        schema = get_schema("plan")
+        assert "content" in schema["properties"]
+        assert schema["properties"]["content"]["type"] == "string"
+        assert "content" in schema["required"]
 
     def test_plan_schema_test_plan_structure(self) -> None:
         schema = get_schema("plan")
