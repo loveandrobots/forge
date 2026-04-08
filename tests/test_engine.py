@@ -6578,3 +6578,204 @@ class TestLoadArtifactsFallback:
         assert "spec_criteria_list" in artifacts
         assert "1. First criterion" in artifacts["spec_criteria_list"]
         assert "2. Second criterion" in artifacts["spec_criteria_list"]
+
+
+# ---------------------------------------------------------------------------
+# Progress stall detection tests (AC 9, 10, 13, 14, 15)
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseMigrationTerminationReason:
+    """AC9: termination_reason column exists and is usable."""
+
+    def test_termination_reason_column_exists(self, conn: sqlite3.Connection) -> None:
+        """Insert and update a stage_run with termination_reason."""
+        pid = db.insert_project(conn, name="P", repo_path="/tmp")
+        tid = db.insert_task(conn, project_id=pid, title="T")
+        sr_id = db.insert_stage_run(conn, task_id=tid, stage="spec", attempt=1)
+        db.update_stage_run(conn, sr_id, termination_reason="progress_stall")
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["termination_reason"] == "progress_stall"
+
+    def test_migration_idempotent(self) -> None:
+        """Running migrate() twice does not raise."""
+        c = db.get_connection(":memory:")
+        db.migrate(c)
+        db.migrate(c)  # should not raise
+        c.close()
+
+
+class TestHandleTimeoutTerminationReason:
+    """AC10: handle_timeout sets termination_reason='wall_clock_timeout'."""
+
+    async def test_timeout_sets_termination_reason(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        old_time = (
+            datetime.now(timezone.utc) - timedelta(seconds=9999)
+        ).isoformat()
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert sr["termination_reason"] == "wall_clock_timeout"
+
+
+class TestProgressStallDetection:
+    """AC13-15: progress stall detection in _check_timeouts."""
+
+    async def test_stall_detected_and_killed(
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
+    ) -> None:
+        """AC13: stalled dispatch is killed with termination_reason='progress_stall'."""
+        import time
+
+        engine_settings = EngineSettings(progress_timeout_seconds=60)
+        settings = Settings(engine=engine_settings)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        # started_at is recent so wall-clock timeout doesn't fire
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        # Stale progress timestamp (120s > 60s threshold)
+        engine._progress_timestamps[task_id] = [time.monotonic() - 120]
+        engine._current_dispatch_pid = 12345
+
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        engine._current_dispatch_task = mock_task
+
+        with patch("forge.engine.os.kill") as mock_kill:
+            await engine._check_timeouts(conn)
+
+        mock_kill.assert_called_once_with(12345, signal.SIGKILL)
+        mock_task.cancel.assert_called_once()
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert sr["termination_reason"] == "progress_stall"
+        assert "No output for" in sr["error_message"]
+
+        # Verify retry was queued
+        runs = db.list_stage_runs(conn, task_id=task_id, status="queued")
+        assert len(runs) == 1
+
+    async def test_per_project_override_respected(
+        self,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """AC14: per-project progress_timeout_seconds overrides engine default."""
+        import time
+
+        # Engine default = 300, project override = 600
+        engine_settings = EngineSettings(progress_timeout_seconds=300)
+        settings = Settings(engine=engine_settings)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        pid = db.insert_project(
+            conn,
+            name="CustomProject",
+            repo_path="/tmp/repo2",
+            gate_dir="/tmp/repo2/gates",
+            config={"progress_timeout_seconds": 600},
+        )
+        task_id = db.insert_task(conn, project_id=pid, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        # 400s stale — exceeds engine default (300) but NOT project override (600)
+        engine._progress_timestamps[task_id] = [time.monotonic() - 400]
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "running"  # Should not have fired
+
+        # Now set to 700s stale — exceeds project override (600)
+        engine._progress_timestamps[task_id] = [time.monotonic() - 700]
+
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        engine._current_dispatch_task = mock_task
+
+        with patch("forge.engine.os.kill"):
+            await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert sr["termination_reason"] == "progress_stall"
+
+    async def test_no_false_stall_on_fresh_output(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC15: fresh progress timestamp does not trigger stall."""
+        import time
+
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        # Fresh timestamp — should not trigger
+        engine._progress_timestamps[task_id] = [time.monotonic()]
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "running"
+
+    async def test_no_stall_check_without_progress_timestamps(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC15: task_id not in _progress_timestamps — no stall detection."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        # No entry in _progress_timestamps for this task
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "running"

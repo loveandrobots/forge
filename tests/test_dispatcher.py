@@ -431,31 +431,41 @@ def _make_claude_proc_mock(
     hang_readline: bool = False,
     pid: int | None = None,
 ) -> MagicMock:
-    """Build a mock claude process using readline/wait (incremental drain)."""
+    """Build a mock claude process using read()/wait (incremental drain)."""
     mock_proc = MagicMock()
     mock_proc.returncode = returncode
     mock_proc.kill = MagicMock()
     if pid is not None:
         mock_proc.pid = pid
 
-    # stdout with readline
+    # stdout with read() — chunks are returned one per call, then b""
     mock_proc.stdout = MagicMock()
     if hang_readline:
-        # Yield lines, then block forever (simulates slow process)
+        # Yield chunks, then block forever (simulates slow process)
         call_count = 0
 
-        async def readline():
+        async def read_chunk(_size: int = 65536) -> bytes:
             nonlocal call_count
             if call_count < len(stdout_lines):
-                line = stdout_lines[call_count]
+                chunk = stdout_lines[call_count]
                 call_count += 1
-                return line
+                return chunk
             await asyncio.sleep(999)
             return b""
 
-        mock_proc.stdout.readline = readline
+        mock_proc.stdout.read = read_chunk
     else:
-        mock_proc.stdout.readline = _make_readline_mock(stdout_lines)
+        call_count = 0
+
+        async def read_chunk(_size: int = 65536) -> bytes:
+            nonlocal call_count
+            if call_count < len(stdout_lines):
+                chunk = stdout_lines[call_count]
+                call_count += 1
+                return chunk
+            return b""
+
+        mock_proc.stdout.read = read_chunk
 
     # stderr
     mock_proc.stderr = MagicMock()
@@ -987,3 +997,82 @@ class TestDispatchClaudeCheckoutTimeout:
 
         # pid_callback should have been called once (for the claude process, not git)
         assert 99999 in received_pids
+
+
+class TestProgressTimerUpdates:
+    """AC12: last_output_time is updated on each stdout read."""
+
+    async def test_last_output_time_updated_on_read(self, git_repo):
+        """last_output_time[0] is updated to near-current monotonic time after output."""
+        import time
+
+        result_line = json.dumps(
+            {
+                "type": "result",
+                "result": "done",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
+
+        async def mock_exec(*args, **kwargs):
+            if args[0] == "git":
+                return _make_git_proc_mock()
+            return _make_claude_proc_mock(
+                stdout_lines=[
+                    b"line1\n",
+                    b"line2\n",
+                    result_line.encode() + b"\n",
+                ],
+            )
+
+        last_output_time: list[float] = [0.0]
+        before = time.monotonic()
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="main",
+                timeout=60,
+                last_output_time=last_output_time,
+            )
+
+        after = time.monotonic()
+        assert result.exit_code == 0
+        # last_output_time should have been updated to a time between before and after
+        assert last_output_time[0] >= before
+        assert last_output_time[0] <= after
+
+    async def test_last_output_time_none_by_default(self, git_repo):
+        """dispatch_claude works normally when last_output_time is not provided."""
+        result_line = json.dumps(
+            {
+                "type": "result",
+                "result": "ok",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        )
+
+        async def mock_exec(*args, **kwargs):
+            if args[0] == "git":
+                return _make_git_proc_mock()
+            return _make_claude_proc_mock(
+                stdout_lines=[result_line.encode() + b"\n"],
+            )
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="main",
+                timeout=60,
+            )
+
+        assert result.exit_code == 0
+        assert result.error is None

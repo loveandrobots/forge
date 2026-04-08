@@ -125,6 +125,7 @@ async def dispatch_claude(
     headless_flags: str = "",
     json_schema: str | None = None,
     pid_callback: Callable[[int], None] | None = None,
+    last_output_time: list[float] | None = None,
 ) -> DispatchResult:
     """Spawn a Claude Code CLI session and capture output.
 
@@ -216,6 +217,8 @@ async def dispatch_claude(
         logger.info("dispatch_claude: spawned pid=%s", pid)
         if pid_callback is not None and pid is not None:
             pid_callback(pid)
+        if last_output_time is not None:
+            last_output_time[0] = time.monotonic()
 
         # Incremental drain: read stdout line-by-line so partial output
         # is preserved when the subprocess times out.
@@ -228,6 +231,8 @@ async def dispatch_claude(
                 if not chunk:
                     break
                 lines.append(chunk)
+                if last_output_time is not None:
+                    last_output_time[0] = time.monotonic()
 
         drain_task = asyncio.create_task(drain_stdout())
 

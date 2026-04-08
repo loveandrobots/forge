@@ -9,11 +9,13 @@ import os
 import re
 import signal
 import sqlite3
+import time
 from datetime import datetime, timezone
 
 from forge import database
 from forge.config import (
     FLOW_STAGES,
+    EngineSettings,
     STAGES,
     VALID_FLOWS,
     Settings,
@@ -178,6 +180,24 @@ def _parse_stage_timeouts(project: dict) -> dict | None:
     return json.loads(raw)
 
 
+def _resolve_progress_timeout(
+    project: dict | None,
+    engine: "EngineSettings",
+) -> int:
+    """Resolve progress timeout: project config override > engine default."""
+    if project:
+        raw = project.get("config")
+        if raw:
+            try:
+                cfg = json.loads(raw) if isinstance(raw, str) else raw
+                val = cfg.get("progress_timeout_seconds")
+                if val is not None:
+                    return int(val)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+    return engine.progress_timeout_seconds
+
+
 def _git_metadata(result: GitResult) -> dict:
     """Build metadata dict from a GitResult for log entries."""
     return {
@@ -199,6 +219,7 @@ class PipelineEngine:
         self._timeout_task: asyncio.Task | None = None
         self._current_dispatch_task: asyncio.Task | None = None
         self._current_dispatch_pid: int | None = None
+        self._progress_timestamps: dict[str, list[float]] = {}
 
     async def start(self) -> None:
         """Set running=True and begin the loop."""
@@ -424,6 +445,8 @@ class PipelineEngine:
                 schema = get_schema(stage, flow)
                 if schema:
                     json_schema_str = json.dumps(schema)
+                progress_ts: list[float] = [time.monotonic()]
+                self._progress_timestamps[task_id] = progress_ts
                 self._current_dispatch_task = asyncio.create_task(
                     dispatch_claude(
                         prompt=prompt,
@@ -433,6 +456,7 @@ class PipelineEngine:
                         headless_flags=self.settings.claude.headless_flags,
                         json_schema=json_schema_str,
                         pid_callback=self._set_dispatch_pid,
+                        last_output_time=progress_ts,
                     )
                 )
                 try:
@@ -467,6 +491,7 @@ class PipelineEngine:
                 finally:
                     self._current_dispatch_task = None
                     self._current_dispatch_pid = None
+                    self._progress_timestamps.pop(task_id, None)
 
                 finished_at = _now()
 
@@ -1210,6 +1235,74 @@ class PipelineEngine:
             )
             if elapsed > timeout_seconds:
                 await self.handle_timeout(conn, sr)
+                continue
+
+            # Check progress-based inactivity timeout
+            task_id = sr["task_id"]
+            if task_id in self._progress_timestamps:
+                idle = time.monotonic() - self._progress_timestamps[task_id][0]
+                progress_timeout = _resolve_progress_timeout(
+                    project if task_row else None,
+                    self.settings.engine,
+                )
+                if idle > progress_timeout:
+                    await self.handle_progress_stall(conn, sr, idle)
+
+    async def handle_progress_stall(
+        self,
+        conn: sqlite3.Connection,
+        stage_run: sqlite3.Row,
+        idle_seconds: float,
+    ) -> None:
+        """Kill a stalled dispatch and trigger retry."""
+        sr_id = stage_run["id"]
+        task_id = stage_run["task_id"]
+        stage = stage_run["stage"]
+
+        if self._current_dispatch_pid is not None:
+            try:
+                os.kill(self._current_dispatch_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            self._current_dispatch_pid = None
+        if (
+            self._current_dispatch_task is not None
+            and not self._current_dispatch_task.done()
+        ):
+            self._current_dispatch_task.cancel()
+
+        database.update_stage_run(
+            conn,
+            sr_id,
+            status="error",
+            finished_at=_now(),
+            termination_reason="progress_stall",
+            error_message=f"No output for {int(idle_seconds)}s",
+        )
+        self._log(
+            "warn",
+            f"Stage run {sr_id} stalled — no output for {int(idle_seconds)}s",
+            task_id=task_id,
+            stage_run_id=sr_id,
+        )
+
+        task_row = database.get_task(conn, task_id)
+        if task_row:
+            project_row = database.get_project(conn, task_row["project_id"])
+            project = None
+            reset_ok = True
+            if project_row:
+                project = _row_to_dict(project_row)
+                reset_ok = await self._reset_and_log(
+                    project["repo_path"],
+                    project["default_branch"],
+                    conn,
+                    task_id,
+                )
+            if reset_ok:
+                await self._handle_error_retry(
+                    conn, _row_to_dict(task_row), stage, sr_id, project=project
+                )
 
     def _activate_backlog_tasks(self, conn: sqlite3.Connection) -> None:
         """Pick up backlog tasks: set status='active', current_stage to first stage, create initial stage_run."""
