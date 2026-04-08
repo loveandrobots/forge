@@ -72,7 +72,7 @@ class TestArtifactPathForStage:
 
     def test_review_standard(self) -> None:
         path = _artifact_path_for_stage("/tmp/repo", "task-123", "review")
-        assert path == "/tmp/repo/_forge/reviews/task-123.md"
+        assert path == "/tmp/repo/_forge/reviews/task-123.json"
 
     def test_implement_returns_none(self) -> None:
         path = _artifact_path_for_stage("/tmp/repo", "task-123", "implement")
@@ -82,9 +82,9 @@ class TestArtifactPathForStage:
         path = _artifact_path_for_stage("/tmp/repo", "task-123", "spec", flow="epic")
         assert path == "/tmp/repo/_forge/epic-decompositions/task-123.json"
 
-    def test_review_epic_returns_review_md(self) -> None:
+    def test_review_epic_returns_review_json(self) -> None:
         path = _artifact_path_for_stage("/tmp/repo", "task-123", "review", flow="epic")
-        assert path == "/tmp/repo/_forge/reviews/task-123.md"
+        assert path == "/tmp/repo/_forge/reviews/task-123.json"
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ class TestAdvanceTaskSetsArtifactPaths:
         await engine.advance_task(conn, task_id, "review", project=project)
 
         task = db.get_task(conn, task_id)
-        assert task["review_path"] == f"/tmp/repo/_forge/reviews/{task_id}.md"
+        assert task["review_path"] == f"/tmp/repo/_forge/reviews/{task_id}.json"
         assert task["status"] == "done"
 
     async def test_epic_spec_pass_sets_spec_path_to_decomposition(
@@ -196,7 +196,7 @@ class TestAdvanceTaskSetsArtifactPaths:
             await engine.advance_task(conn, task_id, "review", project=project)
 
         task = db.get_task(conn, task_id)
-        assert task["review_path"] == f"/tmp/repo/_forge/reviews/{task_id}.md"
+        assert task["review_path"] == f"/tmp/repo/_forge/reviews/{task_id}.json"
         # Task should NOT be "done" since merge failed
         assert task["status"] != "done"
 
@@ -235,7 +235,7 @@ class TestAdvanceTaskSetsArtifactPaths:
         task = db.get_task(conn, task_id)
         assert task["spec_path"] == f"/tmp/repo/_forge/specs/{task_id}.json"
         assert task["plan_path"] == f"/tmp/repo/_forge/plans/{task_id}.json"
-        assert task["review_path"] == f"/tmp/repo/_forge/reviews/{task_id}.md"
+        assert task["review_path"] == f"/tmp/repo/_forge/reviews/{task_id}.json"
         assert task["status"] == "done"
 
 
@@ -814,22 +814,23 @@ class TestLoadArtifactsLegacyFallback:
 
         assert task["review_path"] is None
 
-        expected_review_path = f"/tmp/repo/_forge/reviews/{task_id}.md"
+        expected_review_path = f"/tmp/repo/_forge/reviews/{task_id}.json"
 
         with (
             patch("forge.engine.os.path.exists", return_value=True),
-            patch("forge.engine.load_artifact") as mock_load,
+            patch("forge.engine.load_structured_artifact") as mock_load,
+            patch("forge.prompt_builder.build_structured_review_feedback", return_value="review feedback content") as mock_build,
         ):
-            mock_load.return_value = "review feedback content"
+            mock_load.return_value = {"verdict": "bounce", "issues": []}
             artifacts = engine._load_artifacts(
                 task, project, "implement", stage_run, conn
             )
 
-        # Verify load_artifact was called with the conventional path from
+        # Verify load_structured_artifact was called with the conventional path from
         # _artifact_path_for_stage, not a hardcoded os.path.join
         assert any(
             call.args == (expected_review_path,) for call in mock_load.call_args_list
-        ), f"Expected load_artifact to be called with {expected_review_path}"
+        ), f"Expected load_structured_artifact to be called with {expected_review_path}"
         assert artifacts["review_feedback"] == "review feedback content"
 
     def test_review_feedback_uses_explicit_review_path(

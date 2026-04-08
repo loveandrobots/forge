@@ -96,7 +96,7 @@ def _artifact_path_for_stage(
     mapping = {
         "spec": f"_forge/specs/{task_id}.json",
         "plan": f"_forge/plans/{task_id}.json",
-        "review": f"_forge/reviews/{task_id}.md",
+        "review": f"_forge/reviews/{task_id}.json",
     }
     rel = mapping.get(stage)
     if rel is None:
