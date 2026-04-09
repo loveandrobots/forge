@@ -48,14 +48,14 @@ def engine_settings() -> EngineSettings:
 
 class TestEngineSettingsDefaults:
     def test_default_stage_timeouts(self) -> None:
-        """AC 1, 9: default stage_timeouts has implement=900."""
+        """AC 1, 9: default stage_timeouts has implement=7200."""
         es = EngineSettings()
-        assert es.stage_timeouts == {"implement": 900}
+        assert es.stage_timeouts == {"implement": 7200}
 
     def test_default_stage_timeout_seconds(self) -> None:
-        """AC 8: global default remains 600."""
+        """AC 8: global default is 3600 (1-hour failsafe)."""
         es = EngineSettings()
-        assert es.stage_timeout_seconds == 600
+        assert es.stage_timeout_seconds == 3600
 
     def test_engine_settings_from_dict(self) -> None:
         """AC 1: stage_timeouts loaded from config dict."""
@@ -68,17 +68,17 @@ class TestEngineSettingsDefaults:
 class TestResolveStageTimeout:
     def test_fallback_to_global_default(self, engine_settings: EngineSettings) -> None:
         """AC 2, 3: stages not in stage_timeouts fall back to stage_timeout_seconds."""
-        assert resolve_stage_timeout("spec", None, engine_settings) == 600
+        assert resolve_stage_timeout("spec", None, engine_settings) == 3600
 
     def test_per_stage_config(self, engine_settings: EngineSettings) -> None:
         """AC 1: implement uses per-stage config value."""
-        assert resolve_stage_timeout("implement", None, engine_settings) == 900
+        assert resolve_stage_timeout("implement", None, engine_settings) == 7200
 
     def test_empty_stage_timeouts(self) -> None:
         """AC 2: empty stage_timeouts dict falls back to global default."""
         es = EngineSettings(stage_timeouts={})
-        assert resolve_stage_timeout("implement", None, es) == 600
-        assert resolve_stage_timeout("spec", None, es) == 600
+        assert resolve_stage_timeout("implement", None, es) == 3600
+        assert resolve_stage_timeout("spec", None, es) == 3600
 
     def test_project_override_takes_precedence(self, engine_settings: EngineSettings) -> None:
         """AC 6, 7: project-level override wins over global per-stage config."""
@@ -86,13 +86,13 @@ class TestResolveStageTimeout:
 
     def test_full_fallback_chain(self) -> None:
         """AC 6, 7: three-tier resolution across all stages."""
-        es = EngineSettings(stage_timeouts={"plan": 400, "implement": 900})
+        es = EngineSettings(stage_timeouts={"plan": 400, "implement": 7200})
         project_timeouts = {"spec": 200}
 
         assert resolve_stage_timeout("spec", project_timeouts, es) == 200  # project
         assert resolve_stage_timeout("plan", project_timeouts, es) == 400  # global per-stage
-        assert resolve_stage_timeout("implement", project_timeouts, es) == 900  # global per-stage
-        assert resolve_stage_timeout("review", project_timeouts, es) == 600  # global default
+        assert resolve_stage_timeout("implement", project_timeouts, es) == 7200  # global per-stage
+        assert resolve_stage_timeout("review", project_timeouts, es) == 3600  # global default
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ class TestDatabaseStageTimeouts:
 
 class TestCheckTimeoutsPerStage:
     async def test_implement_uses_longer_timeout(self, conn: sqlite3.Connection) -> None:
-        """AC 7: implement stage at 700s should NOT time out (900s timeout)."""
+        """AC 7: implement stage at 3700s should NOT time out (7200s timeout)."""
         settings = Settings()
         engine = PipelineEngine(settings, ":memory:")
 
@@ -186,7 +186,7 @@ class TestCheckTimeoutsPerStage:
         task_id = db.insert_task(conn, project_id=pid, title="T", max_retries=3)
         db.update_task(conn, task_id, status="active", current_stage="implement")
 
-        old_time = (datetime.now(timezone.utc) - timedelta(seconds=700)).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=3700)).isoformat()
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="implement", attempt=1, status="running"
         )
@@ -195,10 +195,10 @@ class TestCheckTimeoutsPerStage:
         await engine._check_timeouts(conn)
 
         sr = db.get_stage_run(conn, sr_id)
-        assert sr["status"] == "running"  # 700 < 900, not timed out
+        assert sr["status"] == "running"  # 3700 < 7200, not timed out
 
     async def test_spec_times_out_at_default(self, conn: sqlite3.Connection) -> None:
-        """AC 7: spec stage at 700s should time out (600s default timeout)."""
+        """AC 7: spec stage at 3700s should time out (3600s default timeout)."""
         settings = Settings()
         engine = PipelineEngine(settings, ":memory:")
 
@@ -206,7 +206,7 @@ class TestCheckTimeoutsPerStage:
         task_id = db.insert_task(conn, project_id=pid, title="T", max_retries=3)
         db.update_task(conn, task_id, status="active", current_stage="spec")
 
-        old_time = (datetime.now(timezone.utc) - timedelta(seconds=700)).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=3700)).isoformat()
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
@@ -240,3 +240,55 @@ class TestCheckTimeoutsPerStage:
 
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "running"  # 1000 < 1200, not timed out
+
+    async def test_wall_clock_timeout_fires_as_fallback(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Wall-clock timeout fires as a last-resort failsafe when elapsed exceeds the limit."""
+        settings = Settings()
+        engine = PipelineEngine(settings, ":memory:")
+
+        pid = db.insert_project(conn, name="TP_fallback", repo_path="/tmp/r")
+        task_id = db.insert_task(conn, project_id=pid, title="T", max_retries=3)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+
+        # Exceed the 3600s default wall-clock timeout
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=4000)).isoformat()
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert sr["termination_reason"] == "wall_clock_timeout"
+        assert "timed out" in sr["error_message"]
+
+    async def test_project_override_preserved_with_new_defaults(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Projects with existing stage_timeouts overrides keep their values."""
+        settings = Settings()
+        engine = PipelineEngine(settings, ":memory:")
+
+        # Project has a custom implement timeout of 1800s (lower than new 7200 default)
+        pid = db.insert_project(
+            conn, name="TP_override", repo_path="/tmp/r",
+            stage_timeouts={"implement": 1800},
+        )
+        task_id = db.insert_task(conn, project_id=pid, title="T", max_retries=3)
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+
+        # 2000s exceeds the project override of 1800s
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=2000)).isoformat()
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"  # Project override of 1800s takes effect

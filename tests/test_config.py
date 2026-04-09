@@ -33,7 +33,7 @@ def test_default_settings() -> None:
     s = Settings()
     assert s.engine.poll_interval_seconds == 30
     assert s.engine.max_concurrent_tasks == 1
-    assert s.engine.stage_timeout_seconds == 600
+    assert s.engine.stage_timeout_seconds == 3600
     assert s.engine.default_max_retries == 3
     assert s.claude.default_model == "opus"
     assert s.claude.headless_flags == ""
@@ -52,7 +52,7 @@ def test_get_settings_from_yaml() -> None:
     assert s.engine.poll_interval_seconds == 10
     assert s.engine.max_concurrent_tasks == 2
     # Defaults for missing keys
-    assert s.engine.stage_timeout_seconds == 600
+    assert s.engine.stage_timeout_seconds == 3600
     assert s.claude.default_model == "sonnet"
     assert s.claude.headless_flags == ""
     tmp.unlink()

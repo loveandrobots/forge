@@ -65,8 +65,11 @@ LOG_LEVELS: list[str] = ["info", "warn", "error"]
 class EngineSettings(BaseModel):
     poll_interval_seconds: int = 30
     max_concurrent_tasks: int = 1
-    stage_timeout_seconds: int = 600
-    stage_timeouts: dict[str, int] = Field(default_factory=lambda: {"implement": 900})
+    # Wall-clock timeouts are last-resort failsafes. Progress timeout
+    # (progress_timeout_seconds) and token budget (max_token_budget) are
+    # the primary controls that should fire first under normal conditions.
+    stage_timeout_seconds: int = 3600
+    stage_timeouts: dict[str, int] = Field(default_factory=lambda: {"implement": 7200})
     default_max_retries: int = 3
     progress_timeout_seconds: int = 300
     max_token_budget: int = 2_000_000

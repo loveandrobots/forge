@@ -1150,12 +1150,12 @@ class PipelineEngine:
             status="error",
             finished_at=_now(),
             error_message="Stage run timed out",
-            termination_reason="timeout",
+            termination_reason="wall_clock_timeout",
             tokens_used=tokens_used,
         )
         self._log(
-            "error",
-            f"Stage run {sr_id} timed out",
+            "warn",
+            f"Stage run {sr_id} hit wall-clock timeout — progress timeout and token budget may need adjustment",
             task_id=task_id,
             stage_run_id=sr_id,
         )
