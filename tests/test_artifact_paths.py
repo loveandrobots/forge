@@ -819,7 +819,7 @@ class TestLoadArtifactsLegacyFallback:
         with (
             patch("forge.engine.os.path.exists", return_value=True),
             patch("forge.engine.load_structured_artifact") as mock_load,
-            patch("forge.prompt_builder.build_structured_review_feedback", return_value="review feedback content") as mock_build,
+            patch("forge.prompt_builder.build_structured_review_feedback", return_value="review feedback content"),
         ):
             mock_load.return_value = {"verdict": "bounce", "issues": []}
             artifacts = engine._load_artifacts(
