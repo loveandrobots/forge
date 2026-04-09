@@ -124,7 +124,18 @@
             {% if run.duration_seconds is not none %}
             <span class="duration">{{ "%.1f" | format(run.duration_seconds) }}s</span>
             {% endif %}
+            {% if run.tokens_used is not none %}
+            <span class="duration">{{ run.tokens_used|format_tokens }}</span>
+            {% endif %}
         </div>
+
+        {% if run.termination_reason == 'progress_stall' %}
+        <span class="badge badge-warning">Progress Stall</span>
+        {% elif run.termination_reason == 'token_budget_exceeded' %}
+        <span class="badge badge-error">Token Budget Exceeded</span>
+        {% elif run.termination_reason == 'wall_clock_timeout' %}
+        <span class="badge badge-info">Wall-Clock Timeout</span>
+        {% endif %}
 
         {% if run.error_message %}
         <div class="alert alert-error">{{ run.error_message }}</div>
@@ -172,11 +183,6 @@
             <div class="detail-section">
                 <h4>Gate stdout</h4>
                 <pre class="code-block">{{ run.gate_stdout }}</pre>
-            </div>
-            {% endif %}
-            {% if run.tokens_used is not none %}
-            <div class="detail-section">
-                <span>Tokens used: {{ run.tokens_used }}</span>
             </div>
             {% endif %}
         </details>

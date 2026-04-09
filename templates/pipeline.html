@@ -56,6 +56,16 @@
                     {% elif task.status == 'cancelled' %}
                     <span class="badge badge-cancelled">Cancelled</span>
                     {% endif %}
+                    {% if task.id in stage_run_info and stage_run_info[task.id].termination_reason %}
+                    {% set tr = stage_run_info[task.id].termination_reason %}
+                    {% if tr == 'progress_stall' %}
+                    <span class="badge badge-warning">Progress Stall</span>
+                    {% elif tr == 'token_budget_exceeded' %}
+                    <span class="badge badge-error">Token Budget Exceeded</span>
+                    {% elif tr == 'wall_clock_timeout' %}
+                    <span class="badge badge-info">Wall-Clock Timeout</span>
+                    {% endif %}
+                    {% endif %}
                     <span class="priority">P{{ task.priority }}</span>
                     {% if task.id in stage_run_info and stage_run_info[task.id].attempt > 1 %}
                     <span class="attempt">Attempt {{ stage_run_info[task.id].attempt }}/{{ stage_run_info[task.id].max_retries }}</span>

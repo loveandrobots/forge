@@ -19,6 +19,18 @@ from forge.utils import relative_time
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
+
+def _format_tokens(n: int) -> str:
+    """Format a token count as a human-readable string."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M tokens"
+    if n >= 1_000:
+        return f"{n / 1_000:.0f}K tokens"
+    return f"{n:,} tokens"
+
+
+templates.env.filters["format_tokens"] = _format_tokens
+
 router = APIRouter(tags=["dashboard"])
 
 
@@ -92,7 +104,7 @@ def pipeline_view(request: Request, project_id: str | None = None) -> HTMLRespon
         # Get stage runs for active tasks to show attempt info
         stage_run_info: dict[str, dict] = {}
         for t in task_list:
-            if t["status"] in ("active", "needs_human", "paused"):
+            if t["status"] in ("active", "needs_human", "paused", "failed"):
                 runs = database.list_stage_runs(conn, task_id=t["id"])
                 if runs:
                     latest = _row_to_dict(runs[-1])
