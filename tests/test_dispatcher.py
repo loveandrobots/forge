@@ -1301,27 +1301,3 @@ class TestIncrementalTokenAccumulation:
         # 50+25 + 60+30 = 165
         assert token_count[0] == 165
         assert result.tokens_used == 165
-
-
-# ---------------------------------------------------------------------------
-# Dead code removal verification
-# ---------------------------------------------------------------------------
-
-
-class TestNoDeadReadlineMock:
-    """Verify _make_readline_mock (readline-based helper) was removed."""
-
-    def test_make_readline_mock_not_defined(self):
-        """_make_readline_mock should not exist — _make_claude_proc_mock uses read()."""
-        import tests.test_dispatcher as mod
-
-        assert not hasattr(mod, "_make_readline_mock"), (
-            "_make_readline_mock is dead code; it should be removed"
-        )
-
-    def test_claude_proc_mock_uses_read(self):
-        """_make_claude_proc_mock wires stdout.read, not stdout.readline."""
-        proc = _make_claude_proc_mock(stdout_lines=[b'{"type":"result"}\n'])
-        assert hasattr(proc.stdout, "read") and callable(proc.stdout.read)
-        # readline should not be explicitly wired (only MagicMock default)
-        assert not isinstance(proc.stdout.readline, (type(proc.stdout.read),))
