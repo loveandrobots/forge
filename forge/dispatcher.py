@@ -114,6 +114,26 @@ def parse_stream_json(raw: str) -> tuple[str, int | None, dict | None]:
     return final_text, tokens_used, structured_output
 
 
+def _extract_usage_tokens(line: str) -> int:
+    """Parse a JSON line and return input_tokens + output_tokens if it has a usage field.
+
+    Returns 0 if the line is not valid JSON or has no usage field.
+    """
+    try:
+        obj = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return 0
+    if not isinstance(obj, dict):
+        return 0
+    # Usage can be top-level or nested under "message"
+    usage = obj.get("usage")
+    if not usage and isinstance(obj.get("message"), dict):
+        usage = obj["message"].get("usage")
+    if not isinstance(usage, dict):
+        return 0
+    return usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+
+
 _GIT_CHECKOUT_TIMEOUT = 60.0
 
 
@@ -126,6 +146,7 @@ async def dispatch_claude(
     json_schema: str | None = None,
     pid_callback: Callable[[int], None] | None = None,
     last_output_time: list[float] | None = None,
+    token_count: list[int] | None = None,
 ) -> DispatchResult:
     """Spawn a Claude Code CLI session and capture output.
 
@@ -223,16 +244,35 @@ async def dispatch_claude(
         # Incremental drain: read stdout in chunks so partial output
         # is preserved when the subprocess times out.
         lines: list[bytes] = []
+        _line_buffer = b""  # Buffer for incomplete JSON lines
 
         async def drain_stdout() -> None:
+            nonlocal _line_buffer
             assert proc.stdout is not None
             while True:
                 chunk = await proc.stdout.read(65536)
                 if not chunk:
+                    # Process any remaining buffered data
+                    if _line_buffer and token_count is not None:
+                        token_count[0] += _extract_usage_tokens(
+                            _line_buffer.decode(errors="replace")
+                        )
                     break
                 lines.append(chunk)
                 if last_output_time is not None:
                     last_output_time[0] = time.monotonic()
+                # Incremental token parsing: split on newlines, buffer partials
+                if token_count is not None:
+                    _line_buffer += chunk
+                    parts = _line_buffer.split(b"\n")
+                    # Last element is either empty (line ended with \n) or partial
+                    _line_buffer = parts[-1]
+                    for part in parts[:-1]:
+                        stripped = part.strip()
+                        if stripped:
+                            token_count[0] += _extract_usage_tokens(
+                                stripped.decode(errors="replace")
+                            )
 
         drain_task = asyncio.create_task(drain_stdout())
 
@@ -264,6 +304,7 @@ async def dispatch_claude(
                 output=raw_output,
                 exit_code=-1,
                 duration_seconds=time.monotonic() - start,
+                tokens_used=token_count[0] if token_count and token_count[0] > 0 else None,
                 error=error_msg,
             )
 
@@ -299,16 +340,23 @@ async def dispatch_claude(
                 output=raw_output,
                 exit_code=exit_code,
                 duration_seconds=time.monotonic() - start,
+                tokens_used=token_count[0] if token_count and token_count[0] > 0 else None,
                 error=stderr_text or f"Claude exited with code {exit_code}",
             )
 
-        final_text, tokens_used, structured_output = parse_stream_json(raw_output)
+        final_text, parsed_tokens, structured_output = parse_stream_json(raw_output)
+        # Incremental counter is authoritative (captures partial runs)
+        final_tokens = (
+            token_count[0]
+            if token_count is not None and token_count[0] > 0
+            else parsed_tokens
+        )
 
         return DispatchResult(
             output=final_text,
             exit_code=exit_code,
             duration_seconds=time.monotonic() - start,
-            tokens_used=tokens_used,
+            tokens_used=final_tokens,
             structured_output=structured_output,
         )
 

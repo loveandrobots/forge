@@ -6779,3 +6779,269 @@ class TestProgressStallDetection:
 
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "running"
+
+
+class TestTokenBudgetEnforcement:
+    """Token budget enforcement in _check_timeouts (AC5-AC7, AC11, AC13, AC14)."""
+
+    async def test_token_budget_exceeded_sets_error(
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
+    ) -> None:
+        """AC11: when tokens exceed budget, stage_run gets status=error and
+        termination_reason=token_budget_exceeded."""
+        engine_settings = EngineSettings(max_token_budget=1000)
+        settings = Settings(engine=engine_settings)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        engine._token_counts[task_id] = [5000]
+        engine._current_dispatch_pid = 12345
+
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        engine._current_dispatch_task = mock_task
+
+        with patch("forge.engine.os.kill") as mock_kill:
+            await engine._check_timeouts(conn)
+
+        mock_kill.assert_called_once_with(12345, signal.SIGKILL)
+        mock_task.cancel.assert_called_once()
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert sr["termination_reason"] == "token_budget_exceeded"
+        assert "Token budget exceeded: 5000 / 1000" in sr["error_message"]
+
+        # Verify retry was queued
+        runs = db.list_stage_runs(conn, task_id=task_id, status="queued")
+        assert len(runs) == 1
+
+    async def test_per_project_token_budget_override(
+        self,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """AC13: per-project max_token_budget overrides engine default."""
+        engine_settings = EngineSettings(max_token_budget=2_000_000)
+        settings = Settings(engine=engine_settings)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        pid = db.insert_project(
+            conn,
+            name="BudgetProject",
+            repo_path="/tmp/repo3",
+            gate_dir="/tmp/repo3/gates",
+            max_token_budget=500,
+        )
+        task_id = db.insert_task(conn, project_id=pid, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        # 1000 exceeds project budget of 500 but not engine default of 2M
+        engine._token_counts[task_id] = [1000]
+        engine._current_dispatch_pid = 12345
+
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        engine._current_dispatch_task = mock_task
+
+        with patch("forge.engine.os.kill"):
+            await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert sr["termination_reason"] == "token_budget_exceeded"
+        assert "1000 / 500" in sr["error_message"]
+
+    async def test_partial_tokens_preserved_on_budget_kill(
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
+    ) -> None:
+        """AC14: accumulated token count before kill is written to tokens_used."""
+        engine_settings = EngineSettings(max_token_budget=1000)
+        settings = Settings(engine=engine_settings)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        engine._token_counts[task_id] = [3500]
+        engine._current_dispatch_pid = 12345
+
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        engine._current_dispatch_task = mock_task
+
+        with patch("forge.engine.os.kill"):
+            await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["tokens_used"] == 3500
+
+    async def test_no_budget_violation_when_under_limit(
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
+    ) -> None:
+        """Token count under budget does not trigger enforcement."""
+        engine_settings = EngineSettings(max_token_budget=2_000_000)
+        settings = Settings(engine=engine_settings)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="implement")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="implement", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        engine._token_counts[task_id] = [500_000]
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "running"
+
+
+class TestTokensUsedOnAllPaths:
+    """AC9 + AC12: tokens_used written on all completion paths."""
+
+    async def test_tokens_used_written_on_timeout(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        project_id: str,
+    ) -> None:
+        """AC9: handle_timeout writes tokens_used from _token_counts."""
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        old_time = (
+            datetime.now(timezone.utc) - timedelta(seconds=9999)
+        ).isoformat()
+        db.update_stage_run(conn, sr_id, started_at=old_time)
+
+        engine._token_counts[task_id] = [750]
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert sr["termination_reason"] == "timeout"
+        assert sr["tokens_used"] == 750
+
+    async def test_tokens_used_written_on_progress_stall(
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
+    ) -> None:
+        """AC9: handle_progress_stall writes tokens_used from _token_counts."""
+        import time
+
+        engine_settings = EngineSettings(progress_timeout_seconds=60)
+        settings = Settings(engine=engine_settings)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+
+        engine._progress_timestamps[task_id] = [time.monotonic() - 120]
+        engine._token_counts[task_id] = [1200]
+        engine._current_dispatch_pid = 12345
+
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        engine._current_dispatch_task = mock_task
+
+        with patch("forge.engine.os.kill"):
+            await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "error"
+        assert sr["termination_reason"] == "progress_stall"
+        assert sr["tokens_used"] == 1200
+
+    async def test_tokens_used_recorded_on_normal_completion(
+        self,
+        conn: sqlite3.Connection,
+        project_id: str,
+    ) -> None:
+        """AC12: tokens_used is recorded on stage_run for normal completions."""
+        settings = Settings()
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="queued"
+        )
+
+        mock_result = DispatchResult(
+            output="spec output",
+            exit_code=0,
+            duration_seconds=10.0,
+            tokens_used=1500,
+        )
+        mock_gate = GateResult(
+            gate_name="post-spec",
+            exit_code=0,
+            passed=True,
+            stdout="ok",
+            stderr="",
+            duration_seconds=1.0,
+        )
+
+        with (
+            patch("forge.engine.build_prompt", return_value="prompt"),
+            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=mock_result),
+            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=mock_gate),
+            patch("forge.engine.create_branch", new_callable=AsyncMock, return_value=GitResult(success=True)),
+            patch("forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=GitResult(success=True)),
+            patch("forge.engine.get_git_diff", new_callable=AsyncMock, return_value=""),
+            patch("forge.engine.load_artifact", return_value=""),
+            patch("forge.engine.get_schema", return_value=None),
+        ):
+            # Run one iteration of the engine loop
+            unclosable = _UnclosableConnection(conn)
+            with patch("forge.engine.database.get_connection", return_value=unclosable):
+                engine._loop_task = asyncio.create_task(engine.run_loop())
+                await asyncio.sleep(0.5)
+                engine.running = False
+                engine._loop_task.cancel()
+                try:
+                    await engine._loop_task
+                except asyncio.CancelledError:
+                    pass
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["tokens_used"] == 1500

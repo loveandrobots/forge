@@ -13,6 +13,7 @@ import pytest
 from forge.dispatcher import (
     DispatchResult,
     GitResult,
+    _extract_usage_tokens,
     checkout_and_pull,
     create_branch,
     delete_branch,
@@ -1076,3 +1077,206 @@ class TestProgressTimerUpdates:
 
         assert result.exit_code == 0
         assert result.error is None
+
+
+# ---------------------------------------------------------------------------
+# _extract_usage_tokens tests
+# ---------------------------------------------------------------------------
+
+
+class TestExtractUsageTokens:
+    def test_result_message_with_usage(self):
+        line = json.dumps({
+            "type": "result",
+            "result": "done",
+            "usage": {"input_tokens": 100, "output_tokens": 50},
+        })
+        assert _extract_usage_tokens(line) == 150
+
+    def test_assistant_message_with_nested_usage(self):
+        line = json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 200, "output_tokens": 80},
+            },
+        })
+        assert _extract_usage_tokens(line) == 280
+
+    def test_no_usage_field(self):
+        line = json.dumps({"type": "system", "data": "init"})
+        assert _extract_usage_tokens(line) == 0
+
+    def test_invalid_json(self):
+        assert _extract_usage_tokens("not json at all") == 0
+
+    def test_empty_string(self):
+        assert _extract_usage_tokens("") == 0
+
+
+# ---------------------------------------------------------------------------
+# Incremental token accumulation in drain_stdout (AC10)
+# ---------------------------------------------------------------------------
+
+
+class TestIncrementalTokenAccumulation:
+    async def test_drain_stdout_accumulates_token_counts(self, git_repo):
+        """AC10: drain_stdout incrementally parses usage from multiple JSON lines."""
+        assistant_line = json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": "Working..."}],
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+            },
+        })
+        result_line = json.dumps({
+            "type": "result",
+            "result": "Done",
+            "usage": {"input_tokens": 200, "output_tokens": 80},
+        })
+        system_line = json.dumps({"type": "system", "data": "init"})
+
+        stdout_data = [
+            system_line.encode() + b"\n",
+            assistant_line.encode() + b"\n",
+            result_line.encode() + b"\n",
+        ]
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "claude":
+                return _make_claude_proc_mock(stdout_lines=stdout_data)
+            return _make_git_proc_mock()
+
+        token_count: list[int] = [0]
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="main",
+                timeout=60,
+                token_count=token_count,
+            )
+
+        # 100+50 + 200+80 = 430
+        assert token_count[0] == 430
+        assert result.tokens_used == 430
+        assert result.exit_code == 0
+
+    async def test_token_count_none_does_not_error(self, git_repo):
+        """When token_count is None, no parsing errors occur."""
+        result_line = json.dumps({
+            "type": "result",
+            "result": "ok",
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        })
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "claude":
+                return _make_claude_proc_mock(
+                    stdout_lines=[result_line.encode() + b"\n"],
+                )
+            return _make_git_proc_mock()
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="main",
+                timeout=60,
+                token_count=None,
+            )
+
+        # Falls back to parse_stream_json
+        assert result.tokens_used == 15
+        assert result.exit_code == 0
+
+    async def test_incremental_counter_on_nonzero_exit(self, git_repo):
+        """Incremental counter is used even when exit code is non-zero."""
+        assistant_line = json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": "partial"}],
+                "usage": {"input_tokens": 300, "output_tokens": 100},
+            },
+        })
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "claude":
+                return _make_claude_proc_mock(
+                    stdout_lines=[assistant_line.encode() + b"\n"],
+                    returncode=1,
+                    stderr=b"some error",
+                )
+            return _make_git_proc_mock()
+
+        token_count: list[int] = [0]
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="main",
+                timeout=60,
+                token_count=token_count,
+            )
+
+        assert token_count[0] == 400
+        assert result.tokens_used == 400
+        assert result.exit_code == 1
+
+    async def test_chunk_split_across_json_line_boundary(self, git_repo):
+        """Token parsing handles chunks that split a JSON line across reads."""
+        line1 = json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 50, "output_tokens": 25},
+            },
+        })
+        line2 = json.dumps({
+            "type": "result",
+            "result": "done",
+            "usage": {"input_tokens": 60, "output_tokens": 30},
+        })
+        # Split line2 across two chunks
+        full = line1.encode() + b"\n" + line2.encode() + b"\n"
+        mid = len(full) // 2
+        chunk1 = full[:mid]
+        chunk2 = full[mid:]
+
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            cmd = args[0] if args else ""
+            if cmd == "claude":
+                return _make_claude_proc_mock(stdout_lines=[chunk1, chunk2])
+            return _make_git_proc_mock()
+
+        token_count: list[int] = [0]
+
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
+            result = await dispatch_claude(
+                prompt="test",
+                repo_path=git_repo,
+                branch="main",
+                timeout=60,
+                token_count=token_count,
+            )
+
+        # 50+25 + 60+30 = 165
+        assert token_count[0] == 165
+        assert result.tokens_used == 165

@@ -21,6 +21,7 @@ from forge.config import (
     Settings,
     resolve_progress_timeout,
     resolve_stage_timeout,
+    resolve_token_budget,
 )
 from forge.dispatcher import (
     DispatchResult,
@@ -222,6 +223,7 @@ class PipelineEngine:
         self._current_dispatch_task: asyncio.Task | None = None
         self._current_dispatch_pid: int | None = None
         self._progress_timestamps: dict[str, list[float]] = {}
+        self._token_counts: dict[str, list[int]] = {}
 
     async def start(self) -> None:
         """Set running=True and begin the loop."""
@@ -449,6 +451,8 @@ class PipelineEngine:
                     json_schema_str = json.dumps(schema)
                 progress_ts: list[float] = [time.monotonic()]
                 self._progress_timestamps[task_id] = progress_ts
+                token_count: list[int] = [0]
+                self._token_counts[task_id] = token_count
                 self._current_dispatch_task = asyncio.create_task(
                     dispatch_claude(
                         prompt=prompt,
@@ -459,6 +463,7 @@ class PipelineEngine:
                         json_schema=json_schema_str,
                         pid_callback=self._set_dispatch_pid,
                         last_output_time=progress_ts,
+                        token_count=token_count,
                     )
                 )
                 try:
@@ -469,11 +474,13 @@ class PipelineEngine:
                     self.current_task_id = None
                     self._current_dispatch_task = None
                     self._current_dispatch_pid = None
+                    self._token_counts.pop(task_id, None)
                     continue
                 finally:
                     self._current_dispatch_task = None
                     self._current_dispatch_pid = None
                     self._progress_timestamps.pop(task_id, None)
+                    self._token_counts.pop(task_id, None)
 
                 finished_at = _now()
 
@@ -1133,6 +1140,10 @@ class PipelineEngine:
         ):
             self._current_dispatch_task.cancel()
 
+        # Capture any partial token count before updating the stage_run
+        tc = self._token_counts.get(task_id, [0])
+        tokens_used = tc[0] if tc[0] > 0 else None
+
         database.update_stage_run(
             conn,
             sr_id,
@@ -1140,6 +1151,7 @@ class PipelineEngine:
             finished_at=_now(),
             error_message="Stage run timed out",
             termination_reason="timeout",
+            tokens_used=tokens_used,
         )
         self._log(
             "error",
@@ -1229,6 +1241,76 @@ class PipelineEngine:
                 )
                 if idle > progress_timeout:
                     await self.handle_progress_stall(conn, sr, idle)
+                    continue
+
+            # Check token budget
+            task_id = sr["task_id"]
+            if task_id in self._token_counts:
+                used = self._token_counts[task_id][0]
+                budget = resolve_token_budget(
+                    project.get("max_token_budget") if project else None,
+                    self.settings.engine,
+                )
+                if used > budget:
+                    await self.handle_token_budget_exceeded(conn, sr, used, budget)
+
+    async def handle_token_budget_exceeded(
+        self,
+        conn: sqlite3.Connection,
+        stage_run: sqlite3.Row,
+        used: int,
+        budget: int,
+    ) -> None:
+        """Kill a dispatch that exceeded the token budget and trigger retry."""
+        sr_id = stage_run["id"]
+        task_id = stage_run["task_id"]
+        stage = stage_run["stage"]
+
+        if self._current_dispatch_pid is not None:
+            try:
+                os.kill(self._current_dispatch_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            self._current_dispatch_pid = None
+        if (
+            self._current_dispatch_task is not None
+            and not self._current_dispatch_task.done()
+        ):
+            self._current_dispatch_task.cancel()
+
+        database.update_stage_run(
+            conn,
+            sr_id,
+            status="error",
+            finished_at=_now(),
+            termination_reason="token_budget_exceeded",
+            error_message=f"Token budget exceeded: {used} / {budget}",
+            tokens_used=used,
+        )
+        self._log(
+            "warn",
+            f"Stage run {sr_id} killed — token budget exceeded: {used} / {budget}",
+            task_id=task_id,
+            stage_run_id=sr_id,
+        )
+
+        task_row = database.get_task(conn, task_id)
+        if task_row:
+            project_row = database.get_project(conn, task_row["project_id"])
+            project = None
+            reset_ok = True
+            if project_row:
+                project = _row_to_dict(project_row)
+                reset_ok = await self._reset_and_log(
+                    project["repo_path"],
+                    project["default_branch"],
+                    conn,
+                    task_id,
+                )
+            if reset_ok:
+                await self._handle_error_retry(
+                    conn, _row_to_dict(task_row), stage, sr_id, project=project
+                )
 
     async def handle_progress_stall(
         self,
@@ -1253,6 +1335,10 @@ class PipelineEngine:
         ):
             self._current_dispatch_task.cancel()
 
+        # Capture any partial token count
+        tc = self._token_counts.get(task_id, [0])
+        tokens_used = tc[0] if tc[0] > 0 else None
+
         database.update_stage_run(
             conn,
             sr_id,
@@ -1260,6 +1346,7 @@ class PipelineEngine:
             finished_at=_now(),
             termination_reason="progress_stall",
             error_message=f"No output for {int(idle_seconds)}s",
+            tokens_used=tokens_used,
         )
         self._log(
             "warn",
