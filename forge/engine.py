@@ -1244,11 +1244,10 @@ class PipelineEngine:
                     continue
 
             # Check token budget
-            task_id = sr["task_id"]
             if task_id in self._token_counts:
                 used = self._token_counts[task_id][0]
                 budget = resolve_token_budget(
-                    project.get("max_token_budget") if project else None,
+                    project.get("max_token_budget") if task_row and project else None,
                     self.settings.engine,
                 )
                 if used > budget:

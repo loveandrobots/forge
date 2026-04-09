@@ -109,14 +109,16 @@ class TestParseStreamJson:
 
     def test_json_array_result_message(self):
         """--verbose mode emits a JSON array; result message is found in it."""
-        data = json.dumps([
-            {"type": "system", "data": "init"},
-            {
-                "type": "result",
-                "result": "array output",
-                "usage": {"input_tokens": 10, "output_tokens": 5},
-            },
-        ])
+        data = json.dumps(
+            [
+                {"type": "system", "data": "init"},
+                {
+                    "type": "result",
+                    "result": "array output",
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                },
+            ]
+        )
         text, tokens, structured = parse_stream_json(data)
         assert text == "array output"
         assert tokens == 15
@@ -124,20 +126,22 @@ class TestParseStreamJson:
 
     def test_json_array_result_overrides_assistant_text(self):
         """Array format: result message text takes precedence over assistant."""
-        data = json.dumps([
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [{"type": "text", "text": "hello from array"}],
+        data = json.dumps(
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "hello from array"}],
+                        "usage": {"input_tokens": 20, "output_tokens": 8},
+                    },
+                },
+                {
+                    "type": "result",
+                    "result": "final",
                     "usage": {"input_tokens": 20, "output_tokens": 8},
                 },
-            },
-            {
-                "type": "result",
-                "result": "final",
-                "usage": {"input_tokens": 20, "output_tokens": 8},
-            },
-        ])
+            ]
+        )
         text, tokens, structured = parse_stream_json(data)
         assert text == "final"
         assert tokens == 28
@@ -145,15 +149,17 @@ class TestParseStreamJson:
 
     def test_json_array_no_result_falls_back_to_assistant(self):
         """If no result message, assistant message text is returned."""
-        data = json.dumps([
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [{"type": "text", "text": "assistant text"}],
-                    "usage": {"input_tokens": 5, "output_tokens": 3},
+        data = json.dumps(
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "assistant text"}],
+                        "usage": {"input_tokens": 5, "output_tokens": 3},
+                    },
                 },
-            },
-        ])
+            ]
+        )
         text, tokens, structured = parse_stream_json(data)
         assert text == "assistant text"
         assert tokens == 8
@@ -311,9 +317,7 @@ class TestRebaseBranch:
         )
 
         # Stage a deletion without committing (simulates timed-out session)
-        subprocess.run(
-            ["git", "rm", "README.md"], cwd=git_repo, capture_output=True
-        )
+        subprocess.run(["git", "rm", "README.md"], cwd=git_repo, capture_output=True)
         # Verify index is dirty
         status = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -324,9 +328,7 @@ class TestRebaseBranch:
         assert "D" in status.stdout
 
         # Switch to main and add a commit so rebase has work to do
-        subprocess.run(
-            ["git", "checkout", "main"], cwd=git_repo, capture_output=True
-        )
+        subprocess.run(["git", "checkout", "main"], cwd=git_repo, capture_output=True)
         with open(os.path.join(git_repo, "main_new.txt"), "w") as f:
             f.write("main progress")
         subprocess.run(["git", "add", "."], cwd=git_repo, capture_output=True)
@@ -705,9 +707,7 @@ class TestDispatchClaude:
                 else:
                     return _make_git_proc_mock()
             elif cmd == "claude":
-                result_line = json.dumps(
-                    {"type": "result", "result": "done"}
-                )
+                result_line = json.dumps({"type": "result", "result": "done"})
                 return _make_claude_proc_mock(
                     stdout_lines=[result_line.encode() + b"\n"],
                 )
@@ -737,12 +737,14 @@ class TestDispatchClaudeJsonSchema:
         schema = '{"type": "object", "properties": {"verdict": {"type": "string"}}}'
         # stream-json: newline-delimited event objects
         system_line = json.dumps({"type": "system", "session_id": "sess123"})
-        result_line = json.dumps({
-            "type": "result",
-            "result": "Review complete",
-            "structured_output": {"verdict": "PASS"},
-            "usage": {"input_tokens": 50, "output_tokens": 25},
-        })
+        result_line = json.dumps(
+            {
+                "type": "result",
+                "result": "Review complete",
+                "structured_output": {"verdict": "PASS"},
+                "usage": {"input_tokens": 50, "output_tokens": 25},
+            }
+        )
         captured_args: list[list] = []
 
         async def mock_create_subprocess_exec(*args, **kwargs):
@@ -782,11 +784,13 @@ class TestDispatchClaudeJsonSchema:
 
     async def test_dispatch_without_json_schema_uses_stream_json(self, git_repo):
         """dispatch_claude defaults to stream-json when no json_schema provided."""
-        result_line = json.dumps({
-            "type": "result",
-            "result": "Done",
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        })
+        result_line = json.dumps(
+            {
+                "type": "result",
+                "result": "Done",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
         captured_args: list[list] = []
 
         async def mock_create_subprocess_exec(*args, **kwargs):
@@ -886,7 +890,10 @@ class TestRebaseAbortFailure:
                 return mock_proc
             return await original_create_subprocess_exec(*args, **kwargs)
 
-        with patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_create_subprocess_exec):
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec",
+            side_effect=mock_create_subprocess_exec,
+        ):
             result = await rebase_branch(git_repo, "forge/abort-test", "main")
 
         assert result.success is False
@@ -919,7 +926,9 @@ class TestDispatchClaudeCheckoutTimeout:
             return await original_exec(*args, **kwargs)
 
         with (
-            patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec),
+            patch(
+                "forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec
+            ),
             patch("forge.dispatcher._GIT_CHECKOUT_TIMEOUT", 0.01),
         ):
             result = await dispatch_claude(
@@ -951,13 +960,17 @@ class TestDispatchClaudeCheckoutTimeout:
                 else:
                     # Second checkout (-b) hangs
                     mock_proc = MagicMock()
-                    mock_proc.wait = AsyncMock(side_effect=[asyncio.TimeoutError(), None])
+                    mock_proc.wait = AsyncMock(
+                        side_effect=[asyncio.TimeoutError(), None]
+                    )
                     mock_proc.kill = MagicMock()
                     return mock_proc
             return await original_exec(*args, **kwargs)
 
         with (
-            patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec),
+            patch(
+                "forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec
+            ),
             patch("forge.dispatcher._GIT_CHECKOUT_TIMEOUT", 0.01),
         ):
             result = await dispatch_claude(
@@ -987,7 +1000,9 @@ class TestDispatchClaudeCheckoutTimeout:
                     pid=99999,
                 )
 
-        with patch("forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec):
+        with patch(
+            "forge.dispatcher.asyncio.create_subprocess_exec", side_effect=mock_exec
+        ):
             await dispatch_claude(
                 prompt="test",
                 repo_path=git_repo,
@@ -1086,21 +1101,25 @@ class TestProgressTimerUpdates:
 
 class TestExtractUsageTokens:
     def test_result_message_with_usage(self):
-        line = json.dumps({
-            "type": "result",
-            "result": "done",
-            "usage": {"input_tokens": 100, "output_tokens": 50},
-        })
+        line = json.dumps(
+            {
+                "type": "result",
+                "result": "done",
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+            }
+        )
         assert _extract_usage_tokens(line) == 150
 
     def test_assistant_message_with_nested_usage(self):
-        line = json.dumps({
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "text", "text": "hi"}],
-                "usage": {"input_tokens": 200, "output_tokens": 80},
-            },
-        })
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "hi"}],
+                    "usage": {"input_tokens": 200, "output_tokens": 80},
+                },
+            }
+        )
         assert _extract_usage_tokens(line) == 280
 
     def test_no_usage_field(self):
@@ -1122,18 +1141,22 @@ class TestExtractUsageTokens:
 class TestIncrementalTokenAccumulation:
     async def test_drain_stdout_accumulates_token_counts(self, git_repo):
         """AC10: drain_stdout incrementally parses usage from multiple JSON lines."""
-        assistant_line = json.dumps({
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "text", "text": "Working..."}],
-                "usage": {"input_tokens": 100, "output_tokens": 50},
-            },
-        })
-        result_line = json.dumps({
-            "type": "result",
-            "result": "Done",
-            "usage": {"input_tokens": 200, "output_tokens": 80},
-        })
+        assistant_line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "Working..."}],
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                },
+            }
+        )
+        result_line = json.dumps(
+            {
+                "type": "result",
+                "result": "Done",
+                "usage": {"input_tokens": 200, "output_tokens": 80},
+            }
+        )
         system_line = json.dumps({"type": "system", "data": "init"})
 
         stdout_data = [
@@ -1169,11 +1192,13 @@ class TestIncrementalTokenAccumulation:
 
     async def test_token_count_none_does_not_error(self, git_repo):
         """When token_count is None, no parsing errors occur."""
-        result_line = json.dumps({
-            "type": "result",
-            "result": "ok",
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        })
+        result_line = json.dumps(
+            {
+                "type": "result",
+                "result": "ok",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
 
         async def mock_create_subprocess_exec(*args, **kwargs):
             cmd = args[0] if args else ""
@@ -1201,13 +1226,15 @@ class TestIncrementalTokenAccumulation:
 
     async def test_incremental_counter_on_nonzero_exit(self, git_repo):
         """Incremental counter is used even when exit code is non-zero."""
-        assistant_line = json.dumps({
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "text", "text": "partial"}],
-                "usage": {"input_tokens": 300, "output_tokens": 100},
-            },
-        })
+        assistant_line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "partial"}],
+                    "usage": {"input_tokens": 300, "output_tokens": 100},
+                },
+            }
+        )
 
         async def mock_create_subprocess_exec(*args, **kwargs):
             cmd = args[0] if args else ""
@@ -1239,18 +1266,22 @@ class TestIncrementalTokenAccumulation:
 
     async def test_chunk_split_across_json_line_boundary(self, git_repo):
         """Token parsing handles chunks that split a JSON line across reads."""
-        line1 = json.dumps({
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "text", "text": "hi"}],
-                "usage": {"input_tokens": 50, "output_tokens": 25},
-            },
-        })
-        line2 = json.dumps({
-            "type": "result",
-            "result": "done",
-            "usage": {"input_tokens": 60, "output_tokens": 30},
-        })
+        line1 = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "hi"}],
+                    "usage": {"input_tokens": 50, "output_tokens": 25},
+                },
+            }
+        )
+        line2 = json.dumps(
+            {
+                "type": "result",
+                "result": "done",
+                "usage": {"input_tokens": 60, "output_tokens": 30},
+            }
+        )
         # Split line2 across two chunks
         full = line1.encode() + b"\n" + line2.encode() + b"\n"
         mid = len(full) // 2

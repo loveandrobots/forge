@@ -2223,7 +2223,9 @@ class TestFollowUpPriority:
         }
 
         engine._process_follow_ups(
-            conn, task_id, project,
+            conn,
+            task_id,
+            project,
             structured_output=structured_output,
             parent_priority=5,
         )
@@ -3020,9 +3022,7 @@ class TestHandleTimeoutKillsDispatch:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        old_time = (
-            datetime.now(timezone.utc) - timedelta(seconds=9999)
-        ).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
         engine._current_dispatch_pid = 54321
@@ -3048,9 +3048,7 @@ class TestHandleTimeoutKillsDispatch:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        old_time = (
-            datetime.now(timezone.utc) - timedelta(seconds=9999)
-        ).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
         mock_task = MagicMock()
@@ -3076,9 +3074,7 @@ class TestHandleTimeoutKillsDispatch:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        old_time = (
-            datetime.now(timezone.utc) - timedelta(seconds=9999)
-        ).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
         # No PID or task set — should complete without error
@@ -3102,9 +3098,7 @@ class TestHandleTimeoutKillsDispatch:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        old_time = (
-            datetime.now(timezone.utc) - timedelta(seconds=9999)
-        ).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
         engine._current_dispatch_pid = 12345
@@ -3125,9 +3119,7 @@ class TestRunLoopDispatchCancelledByTimeout:
         project_id: str,
     ) -> None:
         """When dispatch is cancelled by handle_timeout, run_loop continues cleanly."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(conn, task_id, status="active", current_stage="spec")
         db.insert_stage_run(
             conn,
@@ -4134,7 +4126,12 @@ class TestEpicDecomposition:
         os.makedirs(decomp_dir, exist_ok=True)
         structured = {
             "tasks": [
-                {"title": "Child A", "description": "Do A", "flow": "standard", "priority": 1},
+                {
+                    "title": "Child A",
+                    "description": "Do A",
+                    "flow": "standard",
+                    "priority": 1,
+                },
                 {"title": "Child B", "description": "Do B", "flow": "quick"},
             ],
             "rationale": "Split into two components.",
@@ -5520,9 +5517,7 @@ class TestReviewSchemaDispatch:
         project_id: str,
     ) -> None:
         """Review dispatch should pass json_schema to dispatch_claude."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(
             conn,
             task_id,
@@ -5592,9 +5587,7 @@ class TestReviewSchemaDispatch:
         tmp_path,
     ) -> None:
         """Structured review output should be written as .json file."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         # Update project repo_path to tmp_path for file writing
         conn.execute(
             "UPDATE projects SET repo_path = ? WHERE id = ?",
@@ -5679,9 +5672,7 @@ class TestReviewSchemaDispatch:
         tmp_path,
     ) -> None:
         """When structured output has verdict=PASS, task should advance even if gate fails."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         conn.execute(
             "UPDATE projects SET repo_path = ? WHERE id = ?",
             (str(tmp_path), project_id),
@@ -5758,9 +5749,7 @@ class TestReviewSchemaDispatch:
         tmp_path,
     ) -> None:
         """When structured output has verdict=ISSUES, task should bounce to implement."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         conn.execute(
             "UPDATE projects SET repo_path = ? WHERE id = ?",
             (str(tmp_path), project_id),
@@ -5843,9 +5832,7 @@ class TestReviewSchemaDispatch:
         tmp_path,
     ) -> None:
         """_load_artifacts should handle .json review files with build_structured_review_feedback."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         review_data = {
             "verdict": "ISSUES",
             "issues": [
@@ -5914,9 +5901,7 @@ class TestReviewSchemaDispatch:
         tmp_path,
     ) -> None:
         """_load_artifacts should handle .md review files as plain text (legacy)."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         review_dir = tmp_path / "_forge" / "reviews"
         review_dir.mkdir(parents=True)
         review_md_path = review_dir / f"{task_id}.md"
@@ -5971,9 +5956,7 @@ class TestReviewSchemaDispatch:
         tmp_path,
     ) -> None:
         """After a review bounce with structured output, the implement retry should get structured feedback."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         conn.execute(
             "UPDATE projects SET repo_path = ? WHERE id = ?",
             (str(tmp_path), project_id),
@@ -5988,10 +5971,18 @@ class TestReviewSchemaDispatch:
         review_data = {
             "verdict": "ISSUES",
             "issues": [
-                {"file": "foo.py", "severity": "critical", "description": "broken logic"}
+                {
+                    "file": "foo.py",
+                    "severity": "critical",
+                    "description": "broken logic",
+                }
             ],
             "criteria_check": [
-                {"criterion": "Tests pass", "satisfied": False, "evidence": "Tests fail"}
+                {
+                    "criterion": "Tests pass",
+                    "satisfied": False,
+                    "evidence": "Tests fail",
+                }
             ],
             "out_of_scope_changes": [],
             "summary": "Fix the logic",
@@ -6134,7 +6125,9 @@ class TestLoadArtifactsRuntimeError:
 
         # AC3: error logged via self._log (visible in dashboard)
         logs = db.get_logs(conn, task_id=task_id)
-        artifact_logs = [row for row in logs if "Artifact loading failed" in row["message"]]
+        artifact_logs = [
+            row for row in logs if "Artifact loading failed" in row["message"]
+        ]
         assert len(artifact_logs) >= 1
         assert error_text in artifact_logs[0]["message"]
 
@@ -6291,7 +6284,11 @@ class TestSpecPlanArtifactWriting:
         plan_structured = {
             "approach": "Build it.",
             "acceptance_criteria_mapping": [
-                {"criterion_id": 1, "criterion_text": "Works", "implementation": "Write code"},
+                {
+                    "criterion_id": 1,
+                    "criterion_text": "Works",
+                    "implementation": "Write code",
+                },
             ],
             "files_to_modify": ["src/main.py"],
             "test_plan": [{"criterion_id": 1, "description": "Test it"}],
@@ -6358,9 +6355,7 @@ class TestSpecPlanArtifactWriting:
         )
         conn.commit()
 
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         db.update_task(
             conn,
             task_id,
@@ -6387,8 +6382,12 @@ class TestSpecPlanArtifactWriting:
             structured_output=structured,
         )
         gate_result = GateResult(
-            passed=True, exit_code=0, stdout="ok", stderr="",
-            gate_name="post-spec.sh", duration_seconds=1.0,
+            passed=True,
+            exit_code=0,
+            stdout="ok",
+            stderr="",
+            gate_name="post-spec.sh",
+            duration_seconds=1.0,
         )
 
         safe_conn = _UnclosableConnection(conn)
@@ -6396,8 +6395,16 @@ class TestSpecPlanArtifactWriting:
 
         with (
             patch("forge.engine.database.get_connection", return_value=safe_conn),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=dispatch_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=gate_result),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=dispatch_result,
+            ),
+            patch(
+                "forge.engine.run_gate",
+                new_callable=AsyncMock,
+                return_value=gate_result,
+            ),
             patch("forge.engine.build_prompt", return_value="test prompt"),
         ):
             await self._run_one_iteration(engine)
@@ -6419,9 +6426,7 @@ class TestLoadArtifactsFallback:
         tmp_path,
     ) -> None:
         """When both .json and .md spec exist, _load_artifacts loads .json."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         spec_dir = tmp_path / "_forge" / "specs"
         spec_dir.mkdir(parents=True)
         spec_data = {
@@ -6463,9 +6468,7 @@ class TestLoadArtifactsFallback:
         tmp_path,
     ) -> None:
         """When only .md spec exists, _load_artifacts falls back to it."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         spec_dir = tmp_path / "_forge" / "specs"
         spec_dir.mkdir(parents=True)
         (spec_dir / f"{task_id}.md").write_text("# Markdown spec content\n")
@@ -6498,9 +6501,7 @@ class TestLoadArtifactsFallback:
         tmp_path,
     ) -> None:
         """When only .md plan exists, _load_artifacts falls back to it."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         # Create spec as .md
         spec_dir = tmp_path / "_forge" / "specs"
         spec_dir.mkdir(parents=True)
@@ -6539,9 +6540,7 @@ class TestLoadArtifactsFallback:
         tmp_path,
     ) -> None:
         """When loading .json spec for plan stage, spec_criteria_list is populated."""
-        task_id = db.insert_task(
-            conn, project_id=project_id, title="T", priority=1
-        )
+        task_id = db.insert_task(conn, project_id=project_id, title="T", priority=1)
         spec_dir = tmp_path / "_forge" / "specs"
         spec_dir.mkdir(parents=True)
         spec_data = {
@@ -6622,9 +6621,7 @@ class TestHandleTimeoutTerminationReason:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        old_time = (
-            datetime.now(timezone.utc) - timedelta(seconds=9999)
-        ).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
         await engine._check_timeouts(conn)
@@ -6656,7 +6653,9 @@ class TestProgressStallDetection:
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
         # started_at is recent so wall-clock timeout doesn't fire
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         # Stale progress timestamp (120s > 60s threshold)
         engine._progress_timestamps[task_id] = [time.monotonic() - 120]
@@ -6706,7 +6705,9 @@ class TestProgressStallDetection:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         # 400s stale — exceeds engine default (300) but NOT project override (600)
         engine._progress_timestamps[task_id] = [time.monotonic() - 400]
@@ -6747,7 +6748,9 @@ class TestProgressStallDetection:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         # Fresh timestamp — should not trigger
         engine._progress_timestamps[task_id] = [time.monotonic()]
@@ -6772,7 +6775,9 @@ class TestProgressStallDetection:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         # No entry in _progress_timestamps for this task
         await engine._check_timeouts(conn)
@@ -6801,7 +6806,9 @@ class TestTokenBudgetEnforcement:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="implement", attempt=1, status="running"
         )
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         engine._token_counts[task_id] = [5000]
         engine._current_dispatch_pid = 12345
@@ -6847,7 +6854,9 @@ class TestTokenBudgetEnforcement:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="implement", attempt=1, status="running"
         )
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         # 1000 exceeds project budget of 500 but not engine default of 2M
         engine._token_counts[task_id] = [1000]
@@ -6881,7 +6890,9 @@ class TestTokenBudgetEnforcement:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="implement", attempt=1, status="running"
         )
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         engine._token_counts[task_id] = [3500]
         engine._current_dispatch_pid = 12345
@@ -6912,7 +6923,9 @@ class TestTokenBudgetEnforcement:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="implement", attempt=1, status="running"
         )
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         engine._token_counts[task_id] = [500_000]
 
@@ -6940,9 +6953,7 @@ class TestTokensUsedOnAllPaths:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        old_time = (
-            datetime.now(timezone.utc) - timedelta(seconds=9999)
-        ).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=9999)).isoformat()
         db.update_stage_run(conn, sr_id, started_at=old_time)
 
         engine._token_counts[task_id] = [750]
@@ -6972,7 +6983,9 @@ class TestTokensUsedOnAllPaths:
         sr_id = db.insert_stage_run(
             conn, task_id=task_id, stage="spec", attempt=1, status="running"
         )
-        db.update_stage_run(conn, sr_id, started_at=datetime.now(timezone.utc).isoformat())
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
 
         engine._progress_timestamps[task_id] = [time.monotonic() - 120]
         engine._token_counts[task_id] = [1200]
@@ -7023,10 +7036,24 @@ class TestTokensUsedOnAllPaths:
 
         with (
             patch("forge.engine.build_prompt", return_value="prompt"),
-            patch("forge.engine.dispatch_claude", new_callable=AsyncMock, return_value=mock_result),
-            patch("forge.engine.run_gate", new_callable=AsyncMock, return_value=mock_gate),
-            patch("forge.engine.create_branch", new_callable=AsyncMock, return_value=GitResult(success=True)),
-            patch("forge.engine.checkout_and_pull", new_callable=AsyncMock, return_value=GitResult(success=True)),
+            patch(
+                "forge.engine.dispatch_claude",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ),
+            patch(
+                "forge.engine.run_gate", new_callable=AsyncMock, return_value=mock_gate
+            ),
+            patch(
+                "forge.engine.create_branch",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
+            ),
+            patch(
+                "forge.engine.checkout_and_pull",
+                new_callable=AsyncMock,
+                return_value=GitResult(success=True),
+            ),
             patch("forge.engine.get_git_diff", new_callable=AsyncMock, return_value=""),
             patch("forge.engine.load_artifact", return_value=""),
             patch("forge.engine.get_schema", return_value=None),

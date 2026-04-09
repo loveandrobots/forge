@@ -276,7 +276,11 @@ async def dispatch_claude(
 
         drain_task = asyncio.create_task(drain_stdout())
 
-        logger.debug("dispatch_claude: pid=%s waiting for proc.wait() (timeout=%ss)", pid, timeout)
+        logger.debug(
+            "dispatch_claude: pid=%s waiting for proc.wait() (timeout=%ss)",
+            pid,
+            timeout,
+        )
         try:
             await asyncio.wait_for(proc.wait(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -304,13 +308,16 @@ async def dispatch_claude(
                 output=raw_output,
                 exit_code=-1,
                 duration_seconds=time.monotonic() - start,
-                tokens_used=token_count[0] if token_count and token_count[0] > 0 else None,
+                tokens_used=token_count[0]
+                if token_count and token_count[0] > 0
+                else None,
                 error=error_msg,
             )
 
         logger.debug(
             "dispatch_claude: pid=%s proc exited (returncode=%s), draining stdout",
-            pid, proc.returncode,
+            pid,
+            proc.returncode,
         )
         # Normal exit: await drain completion, read stderr.
         # Use timeouts on both reads so that orphaned grandchild processes that
@@ -318,9 +325,15 @@ async def dispatch_claude(
         # after claude has exited.
         try:
             await asyncio.wait_for(drain_task, timeout=5.0)
-            logger.debug("dispatch_claude: pid=%s drain_task done, lines=%s", pid, len(lines))
+            logger.debug(
+                "dispatch_claude: pid=%s drain_task done, lines=%s", pid, len(lines)
+            )
         except asyncio.TimeoutError:
-            logger.debug("dispatch_claude: pid=%s drain_task timed out, lines so far=%s", pid, len(lines))
+            logger.debug(
+                "dispatch_claude: pid=%s drain_task timed out, lines so far=%s",
+                pid,
+                len(lines),
+            )
             drain_task.cancel()
         raw_output = b"".join(lines).decode(errors="replace")
         logger.debug("dispatch_claude: pid=%s reading stderr", pid)
@@ -328,11 +341,20 @@ async def dispatch_claude(
         if proc.stderr:
             try:
                 stderr_bytes = await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
-                logger.debug("dispatch_claude: pid=%s stderr read done (%s bytes)", pid, len(stderr_bytes))
+                logger.debug(
+                    "dispatch_claude: pid=%s stderr read done (%s bytes)",
+                    pid,
+                    len(stderr_bytes),
+                )
             except asyncio.TimeoutError:
                 logger.debug("dispatch_claude: pid=%s stderr read timed out", pid)
         exit_code = proc.returncode or 0
-        logger.debug("dispatch_claude: pid=%s returning exit_code=%s output_len=%s", pid, exit_code, len(raw_output))
+        logger.debug(
+            "dispatch_claude: pid=%s returning exit_code=%s output_len=%s",
+            pid,
+            exit_code,
+            len(raw_output),
+        )
 
         if exit_code != 0:
             stderr_text = stderr_bytes.decode(errors="replace").strip()
@@ -340,7 +362,9 @@ async def dispatch_claude(
                 output=raw_output,
                 exit_code=exit_code,
                 duration_seconds=time.monotonic() - start,
-                tokens_used=token_count[0] if token_count and token_count[0] > 0 else None,
+                tokens_used=token_count[0]
+                if token_count and token_count[0] > 0
+                else None,
                 error=stderr_text or f"Claude exited with code {exit_code}",
             )
 
