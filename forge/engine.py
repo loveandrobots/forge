@@ -186,18 +186,27 @@ def _resolve_progress_timeout(
     project: dict | None,
     engine: "EngineSettings",
 ) -> int:
-    """Resolve progress timeout: project config override > engine default."""
+    """Resolve progress timeout: direct column > config dict fallback > engine default."""
     project_value = None
     if project:
-        raw = project.get("config")
-        if raw:
+        # Prefer the direct column (set via update_project / MCP API)
+        col = project.get("progress_timeout_seconds")
+        if col is not None:
             try:
-                cfg = json.loads(raw) if isinstance(raw, str) else raw
-                val = cfg.get("progress_timeout_seconds")
-                if val is not None:
-                    project_value = int(val)
-            except (json.JSONDecodeError, TypeError, ValueError):
+                project_value = int(col)
+            except (TypeError, ValueError):
                 pass
+        # Fall back to legacy config dict for backwards compatibility
+        if project_value is None:
+            raw = project.get("config")
+            if raw:
+                try:
+                    cfg = json.loads(raw) if isinstance(raw, str) else raw
+                    val = cfg.get("progress_timeout_seconds")
+                    if val is not None:
+                        project_value = int(val)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
     return resolve_progress_timeout(project_value, engine)
 
 

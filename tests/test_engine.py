@@ -6698,7 +6698,7 @@ class TestProgressStallDetection:
             name="CustomProject",
             repo_path="/tmp/repo2",
             gate_dir="/tmp/repo2/gates",
-            config={"progress_timeout_seconds": 600},
+            progress_timeout_seconds=600,
         )
         task_id = db.insert_task(conn, project_id=pid, title="T", priority=1)
         db.update_task(conn, task_id, status="active", current_stage="spec")
@@ -6784,6 +6784,86 @@ class TestProgressStallDetection:
 
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "running"
+
+
+class TestResolveProgressTimeoutColumn:
+    """_resolve_progress_timeout reads direct column over config dict."""
+
+    def test_direct_column_takes_precedence_over_config_dict(self) -> None:
+        """Direct column value wins even when config dict also has the key."""
+        from forge.engine import _resolve_progress_timeout
+
+        project = {
+            "progress_timeout_seconds": 600,
+            "config": json.dumps({"progress_timeout_seconds": 999}),
+        }
+        engine_settings = EngineSettings(progress_timeout_seconds=300)
+        assert _resolve_progress_timeout(project, engine_settings) == 600
+
+    def test_falls_back_to_config_dict(self) -> None:
+        """When direct column is None, config dict value is used."""
+        from forge.engine import _resolve_progress_timeout
+
+        project = {
+            "progress_timeout_seconds": None,
+            "config": json.dumps({"progress_timeout_seconds": 999}),
+        }
+        engine_settings = EngineSettings(progress_timeout_seconds=300)
+        assert _resolve_progress_timeout(project, engine_settings) == 999
+
+    def test_falls_back_to_engine_default(self) -> None:
+        """When neither column nor config dict set, engine default is used."""
+        from forge.engine import _resolve_progress_timeout
+
+        project = {
+            "progress_timeout_seconds": None,
+            "config": json.dumps({}),
+        }
+        engine_settings = EngineSettings(progress_timeout_seconds=300)
+        assert _resolve_progress_timeout(project, engine_settings) == 300
+
+    def test_none_project_uses_engine_default(self) -> None:
+        """When project is None, engine default is used."""
+        from forge.engine import _resolve_progress_timeout
+
+        engine_settings = EngineSettings(progress_timeout_seconds=300)
+        assert _resolve_progress_timeout(None, engine_settings) == 300
+
+    async def test_per_project_column_respected_in_check_timeouts(
+        self,
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Integration: direct column override prevents premature stall detection."""
+        import time
+
+        engine_settings = EngineSettings(progress_timeout_seconds=300)
+        settings = Settings(engine=engine_settings)
+        engine = PipelineEngine(settings, ":memory:")
+        engine.running = True
+
+        pid = db.insert_project(
+            conn,
+            name="ColumnProject",
+            repo_path="/tmp/repo3",
+            gate_dir="/tmp/repo3/gates",
+            progress_timeout_seconds=600,
+        )
+        task_id = db.insert_task(conn, project_id=pid, title="T", priority=1)
+        db.update_task(conn, task_id, status="active", current_stage="spec")
+        sr_id = db.insert_stage_run(
+            conn, task_id=task_id, stage="spec", attempt=1, status="running"
+        )
+        db.update_stage_run(
+            conn, sr_id, started_at=datetime.now(timezone.utc).isoformat()
+        )
+
+        # 400s stale — exceeds engine default (300) but NOT project column (600)
+        engine._progress_timestamps[task_id] = [time.monotonic() - 400]
+
+        await engine._check_timeouts(conn)
+
+        sr = db.get_stage_run(conn, sr_id)
+        assert sr["status"] == "running"  # Should not have fired
 
 
 class TestTokenBudgetEnforcement:
