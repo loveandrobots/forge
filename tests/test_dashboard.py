@@ -299,6 +299,78 @@ class TestPipelineView:
         assert resp.status_code == 200
         assert "Progress Stall" in resp.text
 
+    def test_pipeline_termination_reason_badge_failed_task(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Pipeline view shows termination reason badge on failed task cards."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Failed Budget Task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="failed", current_stage="implement")
+            database.insert_stage_run(
+                conn,
+                task_id=tid,
+                stage="implement",
+                attempt=1,
+                status="error",
+                termination_reason="token_budget_exceeded",
+            )
+        finally:
+            conn.close()
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "Token Budget Exceeded" in resp.text
+
+    def test_pipeline_no_termination_badge_without_reason(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Pipeline view does not show termination badge when reason is NULL."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Normal Pipeline Task",
+                priority=1,
+            )
+            database.update_task(
+                conn, tid, status="needs_human", current_stage="implement"
+            )
+            database.insert_stage_run(
+                conn,
+                task_id=tid,
+                stage="implement",
+                attempt=1,
+                status="running",
+            )
+        finally:
+            conn.close()
+        resp = client.get("/")
+        assert resp.status_code == 200
+        # The card should not have any termination reason badges
+        # (other tests may add badges, so we check this specific task's card context)
+        assert "Normal Pipeline Task" in resp.text
+        # Since no termination_reason, none of these should appear for this task
+        html = resp.text
+        # Find the card for our task and verify no termination badges
+        card_start = html.index("Normal Pipeline Task")
+        card_end = html.index("</div>", html.index("</div>", card_start) + 1)
+        card_html = html[card_start:card_end]
+        assert "Progress Stall" not in card_html
+        assert "Token Budget Exceeded" not in card_html
+        assert "Wall-Clock Timeout" not in card_html
+
     def test_pipeline_shows_quick_flow_badge(
         self,
         tmp_path,
@@ -782,6 +854,37 @@ class TestTaskDetail:
         assert "Token Budget Exceeded" in resp.text
         assert "badge-error" in resp.text
 
+    def test_stage_run_termination_reason_wall_clock_timeout(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Termination reason 'wall_clock_timeout' renders an info badge."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="Timeout Task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="active", current_stage="spec")
+            database.insert_stage_run(
+                conn,
+                task_id=tid,
+                stage="spec",
+                attempt=1,
+                status="running",
+                termination_reason="wall_clock_timeout",
+            )
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert resp.status_code == 200
+        assert "Wall-Clock Timeout" in resp.text
+        assert "badge-info" in resp.text
+
     def test_stage_run_no_termination_reason_badge(
         self,
         tmp_path,
@@ -851,6 +954,38 @@ class TestTaskDetail:
             conn.close()
         resp = client.get(f"/tasks/{tid}")
         assert "450K tokens" in resp.text
+
+    def test_stage_run_tokens_used_not_shown_when_null(
+        self,
+        tmp_path,
+        client: TestClient,
+        sample_project: dict,
+    ) -> None:
+        """Token usage is not displayed when tokens_used is NULL."""
+        conn = database.get_connection(str(tmp_path / "test.db"))
+        try:
+            tid = database.insert_task(
+                conn,
+                project_id=sample_project["id"],
+                title="No Token Task",
+                priority=1,
+            )
+            database.update_task(conn, tid, status="active", current_stage="spec")
+            database.insert_stage_run(
+                conn,
+                task_id=tid,
+                stage="spec",
+                attempt=1,
+                status="running",
+            )
+        finally:
+            conn.close()
+        resp = client.get(f"/tasks/{tid}")
+        assert resp.status_code == 200
+        assert (
+            "tokens"
+            not in resp.text.lower().split("no token task")[1].split("</div>")[0]
+        )
 
     def test_css_has_pre_wrap(self) -> None:
         """The .task-description CSS rule includes white-space: pre-wrap."""
