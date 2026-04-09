@@ -6606,7 +6606,7 @@ class TestDatabaseMigrationTerminationReason:
 
 
 class TestHandleTimeoutTerminationReason:
-    """AC10: handle_timeout sets termination_reason='wall_clock_timeout'."""
+    """AC10: handle_timeout sets termination_reason='timeout'."""
 
     async def test_timeout_sets_termination_reason(
         self,
@@ -6631,7 +6631,7 @@ class TestHandleTimeoutTerminationReason:
 
         sr = db.get_stage_run(conn, sr_id)
         assert sr["status"] == "error"
-        assert sr["termination_reason"] == "wall_clock_timeout"
+        assert sr["termination_reason"] == "timeout"
 
 
 class TestProgressStallDetection:

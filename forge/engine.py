@@ -19,6 +19,7 @@ from forge.config import (
     STAGES,
     VALID_FLOWS,
     Settings,
+    resolve_progress_timeout,
     resolve_stage_timeout,
 )
 from forge.dispatcher import (
@@ -185,6 +186,7 @@ def _resolve_progress_timeout(
     engine: "EngineSettings",
 ) -> int:
     """Resolve progress timeout: project config override > engine default."""
+    project_value = None
     if project:
         raw = project.get("config")
         if raw:
@@ -192,10 +194,10 @@ def _resolve_progress_timeout(
                 cfg = json.loads(raw) if isinstance(raw, str) else raw
                 val = cfg.get("progress_timeout_seconds")
                 if val is not None:
-                    return int(val)
+                    project_value = int(val)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
-    return engine.progress_timeout_seconds
+    return resolve_progress_timeout(project_value, engine)
 
 
 def _git_metadata(result: GitResult) -> dict:
@@ -1137,7 +1139,7 @@ class PipelineEngine:
             status="error",
             finished_at=_now(),
             error_message="Stage run timed out",
-            termination_reason="wall_clock_timeout",
+            termination_reason="timeout",
         )
         self._log(
             "error",

@@ -618,10 +618,10 @@ class TestStageRuns:
             task_id=task_id,
             stage="spec",
             attempt=1,
-            termination_reason="wall_clock_timeout",
+            termination_reason="timeout",
         )
         row = db.get_stage_run(conn, sr_id)
-        assert row["termination_reason"] == "wall_clock_timeout"
+        assert row["termination_reason"] == "timeout"
 
     def test_insert_default_termination_reason_is_none(
         self, conn: sqlite3.Connection, task_id: str

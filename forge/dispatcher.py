@@ -220,7 +220,7 @@ async def dispatch_claude(
         if last_output_time is not None:
             last_output_time[0] = time.monotonic()
 
-        # Incremental drain: read stdout line-by-line so partial output
+        # Incremental drain: read stdout in chunks so partial output
         # is preserved when the subprocess times out.
         lines: list[bytes] = []
 
@@ -351,7 +351,7 @@ async def dispatch_generate(
             stderr=asyncio.subprocess.PIPE,
         )
 
-        # Incremental drain: read stdout line-by-line so partial output
+        # Incremental drain: read stdout in chunks so partial output
         # is preserved when the subprocess times out.
         lines: list[bytes] = []
 
