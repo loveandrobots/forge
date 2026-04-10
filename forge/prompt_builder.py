@@ -57,7 +57,7 @@ Your response must be a JSON object with these fields:
 
 The plan should be detailed enough that a different agent — with no context beyond this plan and the spec — could implement it correctly.
 
-Read the existing codebase before planning to understand current patterns and conventions.
+Read the files referenced in the spec's dependencies and any closely related code needed to understand their context. Avoid broadly exploring the codebase — focus your reading on what's needed to write an accurate plan.
 
 Load the following skills for context:
 {skill_references}
